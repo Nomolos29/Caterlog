@@ -19,8 +19,9 @@
 5. [Dual-Access Vendor Management (WhatsApp Keywords + Web Dashboard)](#5-dual-access-vendor-management-whatsapp-keywords--web-dashboard)
 6. [Repository Structure (Monorepo Map)](#6-repository-structure-monorepo-map)
 7. [Database Schema & Monetary Integrity](#7-database-schema--monetary-integrity)
-8. [Implementation Roadmap & Repository Status](#8-implementation-roadmap--repository-status)
-9. [Documentation Index](#9-documentation-index)
+8. [Quick Start & Testing with Your WhatsApp](#8-quick-start--testing-with-your-whatsapp)
+9. [Implementation Roadmap & Repository Status](#9-implementation-roadmap--repository-status)
+10. [Documentation Index](#10-documentation-index)
 
 ---
 
@@ -142,8 +143,8 @@ Vendors can manage their entire store from **WhatsApp Keywords** when on the go,
 | **Revenue & Breakdown** | `sales`, `sales today`, `sales week`, `sales month` | Interactive Revenue Charts, Channel Split & Ledger Export |
 | **Add / Update Product** | Send Photo + Caption: `Zara Heel, 25000, stock 5` | Catalog Manager UI & Bulk Editor |
 | **Update Stock** | `stock SHOE-01 10` *(or reply `stock 10` to photo)* | Inline Inventory Counter |
-| **Shipping Zones** | `shipping`, `shipping add Lekki 3500`, `shipping delete 2` | Shipping Matrix & Delivery Rate Builder |
-| **Discounts & Promos** | `discount`, `discount add PAYDAY 10%`, `discount end PAYDAY` | Promotions & Flash Sale Manager |
+| **Shipping Zones** | `shipping`, `ship Ibadan #6000`, `shipping add Lekki 3500`, `shipping delete 2` | Shipping Matrix & Delivery Rate Builder |
+| **Discounts & Promos** | `discount`, `disc VIP #5000`, `discount add PAYDAY 10%`, `discount end PAYDAY` | Promotions & Flash Sale Manager |
 | **Pending & Paid Orders** | `pending`, `paid`, `remind ORD-882` | Live Order Kanban (`Pending` → `Paid` → `Dispatched`) |
 | **Mark Dispatched** | `dispatch ORD-882 08031112222` | `[Mark Dispatched]` Modal + Automated Buyer Alert |
 | **Co-Pilot Mode & Delay** | `mode copilot`, `mode copilot 90s`, `mode auto`, `mode off` | Top-Bar Co-Pilot Status Toggle & Timer Slider |
@@ -156,18 +157,19 @@ Vendors can manage their entire store from **WhatsApp Keywords** when on the go,
 ```text
 caterlog/
 ├── apps/
-│   ├── api/                 # Fastify Headless API, Webhook Ingest, BullMQ Workers & Dynamic OG Image Engine
-│   ├── dashboard/           # Mobile-First Vendor Command Dashboard (Kanban, Analytics, Shipping, Discounts)
-│   └── storefront/          # (Stage 3) Multi-Tenant Vendor Website & Hosted Checkout Engine
+│   ├── api/                 # Stage 1.4 HTTP API, WhatsApp/Monnify Webhooks, Co-Pilot Engine & OG Card Renderer
+│   ├── dashboard/           # Stage 1.5 Vendor Command Dashboard + Live WhatsApp & Monnify Sync Simulator
+│   └── storefront/          # (Stage 3 — Deferred) Multi-Tenant Vendor Website & Hosted Checkout Engine
 ├── packages/
-│   ├── database/            # Prisma PostgreSQL Schema, Migrations, Seed Data & DB Client
-│   ├── commerce-core/       # Pure Domain Services (Catalog, Orders, Payments, Shipping, Discounts, Co-Pilot, Parser)
-│   ├── integrations/        # Pluggable Adapters: Monnify API, WhatsApp Cloud API, pHash Matcher, KYC (Stage 2)
-│   └── storefront-ui/       # (Stage 3/4) Internal Design System SDK for Auto-Generated Vendor Websites
+│   ├── database/            # Stage 1.1 Prisma PostgreSQL Schema, Migrations & Seed Data
+│   ├── commerce-core/       # Stage 1.2 Pure Hexagonal Domain (domain/, ports/, services/, commands/)
+│   ├── integrations/        # Stage 1.3 Monnify Virtual Account + WhatsApp Cloud API Adapters
+│   └── storefront-ui/       # (Stage 3/4 — Deferred) Internal Design System SDK
 ├── docs/
-│   ├── PLATFORM_CONCEPT.md  # Full 6-Layer Platform Vision & Business Model Specification
-│   └── STAGE_1_SPEC.md      # Stage 1 Technical Specification, ER Diagram & API/Keyword Contracts
-└── README.md                # Living Repository Architecture & Status Guide (Updated Continuously)
+│   ├── PLATFORM_CONCEPT.md       # Full 6-Layer Platform Vision & Business Model Specification
+│   ├── STAGE_1_SPEC.md           # Stage 1 Technical Specification, ER Diagram & API/Keyword Contracts
+│   └── WHATSAPP_TESTING_GUIDE.md # Step-by-Step Guide to Testing with Simulator or Physical WhatsApp Phone
+└── README.md                     # Living Repository Architecture & Status Guide (Updated Continuously)
 ```
 
 ---
@@ -186,25 +188,45 @@ For full field-by-field definitions and state machine rules, see [`docs/STAGE_1_
 
 ---
 
-## 8. Implementation Roadmap & Repository Status
+## 8. Quick Start & Testing with Your WhatsApp
+
+### Run All Unit & End-to-End Synchronization Tests
+```bash
+npm test
+```
+
+### Start the API, Webhook Server & Vendor Command Dashboard
+```bash
+npm run dev
+```
+Then open **[http://localhost:4000](http://localhost:4000)** in your browser:
+- **Left Panel (Vendor Command Dashboard):** Manage live orders, test full or partial Monnify transfers, update product stock, preview the live Dynamic OpenGraph Product Card (`/og/product/SHOE-01`), manage shipping zones & discounts, and configure the **Co-Pilot Mode/Timer (`default 60s`)** and **Stock Hold Timer (`default 15m`)**.
+- **Right Panel (Live WhatsApp Dual-Thread Simulator):** Send any Vendor Keyword (`sales`, `shipping add Ikoyi 4000`, `discount add FLASH 15%`, `stock SHOE-01 12`, `mode copilot 90s`, `hold 20`, `dashboard`) or Buyer WhatsApp Status reply and watch the Dashboard synchronize in real time over Server-Sent Events (SSE).
+
+### Connect Your Physical WhatsApp Phone (5-Minute Setup)
+See **[`docs/WHATSAPP_TESTING_GUIDE.md`](docs/WHATSAPP_TESTING_GUIDE.md)** for the step-by-step instructions to expose `http://localhost:4000/webhooks/whatsapp` via `cloudflared` or `ngrok` and connect Meta's free WhatsApp Cloud API Test Number to your personal phone.
+
+---
+
+## 9. Implementation Roadmap & Repository Status
 
 This table tracks the live engineering progress of the repository and is updated as each module is built and verified:
 
 | Stage / Module | Status | Description |
 | :--- | :---: | :--- |
 | **Architecture & Stage 1 Specification** | ✅ Completed | System architecture, ER schema, Co-Pilot rules, and Dual-Access spec (`docs/STAGE_1_SPEC.md`). |
-| **Stage 1.1 — Monorepo & Database (`packages/database`)** | ⏳ Next Up | Workspace config, Prisma schema, migrations, and realistic Nigerian vendor seed data. |
-| **Stage 1.2 — Commerce Core (`packages/commerce-core`)** | ⏳ Planned | Atomic stock lock, order state machine, partial/full payment reconciliation, shipping/discount services, and WhatsApp keyword parser. |
-| **Stage 1.3 — Integrations (`packages/integrations`)** | ⏳ Planned | Monnify Virtual Account & Server Verification adapter + WhatsApp Cloud API & Status `pHash` adapter. |
-| **Stage 1.4 — API & Co-Pilot Workers (`apps/api`)** | ⏳ Planned | Webhook endpoints, BullMQ delayed workers (`copilot-idle-check`, `reservation-expiry`), Dashboard REST API, and Dynamic OG Card route. |
-| **Stage 1.5 — Vendor Command Dashboard (`apps/dashboard`)** | ⏳ Planned | Passwordless login, Live Pending Orders Kanban with countdowns, Revenue Breakdown, Shipping & Discount UI, and Co-Pilot controls. |
-| **Stage 2 — Verification & Trust Layer** | 📋 Backlog | BVN/NIN/NUBAN verification adapter, encrypted identity hash, and tamper-evident Verified Seller badges. |
-| **Stage 3 — Auto-Generated Website Engine** | 📋 Backlog | Multi-tenant storefront (`apps/storefront`), `@caterlog/storefront-ui` SDK, and on-demand cache sync. |
-| **Stage 4 & 5 — Design Tiers & Multi-Channel Sync** | 📋 Backlog | Guided customizer, bespoke design tokens, Instagram DM sync, and unified inbox. |
+| **Stage 1.1 — Monorepo & Database (`packages/database`)** | ✅ Completed | Workspace config, `docker-compose.yml`, 12-table Prisma PostgreSQL schema, kobo utilities, and Nigerian vendor seed script. |
+| **Stage 1.2 — Commerce Core (`packages/commerce-core`)** | ✅ Completed | Hexagonal domain core (`domain/`, `ports/`, `services/`, `commands/`), atomic stock locks, partial/full payment reconciliation, and WhatsApp keyword parser. |
+| **Stage 1.3 — Integrations (`packages/integrations`)** | ✅ Completed | Monnify Dynamic 10-digit NUBAN & Server Verification adapter + WhatsApp Cloud API & 1-tap copyable NUBAN bubble sender. |
+| **Stage 1.4 — API & Co-Pilot Engine (`apps/api`)** | ✅ Completed | Webhook endpoints (`/webhooks/whatsapp`, `/webhooks/monnify`), Co-Pilot idle timer, Dynamic OG Card (`/og/product/:sku`), and SSE sync API. |
+| **Stage 1.5 — Vendor Command Dashboard (`apps/dashboard`)** | ✅ Completed | Interactive Web Dashboard + Dual WhatsApp Simulator for testing real-time WhatsApp <-> Dashboard synchronization. |
+| **Stage 2 — Verification & Trust Layer** | ⏳ Next Up | BVN/NIN/NUBAN verification adapter, encrypted identity hash, appeals flow, and tamper-evident Verified Seller badges. |
+| **Stage 3+ — Auto-Generated Storefront (`apps/storefront`)** | 📋 Deferred | Multi-tenant vendor websites & `@caterlog/storefront-ui` design system (deferred until Stage 1–2 are verified). |
 
 ---
 
-## 9. Documentation Index
+## 10. Documentation Index
 
 - **[`docs/PLATFORM_CONCEPT.md`](docs/PLATFORM_CONCEPT.md):** Complete product vision, 6-layer strategy, architectural principles, and business model.
 - **[`docs/STAGE_1_SPEC.md`](docs/STAGE_1_SPEC.md):** Stage 1 technical specification, Prisma database schema, Redis/BullMQ queue design, and WhatsApp keyword-to-API mapping.
+- **[`docs/WHATSAPP_TESTING_GUIDE.md`](docs/WHATSAPP_TESTING_GUIDE.md):** Step-by-step guide to testing Caterlog using the built-in browser simulator or connecting your physical WhatsApp phone via Meta's free Test Number.

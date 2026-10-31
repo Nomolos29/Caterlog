@@ -1,0 +1,388 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------
+// ENUMS
+// ---------------------------------------------------------
+
+enum CopilotMode {
+  COPILOT    // Waits `copilotIdleSeconds` (default 60s) for vendor reply before auto-responding
+  FULL_AUTO  // Responds immediately (<2s) to buyer product inquiries
+  MANUAL     // Only generates invoices when explicitly triggered by vendor
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING_REVIEW
+  VERIFIED
+  REJECTED
+}
+
+enum SalesChannel {
+  WHATSAPP_CHAT
+  WHATSAPP_STATUS
+  WHATSAPP_CATALOG
+  INSTAGRAM_DM
+  WEB_STOREFRONT
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_PAYMENT  // Virtual account generated, stock reserved (default 15m TTL)
+  PARTIALLY_PAID   // Buyer transferred less than totalAmountKobo
+  PAID             // Full payment verified via Monnify server-to-server check
+  PROCESSING       // Vendor is packing order
+  OUT_FOR_DELIVERY // Handed to dispatch rider
+  FULFILLED        // Delivered & completed
+  EXPIRED          // Payment window elapsed without transfer; stock released
+  CANCELLED        // Cancelled by vendor or buyer
+  REFUNDED
+}
+
+enum DiscountType {
+  PERCENTAGE // Stored in basis points: 1000 = 10.00%
+  FLAT_KOBO  // Stored in kobo: 200000 = ₦2,000.00
+}
+
+// ---------------------------------------------------------
+// 1. VENDOR & COMPLIANCE
+// ---------------------------------------------------------
+
+model Vendor {
+  id                     String             @id @default(uuid()) @db.Uuid
+  slug                   String             @unique
+  businessName           String
+  whatsappPhone          String             @unique
+  whatsappPhoneId        String?            @unique
+  wabaId                 String?
+  metaCatalogId          String?
+
+  // Configurable Co-Pilot & Stock Reservation Settings
+  copilotMode            CopilotMode        @default(COPILOT)
+  copilotIdleSeconds     Int                @default(60)
+  reservationTtlMinutes  Int                @default(15)
+
+  // Settlement & Monnify Subaccount
+  settlementBankCode     String?
+  settlementAccountNum   String?
+  settlementAccountName  String?
+  monnifySubAccountCode  String?            @unique
+
+  // Stage 2 Hook: Identity & Trust Badge
+  verificationStatus     VerificationStatus @default(UNVERIFIED)
+  kycIdentityHash        String?            @unique
+  verifiedAt             DateTime?
+
+  // Stage 3 Hook: Storefront Theme Manifest
+  storefrontConfig       Json?
+
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  consents               VendorConsent[]
+  products               Product[]
+  shippingZones          ShippingZone[]
+  discounts              Discount[]
+  customers              Customer[]
+  orders                 Order[]
+  chatSessions           ChatSession[]
+  commerceEvents         CommerceEvent[]
+
+  @@index([whatsappPhone])
+}
+
+model VendorConsent {
+  id            String   @id @default(uuid()) @db.Uuid
+  vendorId      String   @db.Uuid
+  consentType   String   // "TERMS_AND_NDPR", "KYC_VERIFICATION", "LENDER_DATA_SHARING"
+  policyVersion String   // e.g. "v1.0"
+  granted       Boolean
+  channel       String   // "WHATSAPP" or "WEB_DASHBOARD"
+  ipOrPhoneRef  String
+  createdAt     DateTime @default(now())
+
+  vendor        Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, consentType])
+}
+
+// ---------------------------------------------------------
+// 2. CATALOG, INVENTORY & STATUS IMAGE MATCHING
+// ---------------------------------------------------------
+
+model Product {
+  id              String             @id @default(uuid()) @db.Uuid
+  vendorId        String             @db.Uuid
+  skuCode         String             // Vendor-scoped short code e.g. "SHOE-01"
+  name            String
+  description     String?
+  category        String?            // "fashion", "food", "cosmetics", etc.
+  basePriceKobo   BigInt
+  compareAtKobo   BigInt?
+  isActive        Boolean            @default(true)
+
+  // Media & WhatsApp Status Perceptual Hash (pHash)
+  primaryImageUrl String
+  imageGallery    Json               @default("[]")
+  imagePhash      String?            // 64-bit hex perceptual hash for matching WhatsApp Status replies
+
+  // Atomic stock counters
+  stockTotal      Int                @default(0)
+  stockReserved   Int                @default(0)
+
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  vendor          Vendor             @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  variants        ProductVariant[]
+  orderItems      OrderItem[]
+  reservations    StockReservation[]
+
+  @@unique([vendorId, skuCode])
+  @@index([vendorId, isActive])
+  @@index([vendorId, imagePhash])
+}
+
+model ProductVariant {
+  id            String             @id @default(uuid()) @db.Uuid
+  productId     String             @db.Uuid
+  name          String             // e.g. "Size 39 / Black"
+  skuSuffix     String             // e.g. "39-BLK"
+  priceKobo     BigInt?            // Overrides Product.basePriceKobo if set
+  stockTotal    Int                @default(0)
+  stockReserved Int                @default(0)
+
+  product       Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems    OrderItem[]
+  reservations  StockReservation[]
+
+  @@unique([productId, skuSuffix])
+}
+
+// ---------------------------------------------------------
+// 3. SHIPPING ZONES & DISCOUNTS
+// ---------------------------------------------------------
+
+model ShippingZone {
+  id            String   @id @default(uuid()) @db.Uuid
+  vendorId      String   @db.Uuid
+  code          Int      // 1-based short index for WhatsApp keyword deletion (`shipping delete 2`)
+  name          String   // e.g. "Lagos Mainland", "Lekki Phase 1", "Pickup"
+  feeKobo       BigInt   // e.g. 250000 (₦2,500)
+  estimatedDays String?  // e.g. "Same day" or "1-2 days"
+  isActive      Boolean  @default(true)
+
+  vendor        Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  orders        Order[]
+
+  @@unique([vendorId, name])
+  @@index([vendorId, isActive])
+}
+
+model Discount {
+  id               String       @id @default(uuid()) @db.Uuid
+  vendorId         String       @db.Uuid
+  code             String       // Uppercase e.g. "PAYDAY10"
+  type             DiscountType
+  value            BigInt       // If PERCENTAGE: basis points (1000 = 10%). If FLAT_KOBO: kobo amount
+  minOrderKobo     BigInt       @default(0)
+  maxUses          Int?
+  usedCount        Int          @default(0)
+  startsAt         DateTime     @default(now())
+  expiresAt        DateTime?
+  isActive         Boolean      @default(true)
+
+  vendor           Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  orders           Order[]
+
+  @@unique([vendorId, code])
+  @@index([vendorId, isActive])
+}
+
+// ---------------------------------------------------------
+// 4. CUSTOMERS, ORDERS & STOCK RESERVATIONS
+// ---------------------------------------------------------
+
+model Customer {
+  id                String    @id @default(uuid()) @db.Uuid
+  vendorId          String    @db.Uuid
+  whatsappPhone     String
+  name              String?
+  defaultAddress    String?
+  defaultZoneId     String?   @db.Uuid
+  totalOrdersCount  Int       @default(0)
+  lifetimeSpendKobo BigInt    @default(0)
+  firstSeenAt       DateTime  @default(now())
+  lastOrderAt       DateTime?
+
+  vendor            Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  orders            Order[]
+
+  @@unique([vendorId, whatsappPhone])
+}
+
+model Order {
+  id                  String             @id @default(uuid()) @db.Uuid
+  vendorId            String             @db.Uuid
+  customerId          String             @db.Uuid
+  shortCode           String             // Human-friendly e.g. "ORD-882"
+  channel             SalesChannel       @default(WHATSAPP_CHAT)
+  status              OrderStatus        @default(PENDING_PAYMENT)
+
+  // Financial Breakdown (All in Kobo)
+  subtotalKobo        BigInt
+  shippingZoneId      String?            @db.Uuid
+  shippingFeeKobo     BigInt             @default(0)
+  discountId          String?            @db.Uuid
+  discountCode        String?
+  discountAmountKobo  BigInt             @default(0)
+  totalAmountKobo     BigInt             // subtotal + shippingFee - discountAmount
+  amountPaidKobo      BigInt             @default(0)
+
+  // Delivery Metadata
+  deliveryAddress     String?
+  riderName           String?
+  riderPhone          String?
+
+  // Timestamps
+  paymentExpiresAt    DateTime?
+  paidAt              DateTime?
+  dispatchedAt        DateTime?
+  fulfilledAt         DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  vendor              Vendor             @relation(fields: [vendorId], references: [id])
+  customer            Customer           @relation(fields: [customerId], references: [id])
+  shippingZone        ShippingZone?      @relation(fields: [shippingZoneId], references: [id])
+  discount            Discount?          @relation(fields: [discountId], references: [id])
+  items               OrderItem[]
+  reservations        StockReservation[]
+  invoices            PaymentInvoice[]
+
+  @@unique([vendorId, shortCode])
+  @@index([vendorId, status, createdAt])
+}
+
+model OrderItem {
+  id              String          @id @default(uuid()) @db.Uuid
+  orderId         String          @db.Uuid
+  productId       String          @db.Uuid
+  variantId       String?         @db.Uuid
+  productNameSnap String
+  variantNameSnap String?
+  quantity        Int
+  unitPriceKobo   BigInt
+  lineTotalKobo   BigInt
+
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product         @relation(fields: [productId], references: [id])
+  variant         ProductVariant? @relation(fields: [variantId], references: [id])
+}
+
+model StockReservation {
+  id         String          @id @default(uuid()) @db.Uuid
+  orderId    String          @db.Uuid
+  productId  String          @db.Uuid
+  variantId  String?         @db.Uuid
+  quantity   Int
+  status     String          @default("ACTIVE") // "ACTIVE", "CONSUMED", "RELEASED"
+  expiresAt  DateTime
+  createdAt  DateTime        @default(now())
+
+  order      Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product         @relation(fields: [productId], references: [id])
+  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([status, expiresAt])
+}
+
+// ---------------------------------------------------------
+// 5. MONNIFY VIRTUAL ACCOUNTS & SERVER-VERIFIED PAYMENTS
+// ---------------------------------------------------------
+
+model PaymentInvoice {
+  id                  String               @id @default(uuid()) @db.Uuid
+  orderId             String               @db.Uuid
+  provider            String               @default("MONNIFY")
+  invoiceReference    String               @unique
+  expectedAmountKobo  BigInt
+
+  // Dynamic Virtual Account Details rendered in WhatsApp
+  accountNumber       String               // 10-digit NUBAN e.g. "8092341102"
+  bankName            String               // e.g. "Moniepoint MFB"
+  accountName         String               // e.g. "CATERLOG / AMAKA SHOES"
+  checkoutUrl         String?
+
+  status              String               @default("ACTIVE") // "ACTIVE", "PAID", "EXPIRED"
+  expiresAt           DateTime
+  createdAt           DateTime             @default(now())
+
+  order               Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  transactions        PaymentTransaction[]
+
+  @@index([accountNumber, status])
+}
+
+model PaymentTransaction {
+  id                     String         @id @default(uuid()) @db.Uuid
+  invoiceId              String         @db.Uuid
+  providerTransactionRef String         @unique
+  paymentReference       String
+  amountPaidKobo         BigInt
+  settlementAmountKobo   BigInt?
+  payerName              String?
+  payerBankName          String?
+  paymentMethod          String         // "ACCOUNT_TRANSFER", "CARD"
+
+  // Principle 10.2: Server-to-Server Verification Proof
+  webhookSignatureValid  Boolean        @default(false)
+  serverVerifiedAt       DateTime
+  rawVerificationJson    Json
+
+  createdAt              DateTime       @default(now())
+
+  invoice                PaymentInvoice @relation(fields: [invoiceId], references: [id])
+}
+
+// ---------------------------------------------------------
+// 6. SMART CO-PILOT SESSION & AUDIT LEDGER
+// ---------------------------------------------------------
+
+model ChatSession {
+  id                   String    @id @default(uuid()) @db.Uuid
+  vendorId             String    @db.Uuid
+  buyerWhatsappPhone   String
+  copilotPaused        Boolean   @default(false)
+  lastVendorMessageAt  DateTime?
+  lastBuyerMessageAt   DateTime?
+  activeProductId      String?   @db.Uuid
+  conversationState    String    @default("IDLE")
+  updatedAt            DateTime  @updatedAt
+
+  vendor               Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorId, buyerWhatsappPhone])
+}
+
+model CommerceEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  vendorId    String   @db.Uuid
+  eventType   String   // "ORDER_CREATED", "PAYMENT_VERIFIED", "STOCK_UPDATED", "DISCOUNT_APPLIED", "SETTINGS_UPDATED"
+  actorType   String   // "VENDOR_WA_KEYWORD", "VENDOR_WEB_DASHBOARD", "COPILOT_AUTO", "WEBHOOK"
+  entityType  String   // "ORDER", "PRODUCT", "SHIPPING_ZONE", "DISCOUNT", "VENDOR"
+  entityId    String
+  payload     Json
+  createdAt   DateTime @default(now())
+
+  vendor      Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, eventType, createdAt])
+}
+

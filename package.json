@@ -1,0 +1,28 @@
+{
+  "name": "caterlog",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Commerce Infrastructure for Chat-First African Vendors",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node --experimental-strip-types --watch apps/api/src/server.ts",
+    "start": "node --experimental-strip-types apps/api/src/server.ts",
+    "build": "npm run build --workspaces --if-present",
+    "test": "node --experimental-strip-types --test packages/commerce-core/src/commerce-core.test.ts packages/integrations/src/integrations.test.ts apps/api/src/api.test.ts",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:generate": "npm --workspace=@caterlog/database run db:generate",
+    "db:push": "npm --workspace=@caterlog/database run db:push",
+    "db:migrate": "npm --workspace=@caterlog/database run db:migrate",
+    "db:seed": "npm --workspace=@caterlog/database run db:seed"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
+
