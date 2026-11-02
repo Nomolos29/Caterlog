@@ -65,16 +65,36 @@ export class VendorCommandDispatcher {
           parsedCommand: cmd,
           whatsappReplyText: [
             "🛠️ *Caterlog Vendor Command Menu*",
+            "• *products* / *catalog* — List all products & stock",
             "• *sales* / *sales week* / *sales month* — Revenue breakdown",
             "• *pending* / *paid* — View active transfers & paid orders",
             "• *dispatch ORD-882 0803...* — Mark order out for delivery",
-            "• *shipping* / *shipping add Lekki 3500* / *shipping delete 2*",
+            "• *shipping* / *ship Ibadan #6000* / *shipping delete 2*",
             "• *discount* / *discount add PAYDAY 10%* / *discount end PAYDAY*",
             "• *stock SHOE-01 10* — Update inventory count",
             "• *mode copilot 60s* / *mode auto* / *mode off* — Co-Pilot switch",
             "• *hold 15* — Set buyer transfer reservation window (mins)",
             "• *dashboard* — Get 1-tap login link to Web Dashboard",
           ].join("\n"),
+        };
+      }
+
+      case "LIST_PRODUCTS": {
+        const products = await this.catalogService.listProducts(params.vendorId);
+        if (products.length === 0) {
+          return {
+            parsedCommand: cmd,
+            whatsappReplyText:
+              "📦 Your catalog is empty. Send a photo with caption *Name, #Price, stock Qty* to add an item.",
+          };
+        }
+        const lines = products.map((p) => {
+          const avail = Math.max(0, p.stockTotal - p.stockReserved);
+          return `• *${p.skuCode}* — ${p.name}: *${formatNaira(p.basePriceKobo)}* (${avail} avail, ${p.stockReserved} locked)`;
+        });
+        return {
+          parsedCommand: cmd,
+          whatsappReplyText: `📦 *Your Catalog (${products.length} items):*\n${lines.join("\n")}`,
         };
       }
 

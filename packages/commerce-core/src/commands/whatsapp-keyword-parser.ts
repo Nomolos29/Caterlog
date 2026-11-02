@@ -5,6 +5,7 @@ export type VendorWhatsAppCommand =
   | { type: "OPEN_DASHBOARD" }
   | { type: "HELP_MENU" }
   | { type: "SALES_SUMMARY"; range: "today" | "week" | "month" }
+  | { type: "LIST_PRODUCTS" }
   | { type: "LIST_SHIPPING" }
   | { type: "UPSERT_SHIPPING"; name: string; feeKobo: bigint }
   | { type: "DELETE_SHIPPING"; code: number }
@@ -91,6 +92,18 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
   // 2. Help / Menu
   if (firstWord === "help" || firstWord === "menu" || firstWord === "commands") {
     return { type: "HELP_MENU" };
+  }
+
+  // 2b. List Catalog / Products (`products`, `catalog`, `items`, `stock` with no args)
+  if (
+    firstWord === "products" ||
+    firstWord === "product" ||
+    firstWord === "catalog" ||
+    firstWord === "catalogue" ||
+    firstWord === "items" ||
+    (STOCK_ALIASES.has(firstWord) && tokens.length === 1)
+  ) {
+    return { type: "LIST_PRODUCTS" };
   }
 
   // 3. Sales / Transactional Breakdown (`sales`, `sales today`, `sales week`, `sales month`)

@@ -218,6 +218,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           priceNaira: number | string;
           stockTotal: number;
           category?: string;
+          primaryImageUrl?: string;
         };
         engine.addProduct({
           skuCode: body.skuCode,
@@ -225,6 +226,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           basePriceKobo: nairaToKobo(body.priceNaira),
           stockTotal: Number(body.stockTotal),
           category: body.category,
+          primaryImageUrl: body.primaryImageUrl,
         });
         return sendJson(res, 201, engine.serializeState());
       }
@@ -302,11 +304,25 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, engine.serializeState());
       }
 
+      // 15b. Dashboard REST API: Expire Unpaid Order & Release Stock (`POST /api/v1/vendor/orders/:code/expire`)
+      if (
+        req.method === "POST" &&
+        path.startsWith("/api/v1/vendor/orders/") &&
+        path.endsWith("/expire")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/vendor/orders/", "").replace("/expire", "")
+        );
+        await engine.expireOrderReservation(shortCode);
+        return sendJson(res, 200, engine.serializeState());
+      }
+
       // 16. Local Simulator Endpoint: WhatsApp Vendor Keyword OR Buyer Inquiry (`POST /api/v1/simulate/whatsapp`)
       if (req.method === "POST" && path === "/api/v1/simulate/whatsapp") {
         const body = JSON.parse(await readRawBody(req)) as {
           role: "VENDOR_KEYWORD" | "BUYER_INQUIRY" | "VENDOR_MANUAL_BUYER_REPLY";
           text: string;
+          attachedImageUrl?: string;
           buyerPhone?: string;
           buyerName?: string;
           quotedStatusImagePhash?: string;
@@ -314,7 +330,10 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         };
 
         if (body.role === "VENDOR_KEYWORD") {
-          const resData = await engine.handleVendorWhatsAppKeyword(body.text);
+          const resData = await engine.handleVendorWhatsAppKeyword(
+            body.text,
+            body.attachedImageUrl
+          );
           return sendJson(res, 200, { ...resData, state: engine.serializeState() });
         }
 
