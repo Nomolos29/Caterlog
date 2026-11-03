@@ -159,6 +159,18 @@ export class CatalogService {
     actor: ActorSource
   ): Promise<Product> {
     const normalizedSku = skuCode.trim().toUpperCase();
+    const existing = await this.db.product.findUnique({
+      where: { vendorId_skuCode: { vendorId, skuCode: normalizedSku } },
+    });
+    if (!existing) {
+      throw new Error(`Product SKU "${normalizedSku}" not found.`);
+    }
+    if (newStockTotal < existing.stockReserved) {
+      throw new Error(
+        `Cannot set stock to ${newStockTotal} for "${existing.name}" because ${existing.stockReserved} unit(s) are currently reserved by buyers.`
+      );
+    }
+
     const product = await this.db.product.update({
       where: { vendorId_skuCode: { vendorId, skuCode: normalizedSku } },
       data: { stockTotal: Math.max(0, newStockTotal) },

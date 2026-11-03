@@ -293,6 +293,7 @@ export class OrderPaymentService {
     alreadyProcessed: boolean;
     reconciliationStatus: "PAID" | "PARTIALLY_PAID";
     remainingBalanceKobo: bigint;
+    overpaidAmountKobo: bigint;
   }> {
     if (!params.webhookSignatureValid) {
       throw new Error("Rejected webhook: Invalid cryptographic HMAC signature.");
@@ -311,6 +312,8 @@ export class OrderPaymentService {
         reconciliationStatus: ord.status === "PARTIALLY_PAID" ? "PARTIALLY_PAID" : "PAID",
         remainingBalanceKobo:
           ord.totalAmountKobo > ord.amountPaidKobo ? ord.totalAmountKobo - ord.amountPaidKobo : 0n,
+        overpaidAmountKobo:
+          ord.amountPaidKobo > ord.totalAmountKobo ? ord.amountPaidKobo - ord.totalAmountKobo : 0n,
       };
     }
 
@@ -383,7 +386,10 @@ export class OrderPaymentService {
           data: { status: "PAID" },
         });
 
-        // Consume active stock reservations and permanently decrement product stockTotal
+        // Consume active stock reservations and permanently decrement product stockTotal.
+        // A late payment can arrive after an EXPIRED order released its reservation; in that
+        // case the stock was already returned to `stockTotal` availability, so we must still
+        // deduct the sold units without touching `stockReserved` again.
         for (const resv of order.reservations) {
           if (resv.status === "ACTIVE") {
             await tx.stockReservation.update({
@@ -396,6 +402,11 @@ export class OrderPaymentService {
                 stockTotal: { decrement: resv.quantity },
                 stockReserved: { decrement: resv.quantity },
               },
+            });
+          } else if (resv.status === "RELEASED") {
+            await tx.product.update({
+              where: { id: resv.productId },
+              data: { stockTotal: { decrement: resv.quantity } },
             });
           }
         }
@@ -438,16 +449,21 @@ export class OrderPaymentService {
 
     // 4. Push automated WhatsApp updates into both Buyer and Vendor threads
     if (decision.nextStatus === "PAID") {
+      const overpayNote =
+        decision.overpaidAmountKobo > 0n
+          ? `\n💚 *Overpayment:* ${formatNaira(decision.overpaidAmountKobo)} extra was received. The vendor will refund or credit it.`
+          : "";
+
       await this.messagingPort.sendTextMessage({
         toPhone: order.customer.whatsappPhone,
         vendorPhoneId: order.vendor.whatsappPhoneId,
-        text: `✅ *Payment Confirmed!* (${formatNaira(decision.newAmountPaidKobo)})\n🧾 Receipt: *${order.shortCode}*\n🏪 Vendor: *${order.vendor.businessName}*\n\nYour order is now being packed for dispatch!`,
+        text: `✅ *Payment Confirmed!* (${formatNaira(decision.newAmountPaidKobo)})\n🧾 Receipt: *${order.shortCode}*\n🏪 Vendor: *${order.vendor.businessName}*\n\nYour order is now being packed for dispatch!${overpayNote}`,
       });
 
       await this.messagingPort.sendTextMessage({
         toPhone: order.vendor.whatsappPhone,
         vendorPhoneId: order.vendor.whatsappPhoneId,
-        text: `🔔 *PAID ORDER ${order.shortCode}!*\n💰 Received: *${formatNaira(decision.newAmountPaidKobo)}* from ${verified.payerName ?? order.customer.whatsappPhone}\n📦 Item: ${order.items.map((i) => `${i.productNameSnap} x${i.quantity}`).join(", ")}\n\nReply *dispatch ${order.shortCode} <riderPhone>* when handed to rider.`,
+        text: `🔔 *PAID ORDER ${order.shortCode}!*\n💰 Received: *${formatNaira(decision.newAmountPaidKobo)}* from ${verified.payerName ?? order.customer.whatsappPhone}\n📦 Item: ${order.items.map((i) => `${i.productNameSnap} x${i.quantity}`).join(", ")}\n\nReply *dispatch ${order.shortCode} <riderPhone>* when handed to rider.${overpayNote}`,
       });
 
       await this.eventBus.publish({
@@ -459,6 +475,7 @@ export class OrderPaymentService {
         payload: {
           shortCode: order.shortCode,
           amountPaidKobo: decision.newAmountPaidKobo.toString(),
+          overpaidAmountKobo: decision.overpaidAmountKobo.toString(),
         },
         occurredAt: new Date(),
       });
@@ -489,6 +506,7 @@ export class OrderPaymentService {
       alreadyProcessed: false,
       reconciliationStatus: decision.nextStatus,
       remainingBalanceKobo: decision.remainingBalanceKobo,
+      overpaidAmountKobo: decision.overpaidAmountKobo,
     };
   }
 
@@ -500,9 +518,11 @@ export class OrderPaymentService {
       where: { id: orderId },
       include: { reservations: true, invoices: true },
     });
-    if (!order || order.status !== "PENDING_PAYMENT") {
+    if (!order || (order.status !== "PENDING_PAYMENT" && order.status !== "PARTIALLY_PAID")) {
       return null;
     }
+
+    assertValidOrderTransition(order.status as DomainOrderStatus, "EXPIRED");
 
     const updated = await this.db.$transaction(async (tx) => {
       for (const resv of order.reservations) {

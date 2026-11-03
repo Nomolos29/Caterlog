@@ -158,12 +158,13 @@ Vendors can manage their entire store from **WhatsApp Keywords** when on the go,
 caterlog/
 ├── apps/
 │   ├── api/                 # Stage 1.4 HTTP API, WhatsApp/Monnify Webhooks, Co-Pilot Engine & OG Card Renderer
-│   ├── dashboard/           # Stage 1.5 Vendor Command Dashboard + Live WhatsApp & Monnify Sync Simulator
+│   ├── dashboard/           # Stage 1.5 Next.js + TypeScript Vendor Command Dashboard & Live Simulator
 │   └── storefront/          # (Stage 3 — Deferred) Multi-Tenant Vendor Website & Hosted Checkout Engine
 ├── packages/
 │   ├── database/            # Stage 1.1 Prisma PostgreSQL Schema, Migrations & Seed Data
 │   ├── commerce-core/       # Stage 1.2 Pure Hexagonal Domain (domain/, ports/, services/, commands/)
 │   ├── integrations/        # Stage 1.3 Monnify Virtual Account + WhatsApp Cloud API Adapters
+│   ├── shared/              # Framework-free money utilities shared by domain & persistence layers
 │   └── storefront-ui/       # (Stage 3/4 — Deferred) Internal Design System SDK
 ├── docs/
 │   ├── PLATFORM_CONCEPT.md       # Full 6-Layer Platform Vision & Business Model Specification
@@ -176,7 +177,7 @@ caterlog/
 
 ## 7. Database Schema & Monetary Integrity
 
-The PostgreSQL database (defined in `packages/database/prisma/schema.prisma`) comprises **12 core tables**:
+The PostgreSQL database (defined in `packages/database/prisma/schema.prisma`) comprises **14 core tables**:
 - **Identity & Compliance:** `Vendor`, `VendorConsent` (NDPR opt-in audit trail).
 - **Catalog & Inventory:** `Product` (with `imagePhash`, `stockTotal`, `stockReserved`), `ProductVariant`.
 - **Pricing Rules:** `ShippingZone`, `Discount`.
@@ -195,13 +196,28 @@ For full field-by-field definitions and state machine rules, see [`docs/STAGE_1_
 npm test
 ```
 
+### Typecheck the Workspace & Build the Dashboard
+```bash
+npm run typecheck
+npm run build
+```
+
 ### Start the API, Webhook Server & Vendor Command Dashboard
 ```bash
 npm run dev
 ```
-Then open **[http://localhost:4000](http://localhost:4000)** in your browser:
-- **Left Panel (Vendor Command Dashboard):** Manage live orders, test full or partial Monnify transfers, update product stock, preview the live Dynamic OpenGraph Product Card (`/og/product/SHOE-01`), manage shipping zones & discounts, and configure the **Co-Pilot Mode/Timer (`default 60s`)** and **Stock Hold Timer (`default 15m`)**.
-- **Right Panel (Live WhatsApp Dual-Thread Simulator):** Send any Vendor Keyword (`sales`, `shipping add Ikoyi 4000`, `discount add FLASH 15%`, `stock SHOE-01 12`, `mode copilot 90s`, `hold 20`, `dashboard`) or Buyer WhatsApp Status reply and watch the Dashboard synchronize in real time over Server-Sent Events (SSE).
+This starts both processes together:
+- **API & webhooks:** [http://localhost:4000](http://localhost:4000) — the root redirects to the dashboard.
+- **Next.js Vendor Dashboard:** [http://localhost:3000](http://localhost:3000)
+
+Run them separately when needed with `npm run dev:api` and `npm run dev:dashboard`. The API loads the root `.env` automatically when present. The dashboard reads `NEXT_PUBLIC_API_BASE_URL` at build time (set it in `apps/dashboard/.env.local`; default `http://localhost:4000`).
+
+Open the dashboard to:
+- **Manage live orders:** test full or partial Monnify transfers, expire an unpaid reservation and release stock, or mark a paid order dispatched.
+- **Manage catalog:** add products, update stock inline, and preview the live Dynamic OpenGraph Product Card (`/og/product/SHOE-01`).
+- **Manage shipping & discounts:** add/remove delivery zones and promo codes.
+- **Configure automation:** Co-Pilot Mode, idle takeover timer (`default 60s`), and stock hold TTL (`default 15m`).
+- **Use the Live WhatsApp Dual-Thread Simulator:** send any Vendor Keyword (`sales`, `shipping add Ikoyi 4000`, `discount add FLASH 15%`, `stock SHOE-01 12`, `mode copilot 90s`, `hold 20`, `dashboard`) or Buyer WhatsApp Status reply and watch the dashboard synchronize in real time over Server-Sent Events (SSE).
 
 ### Connect Your Physical WhatsApp Phone (5-Minute Setup)
 See **[`docs/WHATSAPP_TESTING_GUIDE.md`](docs/WHATSAPP_TESTING_GUIDE.md)** for the step-by-step instructions to expose `http://localhost:4000/webhooks/whatsapp` via `cloudflared` or `ngrok` and connect Meta's free WhatsApp Cloud API Test Number to your personal phone.
@@ -215,13 +231,15 @@ This table tracks the live engineering progress of the repository and is updated
 | Stage / Module | Status | Description |
 | :--- | :---: | :--- |
 | **Architecture & Stage 1 Specification** | ✅ Completed | System architecture, ER schema, Co-Pilot rules, and Dual-Access spec (`docs/STAGE_1_SPEC.md`). |
-| **Stage 1.1 — Monorepo & Database (`packages/database`)** | ✅ Completed | Workspace config, `docker-compose.yml`, 12-table Prisma PostgreSQL schema, kobo utilities, and Nigerian vendor seed script. |
+| **Stage 1.1 — Monorepo & Database (`packages/database`)** | ✅ Completed | Workspace config, `docker-compose.yml`, 14-table Prisma PostgreSQL schema, kobo utilities, and Nigerian vendor seed script. |
 | **Stage 1.2 — Commerce Core (`packages/commerce-core`)** | ✅ Completed | Hexagonal domain core (`domain/`, `ports/`, `services/`, `commands/`), atomic stock locks, partial/full payment reconciliation, and WhatsApp keyword parser. |
 | **Stage 1.3 — Integrations (`packages/integrations`)** | ✅ Completed | Monnify Dynamic 10-digit NUBAN & Server Verification adapter + WhatsApp Cloud API & 1-tap copyable NUBAN bubble sender. |
-| **Stage 1.4 — API & Co-Pilot Engine (`apps/api`)** | ✅ Completed | Webhook endpoints (`/webhooks/whatsapp`, `/webhooks/monnify`), Co-Pilot idle timer, Dynamic OG Card (`/og/product/:sku`), and SSE sync API. |
-| **Stage 1.5 — Vendor Command Dashboard (`apps/dashboard`)** | ✅ Completed | Interactive Web Dashboard + Dual WhatsApp Simulator for testing real-time WhatsApp <-> Dashboard synchronization. |
+| **Stage 1.4 — API & Co-Pilot Engine (`apps/api`)** | ✅ Completed | Webhook endpoints (`/webhooks/whatsapp`, `/webhooks/monnify`), HMAC verification, Co-Pilot idle timer, reservation-expiry sweep, Dynamic OG Card (`/og/product/:sku`), and SSE sync API. |
+| **Stage 1.5 — Vendor Command Dashboard (`apps/dashboard`)** | ✅ Completed | Next.js 16 + TypeScript + Tailwind dashboard with orders, catalog, shipping, discounts, OG card preview, and a dual WhatsApp live simulator over SSE. |
 | **Stage 2 — Verification & Trust Layer** | ⏳ Next Up | BVN/NIN/NUBAN verification adapter, encrypted identity hash, appeals flow, and tamper-evident Verified Seller badges. |
 | **Stage 3+ — Auto-Generated Storefront (`apps/storefront`)** | 📋 Deferred | Multi-tenant vendor websites & `@caterlog/storefront-ui` design system (deferred until Stage 1–2 are verified). |
+
+> **Stage 1 runtime note:** the running API currently uses `CaterlogStage1Engine`, an in-memory, single-vendor runtime with seeded demo data. Prisma services and the 14-table schema are implemented and unit-tested in the domain/persistence packages, but the HTTP server does **not** persist to PostgreSQL yet. Durable persistence, multi-tenant auth/magic-link sessions, Redis/BullMQ timers, and the live WhatsApp media-download/pHash pipeline are the next implementation slice.
 
 ---
 

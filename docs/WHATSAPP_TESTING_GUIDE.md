@@ -18,11 +18,15 @@ In this mode:
 - Every change made via a WhatsApp keyword immediately synchronizes with the **Vendor Dashboard**, and vice versa.
 - You can click **Simulate Monnify Transfer** (Full, Partial, or Overpayment) to fire a real `HMAC-SHA512`-signed webhook to `POST /webhooks/monnify`, triggering server-to-server verification and posting the `✅ PAID` receipt into the WhatsApp thread.
 
+Start both surfaces with `npm run dev` (API on `http://localhost:4000`, Next.js dashboard on `http://localhost:3000`). Use `npm run dev:api` / `npm run dev:dashboard` to run just one.
+
 ---
 
 ## Mode 2: Testing on Your Physical WhatsApp Phone (Meta Free Test Number)
 
 To test directly from the **WhatsApp app on your phone** while `apps/api` runs on your laptop (`localhost:4000`):
+
+> **Signature enforcement:** with `WHATSAPP_SANDBOX_MOCK="false"`, inbound `POST /webhooks/whatsapp` requests must carry a valid `x-hub-signature-256` HMAC generated with your `WHATSAPP_APP_SECRET`. Set the same App Secret in Meta's app dashboard and in `.env`; unsigned or forged requests are rejected with `401`.
 
 ### Step 1: Expose `localhost:4000` via a Free HTTPS Tunnel
 Meta's servers require a public `https://` URL to deliver inbound webhooks (`POST /webhooks/whatsapp`). Run either Cloudflare Tunnel or ngrok in a terminal:

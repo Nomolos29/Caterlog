@@ -1,16 +1,34 @@
 import http from "node:http";
-import fs from "node:fs";
-import path from "node:path";
-import { URL, fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { URL } from "node:url";
 import { nairaToKobo } from "@caterlog/commerce-core";
 import { CaterlogStage1Engine } from "./runtime-engine.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dashboardHtmlPath = path.resolve(__dirname, "../../dashboard/src/index.html");
+// Load a local `.env` when present so `npm run dev` / `npm start` pick up
+// WhatsApp & Monnify credentials without requiring a manual `export`.
+const envFile = ".env";
+if (existsSync(envFile) && typeof process.loadEnvFile === "function") {
+  try {
+    process.loadEnvFile(envFile);
+  } catch (err) {
+    console.warn(`Could not load ${envFile}:`, err);
+  }
+}
+
+export class HttpError extends Error {
+  public readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
 
 export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
   const sseClients = new Set<http.ServerResponse>();
+  const whatsappSandboxMock = (process.env.WHATSAPP_SANDBOX_MOCK ?? "true") !== "false";
 
   // Broadcast live state updates over Server-Sent Events (SSE) to connected Web Dashboards
   engine.eventBus.on("*", () => {
@@ -45,11 +63,11 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
     const path = url.pathname;
 
     try {
-      // 0. Serve Vendor Command Dashboard at root `GET /`
+      // 0. Redirect the API root to the Next.js Vendor Dashboard
       if (req.method === "GET" && (path === "/" || path === "/dashboard")) {
-        const html = fs.readFileSync(dashboardHtmlPath, "utf8");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(html);
+        const dashboardUrl = process.env.DASHBOARD_URL ?? "http://localhost:3000";
+        res.writeHead(302, { Location: dashboardUrl });
+        res.end();
         return;
       }
 
@@ -71,7 +89,13 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           )}\n\n`
         );
         sseClients.add(res);
-        req.on("close", () => sseClients.delete(res));
+        const heartbeat = setInterval(() => {
+          res.write(": keep-alive\n\n");
+        }, 25_000);
+        req.on("close", () => {
+          clearInterval(heartbeat);
+          sseClients.delete(res);
+        });
         return;
       }
 
@@ -112,6 +136,18 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       // 5. Meta WhatsApp Inbound Webhook (`POST /webhooks/whatsapp`)
       if (req.method === "POST" && path === "/webhooks/whatsapp") {
         const rawBody = await readRawBody(req);
+
+        // Verify Meta's `x-hub-signature-256` HMAC when not running in sandbox mode.
+        if (!whatsappSandboxMock) {
+          const signature = req.headers["x-hub-signature-256"];
+          if (
+            typeof signature !== "string" ||
+            !engine.whatsapp.verifyWebhookSignature(rawBody, signature)
+          ) {
+            return sendJson(res, 401, { error: "Invalid WhatsApp x-hub-signature-256" });
+          }
+        }
+
         const body = JSON.parse(rawBody || "{}") as {
           entry?: Array<{
             changes?: Array<{
@@ -156,10 +192,13 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
               if (cleanFromPhone === cleanVendorPhone) {
                 await engine.handleVendorWhatsAppKeyword(text);
               } else {
+                // NOTE: Meta's `image.sha256` is a hash of the uploaded media bytes, not a
+                // perceptual hash, so it cannot be compared with a product's `imagePhash`.
+                // Live status-image matching needs the media download + pHash pipeline;
+                // for now the caption/product words still drive product resolution.
                 await engine.handleBuyerWhatsAppInquiry({
                   buyerPhone: fromPhone,
                   text,
-                  quotedStatusImagePhash: msg.image?.sha256?.slice(0, 16),
                 });
               }
             }
@@ -172,10 +211,23 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       // 6. Monnify Payment Webhook (`POST /webhooks/monnify`) — Principle 10.2
       if (req.method === "POST" && path === "/webhooks/monnify") {
         const rawBody = await readRawBody(req);
-        const signature = req.headers["monnify-signature"] as string | undefined;
+        const signature = req.headers["monnify-signature"];
+        if (
+          typeof signature !== "string" ||
+          !engine.monnify.verifyWebhookSignature(rawBody, signature)
+        ) {
+          return sendJson(res, 401, { error: "Invalid Monnify webhook signature." });
+        }
+
         const parsed = JSON.parse(rawBody || "{}") as {
+          eventType?: string;
           eventData?: { transactionReference?: string };
         };
+
+        if (parsed.eventType && parsed.eventType !== "SUCCESSFUL_TRANSACTION") {
+          return sendJson(res, 200, { status: "ignored", eventType: parsed.eventType });
+        }
+
         const txRef = parsed.eventData?.transactionReference;
         if (!txRef) {
           return sendJson(res, 400, { error: "Missing eventData.transactionReference" });
@@ -197,6 +249,16 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       // 7. Dashboard REST API: Full Vendor State (`GET /api/v1/vendor/state`)
       if (req.method === "GET" && path === "/api/v1/vendor/state") {
         return sendJson(res, 200, engine.serializeState());
+      }
+
+      // 7b. Dashboard REST API: Analytics Breakdown (`GET /api/v1/vendor/analytics?range=today|week|month`)
+      if (req.method === "GET" && path === "/api/v1/vendor/analytics") {
+        const requested = url.searchParams.get("range");
+        const range =
+          requested === "today" || requested === "week" || requested === "month"
+            ? requested
+            : "month";
+        return sendJson(res, 200, { range, ...engine.getAnalyticsBreakdown(range) });
       }
 
       // 8. Dashboard REST API: Update Settings (`PATCH /api/v1/vendor/settings`)
@@ -241,7 +303,10 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           path.replace("/api/v1/vendor/products/", "").replace("/stock", "")
         );
         const body = JSON.parse(await readRawBody(req)) as { stockTotal: number };
-        engine.updateProductStock(sku, Number(body.stockTotal));
+        const updated = engine.updateProductStock(sku, Number(body.stockTotal));
+        if (!updated) {
+          throw new HttpError(404, `Product SKU "${sku}" not found.`);
+        }
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -258,7 +323,13 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       // 12. Dashboard REST API: Delete Shipping Zone (`DELETE /api/v1/vendor/shipping-zones/:code`)
       if (req.method === "DELETE" && path.startsWith("/api/v1/vendor/shipping-zones/")) {
         const code = Number.parseInt(path.replace("/api/v1/vendor/shipping-zones/", ""), 10);
-        engine.deleteShippingZone(code);
+        if (!Number.isInteger(code)) {
+          throw new HttpError(400, "Shipping zone code must be an integer.");
+        }
+        const deleted = engine.deleteShippingZone(code);
+        if (!deleted) {
+          throw new HttpError(404, `Active shipping zone #${code} not found.`);
+        }
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -284,7 +355,10 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       // 14. Dashboard REST API: Deactivate Discount (`DELETE /api/v1/vendor/discounts/:code`)
       if (req.method === "DELETE" && path.startsWith("/api/v1/vendor/discounts/")) {
         const code = decodeURIComponent(path.replace("/api/v1/vendor/discounts/", ""));
-        engine.deactivateDiscount(code);
+        const deactivated = engine.deactivateDiscount(code);
+        if (!deactivated) {
+          throw new HttpError(404, `Active discount code "${code}" not found.`);
+        }
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -300,7 +374,10 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         const body = JSON.parse((await readRawBody(req)) || "{}") as {
           riderPhone?: string;
         };
-        await engine.dispatchOrder(shortCode, body.riderPhone);
+        const dispatched = await engine.dispatchOrder(shortCode, body.riderPhone);
+        if (!dispatched) {
+          throw new HttpError(404, `Order "${shortCode}" not found.`);
+        }
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -313,7 +390,13 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         const shortCode = decodeURIComponent(
           path.replace("/api/v1/vendor/orders/", "").replace("/expire", "")
         );
-        await engine.expireOrderReservation(shortCode);
+        const expired = await engine.expireOrderReservation(shortCode);
+        if (!expired) {
+          throw new HttpError(
+            404,
+            `Order "${shortCode}" not found or is no longer awaiting payment.`
+          );
+        }
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -407,17 +490,29 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       return sendJson(res, 404, { error: `Route not found: ${req.method} ${path}` });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return sendJson(res, 400, { error: message });
+      const status = err instanceof HttpError ? err.status : 400;
+      return sendJson(res, status, { error: message });
     }
   });
 
   return { server, engine };
 }
 
+const MAX_BODY_BYTES = 1_000_000;
+
 function readRawBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new HttpError(413, "Request body exceeds the 1 MB limit."));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
@@ -435,9 +530,19 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown) {
 // Start server if invoked directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.API_PORT ?? 4000);
-  const { server } = createCaterlogApiServer();
+  const { server, engine } = createCaterlogApiServer();
+
+  // In-memory Stage 1 safety net: release stock for unpaid orders whose hold elapsed.
+  const expiryTimer = setInterval(() => {
+    void engine.expireOverdueOrders().catch((err) => {
+      console.error("Reservation expiry sweep failed:", err);
+    });
+  }, 30_000);
+  expiryTimer.unref();
+
   server.listen(port, () => {
     console.log(`🚀 Caterlog Stage 1 API & Webhook Server listening on http://localhost:${port}`);
+    console.log(`   • Vendor Dashboard:  ${process.env.DASHBOARD_URL ?? "http://localhost:3000"}`);
     console.log(`   • WhatsApp Webhook:  http://localhost:${port}/webhooks/whatsapp`);
     console.log(`   • Monnify Webhook:   http://localhost:${port}/webhooks/monnify`);
     console.log(`   • Dynamic OG Card:   http://localhost:${port}/og/product/SHOE-01`);

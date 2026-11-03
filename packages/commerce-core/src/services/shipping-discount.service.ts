@@ -82,6 +82,17 @@ export class ShippingDiscountService {
       data: { isActive: false },
     });
 
+    await this.db.commerceEvent.create({
+      data: {
+        vendorId,
+        eventType: "SHIPPING_ZONE_UPDATED",
+        actorType: actor,
+        entityType: "SHIPPING_ZONE",
+        entityId: updated.id,
+        payload: { code: updated.code, name: updated.name, deleted: true },
+      },
+    });
+
     await this.eventBus.publish({
       eventType: "SHIPPING_ZONE_UPDATED",
       vendorId,
@@ -114,6 +125,16 @@ export class ShippingDiscountService {
     actor: ActorSource
   ): Promise<Discount> {
     const cleanCode = input.code.trim().toUpperCase();
+    if (!cleanCode) {
+      throw new Error("Discount code cannot be empty.");
+    }
+    if (input.type === "PERCENTAGE" && (input.value <= 0n || input.value > 10000n)) {
+      throw new Error("Percentage discounts must be between 0.01% and 100%.");
+    }
+    if (input.type === "FLAT_KOBO" && input.value <= 0n) {
+      throw new Error("Flat discounts must be greater than ₦0.");
+    }
+
     const discount = await this.db.discount.upsert({
       where: { vendorId_code: { vendorId, code: cleanCode } },
       update: {
@@ -177,6 +198,17 @@ export class ShippingDiscountService {
     const updated = await this.db.discount.update({
       where: { id: existing.id },
       data: { isActive: false },
+    });
+
+    await this.db.commerceEvent.create({
+      data: {
+        vendorId,
+        eventType: "DISCOUNT_UPDATED",
+        actorType: actor,
+        entityType: "DISCOUNT",
+        entityId: updated.id,
+        payload: { code: updated.code, isActive: false },
+      },
     });
 
     await this.eventBus.publish({

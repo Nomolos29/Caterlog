@@ -8,6 +8,7 @@ import type { AnalyticsSettingsService } from "../services/analytics-settings.se
 import type { CatalogService } from "../services/catalog.service.ts";
 import type { OrderPaymentService } from "../services/order-payment.service.ts";
 import type { ShippingDiscountService } from "../services/shipping-discount.service.ts";
+import type { MessagingChannelPort } from "../ports/index.ts";
 
 export interface DispatchedCommandResult {
   parsedCommand: VendorWhatsAppCommand;
@@ -24,6 +25,7 @@ export class VendorCommandDispatcher {
   private readonly shippingDiscountService: ShippingDiscountService;
   private readonly orderPaymentService: OrderPaymentService;
   private readonly analyticsSettingsService: AnalyticsSettingsService;
+  private readonly messagingPort: MessagingChannelPort;
   private readonly createMagicDashboardUrl: (vendorId: string) => Promise<string>;
 
   constructor(
@@ -32,6 +34,7 @@ export class VendorCommandDispatcher {
     shippingDiscountService: ShippingDiscountService,
     orderPaymentService: OrderPaymentService,
     analyticsSettingsService: AnalyticsSettingsService,
+    messagingPort: MessagingChannelPort,
     createMagicDashboardUrl: (vendorId: string) => Promise<string>
   ) {
     this.db = db;
@@ -39,6 +42,7 @@ export class VendorCommandDispatcher {
     this.shippingDiscountService = shippingDiscountService;
     this.orderPaymentService = orderPaymentService;
     this.analyticsSettingsService = analyticsSettingsService;
+    this.messagingPort = messagingPort;
     this.createMagicDashboardUrl = createMagicDashboardUrl;
   }
 
@@ -295,7 +299,7 @@ export class VendorCommandDispatcher {
           where: {
             vendorId_shortCode: { vendorId: params.vendorId, shortCode: cmd.shortCode },
           },
-          include: { customer: true, invoices: true },
+          include: { customer: true, invoices: true, vendor: true },
         });
         if (!order) {
           return {
@@ -303,10 +307,39 @@ export class VendorCommandDispatcher {
             whatsappReplyText: `⚠️ Order *${cmd.shortCode}* not found.`,
           };
         }
-        const inv = order.invoices[0];
+
+        if (order.status !== "PENDING_PAYMENT" && order.status !== "PARTIALLY_PAID") {
+          return {
+            parsedCommand: cmd,
+            whatsappReplyText: `ℹ️ Order *${order.shortCode}* is already *${order.status}* — no payment reminder is needed.`,
+          };
+        }
+
+        const inv = order.invoices.find((invoice) => invoice.status === "ACTIVE") ?? order.invoices[0];
+        const balanceKobo =
+          order.totalAmountKobo > order.amountPaidKobo
+            ? order.totalAmountKobo - order.amountPaidKobo
+            : 0n;
+
+        await this.messagingPort.sendTextMessage({
+          toPhone: order.customer.whatsappPhone,
+          vendorPhoneId: order.vendor.whatsappPhoneId,
+          text: [
+            `⏰ *Payment Reminder — ${order.shortCode}*`,
+            `🏪 ${order.vendor.businessName}`,
+            `💰 Amount due: *${formatNaira(balanceKobo)}*`,
+            inv
+              ? `🏦 ${inv.bankName} • Account: *${inv.accountNumber}*\n👤 ${inv.accountName}`
+              : "",
+            `\n_Your reserved item is released automatically if payment is not completed before the hold expires._`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        });
+
         return {
           parsedCommand: cmd,
-          whatsappReplyText: `🔔 Payment reminder sent to *${order.customer.whatsappPhone}* for *${order.shortCode}* (${formatNaira(order.totalAmountKobo)}${inv ? ` • ${inv.bankName} ${inv.accountNumber}` : ""}).`,
+          whatsappReplyText: `🔔 Payment reminder sent to *${order.customer.whatsappPhone}* for *${order.shortCode}* (${formatNaira(balanceKobo)} due${inv ? ` • ${inv.bankName} ${inv.accountNumber}` : ""}).`,
         };
       }
 

@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background-color: #0b0f19;
+  color: #f3f4f6;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.wa-bubble-bot {
+  background: #1f2937;
+  border-left: 3px solid #10b981;
+}
+
+.wa-bubble-user {
+  background: #065f46;
+}
+
+.wa-bubble-nuban {
+  background: #111827;
+  border: 1px dashed #34d399;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 160ms ease-out;
+}

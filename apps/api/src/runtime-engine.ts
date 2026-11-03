@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {
+  assertValidOrderTransition,
   computeDiscountKobo,
   computeOrderTotalKobo,
   computePhashHammingDistance,
@@ -45,6 +46,7 @@ export interface RuntimeDiscount {
   minOrderKobo: bigint;
   usedCount: number;
   maxUses: number | null;
+  expiresAt?: Date;
   isActive: boolean;
 }
 
@@ -64,12 +66,14 @@ export interface RuntimeOrder {
   discountAmountKobo: bigint;
   totalAmountKobo: bigint;
   amountPaidKobo: bigint;
+  overpaidAmountKobo?: bigint;
   status: DomainOrderStatus;
   invoiceReference: string;
   accountNumber: string;
   bankName: string;
   accountName: string;
   riderPhone?: string;
+  reservationReleased?: boolean;
   paymentExpiresAt: Date;
   createdAt: Date;
   paidAt?: Date;
@@ -327,7 +331,7 @@ export class CaterlogStage1Engine {
 
     switch (cmd.type) {
       case "OPEN_DASHBOARD": {
-        const dashboardUrl = process.env.DASHBOARD_URL ?? "http://localhost:4000";
+        const dashboardUrl = process.env.DASHBOARD_URL ?? "http://localhost:3000";
         replyText = `🔐 *Your 1-Tap Dashboard Login Link:*\n${dashboardUrl}?magic_vendor=${this.vendor.slug}\n\n⏳ _Valid for 15 minutes._`;
         break;
       }
@@ -365,7 +369,7 @@ export class CaterlogStage1Engine {
       }
 
       case "SALES_SUMMARY": {
-        const b = this.getAnalyticsBreakdown();
+        const b = this.getAnalyticsBreakdown(cmd.range);
         replyText = [
           `📊 *Transactional Breakdown (${cmd.range.toUpperCase()})*`,
           `• Paid Orders: *${b.paidOrdersCount} (${formatNaira(b.paidGrossKobo)})*`,
@@ -387,8 +391,12 @@ export class CaterlogStage1Engine {
       }
 
       case "UPSERT_SHIPPING": {
-        const zone = this.upsertShippingZone(cmd.name, cmd.feeKobo);
-        replyText = `✅ *Shipping Zone Synced:*\n#${zone.code} *${zone.name}* → *${formatNaira(zone.feeKobo)}*`;
+        try {
+          const zone = this.upsertShippingZone(cmd.name, cmd.feeKobo);
+          replyText = `✅ *Shipping Zone Synced:*\n#${zone.code} *${zone.name}* → *${formatNaira(zone.feeKobo)}*`;
+        } catch (err) {
+          replyText = `⚠️ ${err instanceof Error ? err.message : String(err)}`;
+        }
         break;
       }
 
@@ -418,16 +426,20 @@ export class CaterlogStage1Engine {
       }
 
       case "CREATE_DISCOUNT": {
-        const disc = this.upsertDiscount({
-          code: cmd.code,
-          type: cmd.discountType,
-          value: cmd.value,
-        });
-        const label =
-          disc.type === "PERCENTAGE"
-            ? `${Number(disc.value) / 100}% off`
-            : `${formatNaira(disc.value)} off`;
-        replyText = `✅ *Discount Code Synced:* *${disc.code}* (${label})`;
+        try {
+          const disc = this.upsertDiscount({
+            code: cmd.code,
+            type: cmd.discountType,
+            value: cmd.value,
+          });
+          const label =
+            disc.type === "PERCENTAGE"
+              ? `${Number(disc.value) / 100}% off`
+              : `${formatNaira(disc.value)} off`;
+          replyText = `✅ *Discount Code Synced:* *${disc.code}* (${label})`;
+        } catch (err) {
+          replyText = `⚠️ ${err instanceof Error ? err.message : String(err)}`;
+        }
         break;
       }
 
@@ -440,31 +452,39 @@ export class CaterlogStage1Engine {
       }
 
       case "UPDATE_STOCK": {
-        const prod = this.updateProductStock(cmd.skuCode, cmd.stockTotal);
-        if (!prod) {
-          replyText = `⚠️ Product SKU *${cmd.skuCode}* not found.`;
-        } else {
-          const avail = Math.max(0, prod.stockTotal - prod.stockReserved);
-          replyText = `📦 *Inventory Synced:*\n*${prod.name}* (${prod.skuCode})\nTotal Stock: *${prod.stockTotal}* (${avail} available, ${prod.stockReserved} reserved)`;
+        try {
+          const prod = this.updateProductStock(cmd.skuCode, cmd.stockTotal);
+          if (!prod) {
+            replyText = `⚠️ Product SKU *${cmd.skuCode}* not found.`;
+          } else {
+            const avail = Math.max(0, prod.stockTotal - prod.stockReserved);
+            replyText = `📦 *Inventory Synced:*\n*${prod.name}* (${prod.skuCode})\nTotal Stock: *${prod.stockTotal}* (${avail} available, ${prod.stockReserved} reserved)`;
+          }
+        } catch (err) {
+          replyText = `⚠️ ${err instanceof Error ? err.message : String(err)}`;
         }
         break;
       }
 
       case "QUICK_ADD_PRODUCT": {
-        const prod = this.addProduct({
-          name: cmd.name,
-          basePriceKobo: cmd.priceKobo,
-          stockTotal: cmd.stockTotal,
-          primaryImageUrl: attachedImageUrl,
-        });
-        replyText = [
-          `✅ *New Product Added & Synced:*`,
-          `📦 *${prod.name}*`,
-          `🏷️ SKU: *${prod.skuCode}*`,
-          `💰 Price: *${formatNaira(prod.basePriceKobo)}*`,
-          `🔢 Stock: *${prod.stockTotal}*`,
-          `🔍 Status Fingerprint (pHash): \`${prod.imagePhash}\``,
-        ].join("\n");
+        try {
+          const prod = this.addProduct({
+            name: cmd.name,
+            basePriceKobo: cmd.priceKobo,
+            stockTotal: cmd.stockTotal,
+            primaryImageUrl: attachedImageUrl,
+          });
+          replyText = [
+            `✅ *New Product Added & Synced:*`,
+            `📦 *${prod.name}*`,
+            `🏷️ SKU: *${prod.skuCode}*`,
+            `💰 Price: *${formatNaira(prod.basePriceKobo)}*`,
+            `🔢 Stock: *${prod.stockTotal}*`,
+            `🔍 Status Fingerprint (pHash): \`${prod.imagePhash}\``,
+          ].join("\n");
+        } catch (err) {
+          replyText = `⚠️ ${err instanceof Error ? err.message : String(err)}`;
+        }
         break;
       }
 
@@ -491,10 +511,14 @@ export class CaterlogStage1Engine {
       }
 
       case "DISPATCH_ORDER": {
-        const ord = await this.dispatchOrder(cmd.shortCode, cmd.riderPhone);
-        replyText = ord
-          ? `🚚 Order *${ord.shortCode}* marked Out for Delivery! Buyer (${ord.customerPhone}) has been notified on WhatsApp.`
-          : `⚠️ Order *${cmd.shortCode}* not found or not yet paid.`;
+        try {
+          const ord = await this.dispatchOrder(cmd.shortCode, cmd.riderPhone);
+          replyText = ord
+            ? `🚚 Order *${ord.shortCode}* marked Out for Delivery! Buyer (${ord.customerPhone}) has been notified on WhatsApp.`
+            : `⚠️ Order *${cmd.shortCode}* not found.`;
+        } catch (err) {
+          replyText = `⚠️ ${err instanceof Error ? err.message : String(err)}`;
+        }
         break;
       }
 
@@ -717,7 +741,7 @@ export class CaterlogStage1Engine {
 
     // Check if a discount code is mentioned in this turn
     const mentionedDiscount = this.discounts
-      .filter((d) => d.isActive)
+      .filter((d) => this.isDiscountUsable(d))
       .find((d) => params.text.toUpperCase().includes(d.code));
 
     // CASE A: Buyer is already in `AWAITING_SHIPPING_ZONE` and just replied with a valid Shipping Zone!
@@ -892,7 +916,7 @@ export class CaterlogStage1Engine {
 
     const activeDiscount = params.discountCode
       ? this.discounts.find(
-          (d) => d.isActive && d.code.toUpperCase() === params.discountCode!.toUpperCase()
+          (d) => this.isDiscountUsable(d) && d.code.toUpperCase() === params.discountCode!.toUpperCase()
         )
       : undefined;
 
@@ -1007,6 +1031,14 @@ export class CaterlogStage1Engine {
     return newOrder;
   }
 
+  private isDiscountUsable(discount: RuntimeDiscount, now = new Date()): boolean {
+    return (
+      discount.isActive &&
+      (discount.maxUses === null || discount.usedCount < discount.maxUses) &&
+      (!discount.expiresAt || discount.expiresAt > now)
+    );
+  }
+
   private findProductInBuyerMessage(
     text: string,
     quotedStatusImagePhash?: string
@@ -1085,6 +1117,7 @@ export class CaterlogStage1Engine {
     order: RuntimeOrder;
     status: "PAID" | "PARTIALLY_PAID";
     remainingBalanceKobo: bigint;
+    overpaidAmountKobo: bigint;
   }> {
     if (!this.monnify.verifyWebhookSignature(params.rawBody, params.signatureHeader)) {
       throw new Error("Invalid Monnify HMAC-SHA512 webhook signature.");
@@ -1109,6 +1142,10 @@ export class CaterlogStage1Engine {
           order.totalAmountKobo > order.amountPaidKobo
             ? order.totalAmountKobo - order.amountPaidKobo
             : 0n,
+        overpaidAmountKobo:
+          order.amountPaidKobo > order.totalAmountKobo
+            ? order.amountPaidKobo - order.totalAmountKobo
+            : 0n,
       };
     }
     this.processedTxRefs.add(verified.providerTransactionRef);
@@ -1119,7 +1156,10 @@ export class CaterlogStage1Engine {
       verifiedIncomingKobo: verified.amountPaidKobo,
     });
 
+    assertValidOrderTransition(order.status, decision.nextStatus);
+
     order.amountPaidKobo = decision.newAmountPaidKobo;
+    order.overpaidAmountKobo = decision.overpaidAmountKobo;
     order.status = decision.nextStatus;
 
     const product = this.products.find((p) => p.id === order.productId);
@@ -1128,11 +1168,19 @@ export class CaterlogStage1Engine {
       order.paidAt = new Date();
       if (product) {
         product.stockTotal = Math.max(0, product.stockTotal - order.quantity);
-        product.stockReserved = Math.max(0, product.stockReserved - order.quantity);
+        // If the reservation expired earlier, the units were already released from
+        // `stockReserved`; only deduct from `stockTotal` in that case.
+        const reservedQuantity = order.reservationReleased ? 0 : order.quantity;
+        product.stockReserved = Math.max(0, product.stockReserved - reservedQuantity);
       }
 
-      const buyerReceipt = `✅ *Payment Confirmed!* (${formatNaira(decision.newAmountPaidKobo)})\n🧾 Receipt: *${order.shortCode}*\n📦 Item: *${order.productName}* ×${order.quantity}\n🚚 Delivery: *${order.shippingZoneName}*\n🏪 Vendor: *${this.vendor.businessName}*\n\nYour order is now being packed for dispatch!`;
-      const vendorAlert = `🔔 *PAID ORDER ${order.shortCode}!*\n💰 Verified Transfer: *${formatNaira(decision.newAmountPaidKobo)}* from ${verified.payerName ?? order.customerName}\n📦 Item: *${order.productName}* ×${order.quantity} (Remaining available stock: ${product ? product.stockTotal - product.stockReserved : 0})\n\nReply *dispatch ${order.shortCode} <riderPhone>* when handed to rider.`;
+      const overpayNote =
+        decision.overpaidAmountKobo > 0n
+          ? `\n💚 *Overpayment:* ${formatNaira(decision.overpaidAmountKobo)} extra was received. The vendor will refund or credit it.`
+          : "";
+
+      const buyerReceipt = `✅ *Payment Confirmed!* (${formatNaira(decision.newAmountPaidKobo)})\n🧾 Receipt: *${order.shortCode}*\n📦 Item: *${order.productName}* ×${order.quantity}\n🚚 Delivery: *${order.shippingZoneName}*\n🏪 Vendor: *${this.vendor.businessName}*\n\nYour order is now being packed for dispatch!${overpayNote}`;
+      const vendorAlert = `🔔 *PAID ORDER ${order.shortCode}!*\n💰 Verified Transfer: *${formatNaira(decision.newAmountPaidKobo)}* from ${verified.payerName ?? order.customerName}\n📦 Item: *${order.productName}* ×${order.quantity} (Remaining available stock: ${product ? product.stockTotal - product.stockReserved : 0})\n\nReply *dispatch ${order.shortCode} <riderPhone>* when handed to rider.${overpayNote}`;
 
       this.appendChat({
         channel: "BUYER_SHOP_WA",
@@ -1169,6 +1217,7 @@ export class CaterlogStage1Engine {
       order,
       status: decision.nextStatus,
       remainingBalanceKobo: decision.remainingBalanceKobo,
+      overpaidAmountKobo: decision.overpaidAmountKobo,
     };
   }
 
@@ -1183,7 +1232,10 @@ export class CaterlogStage1Engine {
       return undefined;
     }
 
+    assertValidOrderTransition(ord.status, "EXPIRED");
+
     ord.status = "EXPIRED";
+    ord.reservationReleased = true;
     const prod = this.products.find((p) => p.id === ord.productId);
     if (prod) {
       prod.stockReserved = Math.max(0, prod.stockReserved - ord.quantity);
@@ -1200,6 +1252,25 @@ export class CaterlogStage1Engine {
     return ord;
   }
 
+  /**
+   * Expires every unpaid/partially-paid reservation whose payment window has elapsed.
+   * Intended to be called by a lightweight interval (the in-memory Stage 1 engine has
+   * no durable queue yet; a Stage 2 worker will replace this).
+   */
+  public async expireOverdueOrders(now = new Date()): Promise<RuntimeOrder[]> {
+    const overdue = this.orders.filter(
+      (o) =>
+        (o.status === "PENDING_PAYMENT" || o.status === "PARTIALLY_PAID") &&
+        o.paymentExpiresAt <= now
+    );
+    const expired: RuntimeOrder[] = [];
+    for (const order of overdue) {
+      const result = await this.expireOrderReservation(order.shortCode);
+      if (result) expired.push(result);
+    }
+    return expired;
+  }
+
   // ---------------------------------------------------------
   // Shared Mutation Methods (Invoked by both WhatsApp & Web Dashboard)
   // ---------------------------------------------------------
@@ -1210,13 +1281,16 @@ export class CaterlogStage1Engine {
     reservationTtlMinutes?: number;
   }) {
     if (input.copilotMode) {
+      if (!["COPILOT", "FULL_AUTO", "MANUAL"].includes(input.copilotMode)) {
+        throw new Error(`Invalid Co-Pilot mode: ${input.copilotMode}`);
+      }
       this.vendor.copilotMode = input.copilotMode;
     }
-    if (input.copilotIdleSeconds !== undefined && input.copilotIdleSeconds >= 5) {
-      this.vendor.copilotIdleSeconds = input.copilotIdleSeconds;
+    if (input.copilotIdleSeconds !== undefined) {
+      this.vendor.copilotIdleSeconds = clamp(input.copilotIdleSeconds, 5, 600);
     }
-    if (input.reservationTtlMinutes !== undefined && input.reservationTtlMinutes >= 5) {
-      this.vendor.reservationTtlMinutes = input.reservationTtlMinutes;
+    if (input.reservationTtlMinutes !== undefined) {
+      this.vendor.reservationTtlMinutes = clamp(input.reservationTtlMinutes, 5, 180);
     }
     void this.broadcastStateChange();
     return this.vendor;
@@ -1225,7 +1299,15 @@ export class CaterlogStage1Engine {
   public updateProductStock(skuCode: string, stockTotal: number): RuntimeProduct | undefined {
     const prod = this.products.find((p) => p.skuCode.toUpperCase() === skuCode.toUpperCase());
     if (!prod) return undefined;
-    prod.stockTotal = Math.max(0, stockTotal);
+    if (!Number.isInteger(stockTotal) || stockTotal < 0) {
+      throw new Error("Stock must be a whole number greater than or equal to 0.");
+    }
+    if (stockTotal < prod.stockReserved) {
+      throw new Error(
+        `Cannot set stock to ${stockTotal} for "${prod.name}" because ${prod.stockReserved} unit(s) are currently reserved by buyers.`
+      );
+    }
+    prod.stockTotal = stockTotal;
     void this.broadcastStateChange();
     return prod;
   }
@@ -1239,24 +1321,45 @@ export class CaterlogStage1Engine {
     primaryImageUrl?: string;
     imagePhash?: string;
   }): RuntimeProduct {
+    const name = input.name?.trim() ?? "";
+    if (!name) {
+      throw new Error("Product name is required.");
+    }
+    if (input.basePriceKobo <= 0n) {
+      throw new Error("Product price must be greater than ₦0.");
+    }
+    if (!Number.isInteger(input.stockTotal) || input.stockTotal < 0) {
+      throw new Error("Stock must be a whole number greater than or equal to 0.");
+    }
+
     const skuCode = (
       input.skuCode && input.skuCode.trim() !== ""
         ? input.skuCode.trim()
         : `ITEM-0${this.products.length + 1}`
     ).toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9_-]{1,31}$/.test(skuCode)) {
+      throw new Error(
+        "SKU must be 2-32 characters using letters, numbers, hyphens or underscores."
+      );
+    }
 
     const resolvedImageUrl =
       input.primaryImageUrl && input.primaryImageUrl.trim() !== ""
         ? input.primaryImageUrl.trim()
-        : `https://placehold.co/600x600/064e3b/34d399?text=${encodeURIComponent(input.name.slice(0, 18))}`;
+        : `https://placehold.co/600x600/064e3b/34d399?text=${encodeURIComponent(name.slice(0, 18))}`;
 
     const resolvedPhash =
       input.imagePhash ??
-      computeDeterministicImagePhash(`${skuCode}:${input.name}:${resolvedImageUrl.slice(0, 256)}`);
+      computeDeterministicImagePhash(`${skuCode}:${name}:${resolvedImageUrl.slice(0, 256)}`);
 
     const existing = this.products.find((p) => p.skuCode === skuCode);
     if (existing) {
-      existing.name = input.name;
+      if (input.stockTotal < existing.stockReserved) {
+        throw new Error(
+          `Cannot set stock to ${input.stockTotal} for "${existing.name}" because ${existing.stockReserved} unit(s) are currently reserved by buyers.`
+        );
+      }
+      existing.name = name;
       existing.basePriceKobo = input.basePriceKobo;
       existing.stockTotal = input.stockTotal;
       if (input.primaryImageUrl) {
@@ -1270,9 +1373,9 @@ export class CaterlogStage1Engine {
     const created: RuntimeProduct = {
       id: `prod-${Date.now()}`,
       skuCode,
-      name: input.name,
-      description: `${input.name} — available via WhatsApp & Caterlog`,
-      category: input.category ?? "fashion",
+      name,
+      description: `${name} — available via WhatsApp & Caterlog`,
+      category: input.category?.trim() || "fashion",
       basePriceKobo: input.basePriceKobo,
       primaryImageUrl: resolvedImageUrl,
       imagePhash: resolvedPhash,
@@ -1285,8 +1388,16 @@ export class CaterlogStage1Engine {
   }
 
   public upsertShippingZone(name: string, feeKobo: bigint): RuntimeShippingZone {
+    const cleanName = name?.trim() ?? "";
+    if (!cleanName) {
+      throw new Error("Shipping zone name is required.");
+    }
+    if (feeKobo < 0n) {
+      throw new Error("Shipping fee cannot be negative.");
+    }
+
     const existing = this.shippingZones.find(
-      (z) => z.name.toLowerCase() === name.trim().toLowerCase()
+      (z) => z.name.toLowerCase() === cleanName.toLowerCase()
     );
     if (existing) {
       existing.feeKobo = feeKobo;
@@ -1299,7 +1410,7 @@ export class CaterlogStage1Engine {
     const created: RuntimeShippingZone = {
       id: `sz-${Date.now()}`,
       code: nextCode,
-      name: name.trim(),
+      name: cleanName,
       feeKobo,
       isActive: true,
     };
@@ -1321,7 +1432,20 @@ export class CaterlogStage1Engine {
     type: "PERCENTAGE" | "FLAT_KOBO";
     value: bigint;
   }): RuntimeDiscount {
-    const cleanCode = input.code.trim().toUpperCase();
+    const cleanCode = input.code?.trim().toUpperCase() ?? "";
+    if (!cleanCode) {
+      throw new Error("Discount code cannot be empty.");
+    }
+    if (input.type !== "PERCENTAGE" && input.type !== "FLAT_KOBO") {
+      throw new Error(`Unsupported discount type: ${input.type}`);
+    }
+    if (input.type === "PERCENTAGE" && (input.value <= 0n || input.value > 10000n)) {
+      throw new Error("Percentage discounts must be between 0.01% and 100%.");
+    }
+    if (input.type === "FLAT_KOBO" && input.value <= 0n) {
+      throw new Error("Flat discounts must be greater than ₦0.");
+    }
+
     const existing = this.discounts.find((d) => d.code === cleanCode);
     if (existing) {
       existing.type = input.type;
@@ -1362,9 +1486,12 @@ export class CaterlogStage1Engine {
     const ord = this.orders.find(
       (o) => o.shortCode.toUpperCase() === shortCode.trim().toUpperCase()
     );
-    if (!ord || (ord.status !== "PAID" && ord.status !== "PROCESSING")) {
+    if (!ord) {
       return undefined;
     }
+
+    assertValidOrderTransition(ord.status, "OUT_FOR_DELIVERY");
+
     ord.status = "OUT_FOR_DELIVERY";
     ord.riderPhone = riderPhone;
     ord.dispatchedAt = new Date();
@@ -1382,7 +1509,15 @@ export class CaterlogStage1Engine {
     return ord;
   }
 
-  public getAnalyticsBreakdown() {
+  public getAnalyticsBreakdown(range: "today" | "week" | "month" = "month") {
+    const now = new Date();
+    const cutoff =
+      range === "today"
+        ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        : range === "week"
+          ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+          : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
     let paidOrdersCount = 0;
     let paidGrossKobo = 0n;
     let pendingOrdersCount = 0;
@@ -1392,6 +1527,7 @@ export class CaterlogStage1Engine {
     let netProductRevenueKobo = 0n;
 
     for (const o of this.orders) {
+      if (o.createdAt < cutoff) continue;
       if (o.status === "PAID" || o.status === "OUT_FOR_DELIVERY" || o.status === "FULFILLED") {
         paidOrdersCount += 1;
         paidGrossKobo += o.amountPaidKobo;
@@ -1471,6 +1607,9 @@ export class CaterlogStage1Engine {
         remainingBalanceFormatted: formatNaira(
           o.totalAmountKobo > o.amountPaidKobo ? o.totalAmountKobo - o.amountPaidKobo : 0n
         ),
+        overpaidAmountFormatted: formatNaira(
+          o.amountPaidKobo > o.totalAmountKobo ? o.amountPaidKobo - o.totalAmountKobo : 0n
+        ),
       })),
       chatMessages: this.chatMessages.slice(-50),
     };
@@ -1495,4 +1634,9 @@ export class CaterlogStage1Engine {
       occurredAt: new Date(),
     });
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }

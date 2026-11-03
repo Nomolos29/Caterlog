@@ -7,12 +7,16 @@
   "scripts": {
     "dev": "node --experimental-strip-types --watch src/server.ts",
     "start": "node --experimental-strip-types src/server.ts",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts"
+    "test": "node --experimental-strip-types --test src/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@caterlog/commerce-core": "*",
     "@caterlog/integrations": "*",
     "@caterlog/database": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0"
   }
 }
 

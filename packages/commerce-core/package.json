@@ -13,7 +13,8 @@
     "test": "node --experimental-strip-types --test src/**/*.test.ts"
   },
   "dependencies": {
-    "@caterlog/database": "*"
+    "@caterlog/database": "*",
+    "@caterlog/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
