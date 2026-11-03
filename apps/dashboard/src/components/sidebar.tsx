@@ -10,6 +10,8 @@ import {
   MarketBoostIcon,
   SettingsIcon,
   AnalyticsIcon,
+  TeamIcon,
+  ShieldCheckIcon,
   PlusIcon,
 } from "./icons";
 
@@ -22,6 +24,8 @@ export type NavView =
   | "payments"
   | "market-boost"
   | "analytics"
+  | "team"
+  | "verification"
   | "settings"
   | "payment-links";
 
@@ -55,6 +59,8 @@ export function Sidebar({
     { id: "payments", label: "Payments", icon: <PaymentsIcon className="w-5 h-5" /> },
     { id: "market-boost", label: "Market Boost", icon: <MarketBoostIcon className="w-5 h-5" /> },
     { id: "analytics", label: "Analytics", icon: <AnalyticsIcon className="w-5 h-5" /> },
+    { id: "team", label: "Team & Audit", icon: <TeamIcon className="w-5 h-5" /> },
+    { id: "verification", label: "Verification", icon: <ShieldCheckIcon className="w-5 h-5" /> },
     { id: "settings", label: "Settings", icon: <SettingsIcon className="w-5 h-5" /> },
   ];
 
@@ -81,7 +87,7 @@ export function Sidebar({
           {mobileOpen && (
             <button
               onClick={onCloseMobile}
-              className="lg:hidden text-gray-400 hover:text-gray-600 p-1"
+              className="lg:hidden text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 cursor-pointer transition-all"
             >
               ✕
             </button>
@@ -96,10 +102,10 @@ export function Sidebar({
               <button
                 key={item.id}
                 onClick={() => handleItemClick(item.id)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium cursor-pointer transition-all active:scale-[0.98] ${
                   isActive
                     ? "bg-[#eef2ff] text-[#1e1b4b] font-semibold shadow-2xs"
-                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -120,7 +126,7 @@ export function Sidebar({
       {/* Footer Navigation & Workspace Switcher */}
       <div className="p-4 space-y-3">
         {/* Workspace Card */}
-        <div className="bg-[#f3f4f8] rounded-xl p-3">
+        <div className="bg-[#f3f4f8] rounded-xl p-3 border border-transparent hover:border-gray-200 transition-colors">
           <div className="font-semibold text-xs text-gray-900">
             {isReseller ? "Nia Stores" : "Aroko Wholesale"}
           </div>
@@ -129,7 +135,7 @@ export function Sidebar({
           </div>
           <button
             onClick={onToggleWorkspace}
-            className="text-[11px] font-medium text-emerald-700 hover:text-emerald-800 flex items-center gap-1 mt-1 transition-colors"
+            className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-1 mt-1 transition-colors cursor-pointer"
           >
             <span>Switch account</span>
             <span>↗</span>
@@ -142,7 +148,7 @@ export function Sidebar({
             onOpenNewOrder?.();
             if (onCloseMobile) onCloseMobile();
           }}
-          className="w-full bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-medium text-xs py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-all shadow-2xs"
+          className="w-full bg-[#0d5c3a] hover:bg-[#0b4b2f] active:scale-[0.98] text-white font-medium text-xs py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-all shadow-2xs cursor-pointer hover:shadow-xs"
         >
           <PlusIcon className="w-3.5 h-3.5 stroke-[2.5]" />
           <span>New Order</span>
@@ -153,7 +159,7 @@ export function Sidebar({
           href="https://wa.me/2348000000000"
           target="_blank"
           rel="noreferrer"
-          className="flex items-center gap-2.5 px-2 py-1.5 text-xs text-gray-600 hover:text-gray-900 transition-colors"
+          className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
         >
           <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10" />

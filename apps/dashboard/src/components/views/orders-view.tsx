@@ -124,7 +124,7 @@ export function OrdersView({
           <div className="flex items-center gap-2 self-start sm:self-center">
             <button
               onClick={() => setShowPrintModal(true)}
-              className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg shadow-xs transition-colors"
+              className="px-3.5 py-1.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
             >
               Print slip
             </button>
@@ -134,7 +134,7 @@ export function OrdersView({
                   onNavigateToPayments("detail", selectedOrder.shortCode);
                 }
               }}
-              className="px-3.5 py-1.5 border border-rose-200 hover:bg-rose-50 text-rose-700 text-xs font-semibold rounded-lg shadow-xs transition-colors"
+              className="px-3.5 py-1.5 border border-rose-300 hover:border-rose-500 hover:bg-rose-50 text-rose-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
             >
               Review refund
             </button>
@@ -251,7 +251,7 @@ export function OrdersView({
                 <button
                   onClick={handleRequestSupplierUpdate}
                   disabled={supplierRequested}
-                  className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-75 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
+                  className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-75 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
                 >
                   {supplierRequested ? "✓ Update Dispatched to Aroko" : "Request supplier update"}
                 </button>
@@ -261,7 +261,7 @@ export function OrdersView({
                   )}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5"
+                  className="px-4 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
                 >
                   <span>Message customer on WhatsApp</span>
                   <span>↗</span>
@@ -402,7 +402,7 @@ export function OrdersView({
                     onNavigateToPayments("detail", "CT-1042");
                   }
                 }}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
+                className="w-full py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
               >
                 View split transaction →
               </button>
@@ -416,7 +416,7 @@ export function OrdersView({
             <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
               <div className="flex justify-between items-center border-b pb-3">
                 <h3 className="font-bold text-gray-900 text-sm">Fulfillment Pickup Slip</h3>
-                <button onClick={() => setShowPrintModal(false)} className="text-gray-400 hover:text-gray-600">
+                <button onClick={() => setShowPrintModal(false)} className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer">
                   ✕
                 </button>
               </div>
@@ -436,13 +436,13 @@ export function OrdersView({
               <div className="flex gap-2">
                 <button
                   onClick={() => window.print()}
-                  className="flex-1 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg"
+                  className="flex-1 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
                 >
                   Print Slip
                 </button>
                 <button
                   onClick={() => setShowPrintModal(false)}
-                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg"
+                  className="px-4 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
                 >
                   Close
                 </button>
@@ -468,14 +468,14 @@ export function OrdersView({
         <div className="flex items-center gap-2 self-start sm:self-center">
           <button
             onClick={() => setShowFilterModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-xs transition-colors"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
           >
             <FilterIcon className="w-3.5 h-3.5 text-gray-500" />
             <span>Filter</span>
           </button>
           <button
             onClick={handleExportOrders}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-xs transition-colors"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
           >
             <ExportIcon className="w-3.5 h-3.5 text-gray-500" />
             <span>Export</span>
@@ -495,10 +495,10 @@ export function OrdersView({
           <button
             key={tab.id}
             onClick={() => setStatusFilter(tab.id)}
-            className={`pb-3 border-b-2 font-medium transition-all whitespace-nowrap ${
+            className={`pb-3 border-b-2 font-medium transition-all whitespace-nowrap cursor-pointer active:scale-95 ${
               statusFilter === tab.id
                 ? "border-emerald-600 text-emerald-600 font-bold"
-                : "border-transparent text-gray-500 hover:text-gray-900"
+                : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
             }`}
           >
             {tab.label}
@@ -586,7 +586,7 @@ export function OrdersView({
                           e.stopPropagation();
                           onSelectOrder(o);
                         }}
-                        className="px-3 py-1 border border-gray-200 hover:bg-gray-100 text-gray-700 text-xs font-medium rounded-lg"
+                        className="px-3 py-1 border border-gray-300 hover:border-emerald-600 hover:bg-emerald-50 text-gray-700 hover:text-emerald-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
                       >
                         View detail →
                       </button>
@@ -605,7 +605,7 @@ export function OrdersView({
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-xl">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-gray-900 text-sm">Filter Orders</h3>
-              <button onClick={() => setShowFilterModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowFilterModal(false)} className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer">
                 ✕
               </button>
             </div>
@@ -615,7 +615,7 @@ export function OrdersView({
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full p-2 border rounded-lg bg-white"
+                  className="w-full p-2 border rounded-lg bg-white cursor-pointer"
                 >
                   <option value="ALL">All Statuses</option>
                   <option value="PAID">Paid</option>
@@ -632,13 +632,13 @@ export function OrdersView({
                   setSearch("");
                   setShowFilterModal(false);
                 }}
-                className="flex-1 py-2 border border-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-50"
+                className="flex-1 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
               >
                 Reset
               </button>
               <button
                 onClick={() => setShowFilterModal(false)}
-                className="flex-1 py-2 bg-[#0d5c3a] text-white text-xs font-semibold rounded-lg hover:bg-[#0b4b2f]"
+                className="flex-1 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
               >
                 Apply Filters
               </button>

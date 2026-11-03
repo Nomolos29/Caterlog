@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -10,11 +10,110 @@ body {
 }
 
 body {
-  background-color: #0b0f19;
-  color: #f3f4f6;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background-color: #f9fafb;
+  color: #111827;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* Ensure cursor pointer on all interactive elements */
+button,
+[role="button"],
+a,
+select,
+summary,
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+input[type="checkbox"],
+input[type="radio"],
+label[for],
+.cursor-pointer {
+  cursor: pointer !important;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"],
+input:disabled,
+select:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.6;
+}
+
+/* Physical click depression feedback on all buttons */
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]),
+a:active {
+  transform: scale(0.97);
+}
+
+/* Outline button hover indicators and interactions */
+button[class*="border"],
+a[class*="border"] {
+  transition: all 140ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* For neutral outline buttons (border-gray-*, border-slate-*, or general border) */
+button[class*="border"]:not([class*="bg-[#0d5c3a]"]):not([class*="bg-emerald-600"]):not([class*="bg-emerald-700"]):not([class*="bg-rose"]):not([class*="bg-blue"]):not([class*="bg-gray-9"]):not([class*="bg-black"]):hover:not(:disabled),
+a[class*="border"]:not([class*="bg-[#0d5c3a]"]):not([class*="bg-emerald-600"]):not([class*="bg-emerald-700"]):not([class*="bg-rose"]):not([class*="bg-blue"]):not([class*="bg-gray-9"]):not([class*="bg-black"]):hover {
+  border-color: #6b7280 !important;
+  background-color: #f3f4f6;
+  color: #111827;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+}
+
+/* Specific colored outline buttons */
+button[class*="border-emerald"]:hover:not(:disabled),
+a[class*="border-emerald"]:hover {
+  border-color: #059669 !important;
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+  box-shadow: 0 1px 3px 0 rgba(16, 185, 129, 0.15);
+}
+
+button[class*="border-rose"]:hover:not(:disabled),
+a[class*="border-rose"]:hover {
+  border-color: #e11d48 !important;
+  background-color: #fff1f2 !important;
+  color: #9f1239 !important;
+  box-shadow: 0 1px 3px 0 rgba(225, 29, 72, 0.15);
+}
+
+button[class*="border-blue"]:hover:not(:disabled),
+a[class*="border-blue"]:hover {
+  border-color: #2563eb !important;
+  background-color: #eff6ff !important;
+  color: #1e40af !important;
+}
+
+/* Solid primary button hover elevation */
+button[class*="bg-[#0d5c3a]"]:hover:not(:disabled),
+button[class*="bg-emerald-600"]:hover:not(:disabled),
+button[class*="bg-emerald-700"]:hover:not(:disabled) {
+  filter: brightness(0.93);
+  box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.1);
+}
+
+/* Table rows that are interactive */
+tr[class*="hover:"],
+tr[onClick] {
+  cursor: pointer;
+}
+
+/* Interactive Card / Row hover states */
+.interactive-card {
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+
+.interactive-card:hover {
+  transform: translateY(-1px);
+  border-color: #9ca3af;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+}
+
+/* WhatsApp chat simulator styles */
 .wa-bubble-bot {
   background: #1f2937;
   border-left: 3px solid #10b981;
@@ -37,8 +136,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: #cbd5e1;
   border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 @keyframes fade-up {

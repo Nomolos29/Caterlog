@@ -244,10 +244,16 @@ export function TopNav({
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-gray-900 truncate">{vendor.businessName}</div>
-                    <div className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        onNavigateToView?.("verification");
+                        setProfileOpen(false);
+                      }}
+                      className="text-[11px] text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1 cursor-pointer"
+                    >
                       <CheckIcon className="w-3 h-3" />
-                      <span>CAC Verified Merchant</span>
-                    </div>
+                      <span>CAC Verified Merchant →</span>
+                    </button>
                   </div>
                 </div>
 
@@ -257,7 +263,7 @@ export function TopNav({
                       onToggleWorkspace?.();
                       setProfileOpen(false);
                     }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center justify-between cursor-pointer"
                   >
                     <span>Switch to {activeWorkspace === "reseller" ? "Aroko Wholesale" : "Nia Stores"}</span>
                     <span className="text-[10px] text-gray-400 font-mono">↗</span>
@@ -265,10 +271,30 @@ export function TopNav({
 
                   <button
                     onClick={() => {
+                      onNavigateToView?.("verification");
+                      setProfileOpen(false);
+                    }}
+                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+                  >
+                    Business Verification (KYC)
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      onNavigateToView?.("team");
+                      setProfileOpen(false);
+                    }}
+                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+                  >
+                    Team & Activity Audit Log
+                  </button>
+
+                  <button
+                    onClick={() => {
                       onNavigateToView?.("settings");
                       setProfileOpen(false);
                     }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
                   >
                     Settings & Integrations
                   </button>
