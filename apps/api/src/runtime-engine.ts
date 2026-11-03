@@ -14,8 +14,19 @@ import {
   shouldExecuteScheduledTakeover,
   type DomainCopilotMode,
   type DomainOrderStatus,
+  type ServerVerifiedPaymentRecord,
 } from "@caterlog/commerce-core";
-import { MonnifyPaymentAdapter, WhatsAppCloudAdapter } from "@caterlog/integrations";
+import {
+  assertValidIntegrationConfig,
+  describeIntegrationConfig,
+  MonnifyPaymentAdapter,
+  resolveIntegrationConfig,
+  WhatsAppCatalogAdapter,
+  WhatsAppCloudAdapter,
+  type CatalogSyncResult,
+  type EnvLike,
+  type IntegrationConfig,
+} from "@caterlog/integrations";
 
 export interface RuntimeProduct {
   id: string;
@@ -114,10 +125,21 @@ export function computeDeterministicImagePhash(imageSource: string): string {
   return crypto.createHash("sha256").update(imageSource.trim()).digest("hex").slice(0, 16);
 }
 
+export interface PaymentReconciliationResult {
+  order: RuntimeOrder;
+  status: "PAID" | "PARTIALLY_PAID" | "PENDING";
+  remainingBalanceKobo: bigint;
+  overpaidAmountKobo: bigint;
+  /** False when the payment was a duplicate or has not settled yet. */
+  applied: boolean;
+}
+
 export class CaterlogStage1Engine {
   public readonly eventBus = new InMemoryDomainEventBus();
   public readonly monnify: MonnifyPaymentAdapter;
   public readonly whatsapp: WhatsAppCloudAdapter;
+  public readonly catalog: WhatsAppCatalogAdapter;
+  public readonly integrationConfig: IntegrationConfig;
 
   public vendor = {
     id: "v-amaka-001",
@@ -290,22 +312,39 @@ export class CaterlogStage1Engine {
   private readonly activeCopilotTimers = new Map<string, NodeJS.Timeout>();
   private lastVendorReplyInBuyerThreadAt: Date | null = null;
 
-  constructor() {
-    this.monnify = new MonnifyPaymentAdapter({
-      baseUrl: process.env.MONNIFY_BASE_URL ?? "https://sandbox.monnify.com",
-      apiKey: process.env.MONNIFY_API_KEY ?? "MK_TEST_PLACEHOLDER",
-      secretKey: process.env.MONNIFY_SECRET_KEY ?? "SK_TEST_PLACEHOLDER",
-      contractCode: process.env.MONNIFY_CONTRACT_CODE ?? "1234567890",
-      sandboxMock: (process.env.MONNIFY_SANDBOX_MOCK ?? "true") !== "false",
-    });
+  constructor(env: EnvLike = process.env) {
+    this.integrationConfig = resolveIntegrationConfig(env);
+    // Mock mode is always allowed; sandbox/live fail fast on missing credentials.
+    assertValidIntegrationConfig(this.integrationConfig);
 
-    this.whatsapp = new WhatsAppCloudAdapter({
-      accessToken: process.env.WHATSAPP_ACCESS_TOKEN ?? "EAAG_PLACEHOLDER",
-      defaultPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "105992837465001",
-      appSecret: process.env.WHATSAPP_APP_SECRET ?? "whatsapp-app-secret-placeholder",
-      verifyToken: process.env.WHATSAPP_VERIFY_TOKEN ?? "caterlog-whatsapp-verify-token",
-      sandboxMock: (process.env.WHATSAPP_SANDBOX_MOCK ?? "true") !== "false",
+    this.monnify = MonnifyPaymentAdapter.fromConfig(this.integrationConfig.monnify);
+    this.whatsapp = WhatsAppCloudAdapter.fromConfig(this.integrationConfig.whatsapp);
+    this.catalog = WhatsAppCatalogAdapter.fromConfig(this.integrationConfig.catalog, {
+      brand: this.vendor.businessName,
+      productUrlBase: env.CATALOG_PRODUCT_URL_BASE,
     });
+  }
+
+  /**
+   * Redacted integration modes + credential readiness for the dashboard header.
+   */
+  public getIntegrationStatus() {
+    const described = describeIntegrationConfig(this.integrationConfig);
+    return {
+      ...described,
+      monnify: {
+        ...described.monnify,
+        runtime: this.monnify.getIntegrationStatus(),
+      },
+      whatsapp: {
+        ...described.whatsapp,
+        runtime: this.whatsapp.getIntegrationStatus(),
+      },
+      catalog: {
+        ...described.catalog,
+        runtime: this.catalog.getIntegrationStatus(),
+      },
+    };
   }
 
   /**
@@ -1113,12 +1152,7 @@ export class CaterlogStage1Engine {
     rawBody: string;
     signatureHeader?: string;
     providerTransactionRef: string;
-  }): Promise<{
-    order: RuntimeOrder;
-    status: "PAID" | "PARTIALLY_PAID";
-    remainingBalanceKobo: bigint;
-    overpaidAmountKobo: bigint;
-  }> {
+  }): Promise<PaymentReconciliationResult> {
     if (!this.monnify.verifyWebhookSignature(params.rawBody, params.signatureHeader)) {
       throw new Error("Invalid Monnify HMAC-SHA512 webhook signature.");
     }
@@ -1127,17 +1161,29 @@ export class CaterlogStage1Engine {
       params.providerTransactionRef
     );
 
-    const order = this.orders.find(
-      (o) => o.invoiceReference === verified.invoiceReference
-    );
-    if (!order) {
-      throw new Error(`Order not found for invoiceReference: ${verified.invoiceReference}`);
-    }
+    return this.applyVerifiedPayment(verified);
+  }
 
-    if (this.processedTxRefs.has(verified.providerTransactionRef)) {
+  /**
+   * Polling fallback for local/live testing: asks Monnify directly whether the
+   * order's invoice has been paid. Returns `undefined` when the order is unknown
+   * and a `PENDING` result when no completed transfer exists yet.
+   */
+  public async verifyOrderPayment(
+    shortCode: string
+  ): Promise<PaymentReconciliationResult | undefined> {
+    const order = this.orders.find(
+      (o) => o.shortCode.toUpperCase() === shortCode.trim().toUpperCase()
+    );
+    if (!order) return undefined;
+
+    const verified = await this.monnify.verifyPaymentByInvoiceReference(
+      order.invoiceReference
+    );
+    if (!verified) {
       return {
         order,
-        status: order.status === "PARTIALLY_PAID" ? "PARTIALLY_PAID" : "PAID",
+        status: "PENDING",
         remainingBalanceKobo:
           order.totalAmountKobo > order.amountPaidKobo
             ? order.totalAmountKobo - order.amountPaidKobo
@@ -1146,6 +1192,57 @@ export class CaterlogStage1Engine {
           order.amountPaidKobo > order.totalAmountKobo
             ? order.amountPaidKobo - order.totalAmountKobo
             : 0n,
+        applied: false,
+      };
+    }
+
+    return this.applyVerifiedPayment(verified);
+  }
+
+  /**
+   * Applies an already server-verified payment record. Shared by the webhook
+   * path and the manual/polling verification path.
+   */
+  public async applyVerifiedPayment(
+    verified: ServerVerifiedPaymentRecord
+  ): Promise<PaymentReconciliationResult> {
+    const order = this.orders.find(
+      (o) =>
+        o.invoiceReference === verified.invoiceReference ||
+        o.invoiceReference === verified.paymentReference
+    );
+    if (!order) {
+      throw new Error(
+        `Order not found for invoiceReference: ${verified.invoiceReference || verified.paymentReference}`
+      );
+    }
+
+    const outstanding = () => ({
+      order,
+      remainingBalanceKobo:
+        order.totalAmountKobo > order.amountPaidKobo
+          ? order.totalAmountKobo - order.amountPaidKobo
+          : 0n,
+      overpaidAmountKobo:
+        order.amountPaidKobo > order.totalAmountKobo
+          ? order.amountPaidKobo - order.totalAmountKobo
+          : 0n,
+    });
+
+    // Only settled transfers move an order; PENDING/FAILED records are informational.
+    if (
+      verified.paymentStatus !== "PAID" &&
+      verified.paymentStatus !== "OVERPAID" &&
+      verified.paymentStatus !== "PARTIALLY_PAID"
+    ) {
+      return { ...outstanding(), status: "PENDING", applied: false };
+    }
+
+    if (this.processedTxRefs.has(verified.providerTransactionRef)) {
+      return {
+        ...outstanding(),
+        status: order.status === "PARTIALLY_PAID" ? "PARTIALLY_PAID" : "PAID",
+        applied: false,
       };
     }
     this.processedTxRefs.add(verified.providerTransactionRef);
@@ -1218,8 +1315,51 @@ export class CaterlogStage1Engine {
       status: decision.nextStatus,
       remainingBalanceKobo: decision.remainingBalanceKobo,
       overpaidAmountKobo: decision.overpaidAmountKobo,
+      applied: true,
     };
   }
+
+  /**
+   * Pushes the current inventory to the WhatsApp Business catalog.
+   * Mock mode publishes to an in-memory catalog; live mode calls the Meta Graph API.
+   */
+  public async syncWhatsAppCatalog(options: {
+    deleteMissing?: boolean;
+  } = {}): Promise<CatalogSyncResult> {
+    const result = await this.catalog.syncProducts(
+      this.products.map((product) => ({
+        skuCode: product.skuCode,
+        name: product.name,
+        description: product.description,
+        basePriceKobo: product.basePriceKobo,
+        stockAvailable: Math.max(0, product.stockTotal - product.stockReserved),
+        primaryImageUrl: product.primaryImageUrl,
+        category: product.category,
+        brand: this.vendor.businessName,
+      })),
+      {
+        deleteMissing: options.deleteMissing ?? true,
+        existingSkus: this.products.map((product) => product.skuCode),
+      }
+    );
+
+    const failureNote =
+      result.failed.length > 0
+        ? `\n⚠️ ${result.failed.length} item(s) failed: ${result.failed
+            .map((failure) => `${failure.skuCode} (${failure.error})`)
+            .join(", ")}`
+        : "";
+    this.appendChat({
+      channel: "VENDOR_ADMIN_WA",
+      sender: "CATERLOG_BOT",
+      fromPhone: "CATERLOG",
+      text: `🛍️ *WhatsApp Catalog Sync (${result.mode})*\nPublished ${result.upserted}/${result.attempted} product(s) to catalog ${result.catalogId ?? "(mock)"}.${failureNote}`,
+    });
+
+    await this.broadcastStateChange();
+    return result;
+  }
+
 
   /**
    * Expires an unpaid order reservation and releases its locked inventory back to available stock.
@@ -1612,6 +1752,12 @@ export class CaterlogStage1Engine {
         ),
       })),
       chatMessages: this.chatMessages.slice(-50),
+      integrations: this.getIntegrationStatus(),
+      catalogSync: {
+        mode: this.catalog.getMode(),
+        lastSyncedAt: this.catalog.getIntegrationStatus().lastSyncedAt,
+        publishedItems: this.catalog.getIntegrationStatus().publishedItems,
+      },
     };
   }
 

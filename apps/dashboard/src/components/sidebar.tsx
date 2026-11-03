@@ -1,0 +1,143 @@
+import React from "react";
+import {
+  CaterlogIcon,
+  OverviewIcon,
+  OrdersIcon,
+  ProductsIcon,
+  NetworkIcon,
+  CustomersIcon,
+  PaymentsIcon,
+  MarketBoostIcon,
+  SettingsIcon,
+  PlusIcon,
+} from "./icons";
+
+export type NavView =
+  | "overview"
+  | "orders"
+  | "products"
+  | "network"
+  | "customers"
+  | "payments"
+  | "market-boost"
+  | "settings"
+  | "payment-links";
+
+interface SidebarProps {
+  currentView: NavView;
+  onSelectView: (view: NavView) => void;
+  pendingCount?: number;
+  onOpenNewOrder?: () => void;
+  activeWorkspace?: "reseller" | "supplier";
+  onToggleWorkspace?: () => void;
+}
+
+export function Sidebar({
+  currentView,
+  onSelectView,
+  pendingCount = 0,
+  onOpenNewOrder,
+  activeWorkspace = "reseller",
+  onToggleWorkspace,
+}: SidebarProps) {
+  const navItems: Array<{ id: NavView; label: string; icon: React.ReactNode; badge?: number }> = [
+    { id: "overview", label: "Overview", icon: <OverviewIcon className="w-5 h-5" /> },
+    { id: "orders", label: "Orders", icon: <OrdersIcon className="w-5 h-5" />, badge: pendingCount > 0 ? pendingCount : undefined },
+    { id: "products", label: "Products", icon: <ProductsIcon className="w-5 h-5" /> },
+    { id: "network", label: "Network", icon: <NetworkIcon className="w-5 h-5" /> },
+    { id: "customers", label: "Customers", icon: <CustomersIcon className="w-5 h-5" /> },
+    { id: "payments", label: "Payments", icon: <PaymentsIcon className="w-5 h-5" /> },
+    { id: "market-boost", label: "Market Boost", icon: <MarketBoostIcon className="w-5 h-5" /> },
+    { id: "settings", label: "Settings", icon: <SettingsIcon className="w-5 h-5" /> },
+  ];
+
+  const isReseller = activeWorkspace === "reseller";
+
+  return (
+    <aside className="w-64 bg-white border-r border-gray-100 flex flex-col justify-between shrink-0 min-h-screen select-none">
+      <div>
+        {/* Brand Header */}
+        <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-3">
+          <CaterlogIcon className="w-8 h-8 shrink-0" />
+          <div>
+            <div className="font-bold text-gray-900 tracking-tight text-lg leading-tight">Caterlog</div>
+            <div className="text-[10px] font-semibold tracking-wider uppercase text-gray-400">BUSINESS MANAGER</div>
+          </div>
+        </div>
+
+        {/* Main Navigation List */}
+        <nav className="p-3 space-y-1">
+          {navItems.map((item) => {
+            const isActive = currentView === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelectView(item.id)}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  isActive
+                    ? "bg-[#eef2ff] text-[#1e1b4b] font-semibold shadow-xs"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={isActive ? "text-[#1e1b4b]" : "text-gray-400"}>{item.icon}</span>
+                  <span>{item.label}</span>
+                </div>
+                {item.badge ? (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    {item.badge}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Footer Navigation & Workspace Switcher */}
+      <div className="p-4 space-y-3">
+        {/* Workspace Card */}
+        <div className="bg-[#f3f4f8] rounded-xl p-3">
+          <div className="font-semibold text-xs text-gray-900">
+            {isReseller ? "Nia Stores" : "Aroko Wholesale"}
+          </div>
+          <div className="text-[11px] text-gray-500 mt-0.5">
+            {isReseller ? "Reseller workspace · NGN" : "Supplier workspace · NGN"}
+          </div>
+          <button
+            onClick={onToggleWorkspace}
+            className="text-[11px] font-medium text-emerald-700 hover:text-emerald-800 flex items-center gap-1 mt-1 transition-colors"
+          >
+            <span>Switch account</span>
+            <span>↗</span>
+          </button>
+        </div>
+
+        {/* Solid Green Primary Action Button */}
+        <button
+          onClick={onOpenNewOrder}
+          className="w-full bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-medium text-xs py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs"
+        >
+          <PlusIcon className="w-3.5 h-3.5 stroke-[2.5]" />
+          <span>New Order</span>
+        </button>
+
+        {/* Help Center */}
+        <a
+          href="https://wa.me/2348000000000"
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2.5 px-2 py-1.5 text-xs text-gray-600 hover:text-gray-900 transition-colors"
+        >
+          <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <span>Help Center</span>
+        </a>
+      </div>
+    </aside>
+  );
+}
+

@@ -1,0 +1,287 @@
+import React, { useState } from "react";
+import type { VendorAnalytics, OrderItem, VendorProfile } from "@/lib/types";
+import { ClockIcon, CheckIcon, WhatsAppBadgeIcon } from "../icons";
+
+interface OverviewViewProps {
+  analytics: VendorAnalytics;
+  vendor: VendorProfile;
+  orders: OrderItem[];
+  onSelectOrder?: (order: OrderItem) => void;
+  onViewAllOrders?: () => void;
+}
+
+export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewAllOrders }: OverviewViewProps) {
+  const [period, setPeriod] = useState<"7D" | "30D" | "1Y">("30D");
+
+  // Derive counts based on orders
+  const pendingOrders = orders.filter((o) => o.status === "PENDING_PAYMENT" || o.status === "PARTIALLY_PAID");
+  const paidOrders = orders.filter((o) => o.status === "PAID");
+  const processingOrders = orders.filter((o) => o.status === "PROCESSING" || o.status === "OUT_FOR_DELIVERY");
+
+  // Needs Attention: Unpaid or recently active pending orders
+  const needsAttention = pendingOrders.slice(0, 5);
+
+  return (
+    <div className="space-y-8 max-w-7xl mx-auto">
+      {/* Welcome Header */}
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+          Good morning, {vendor.businessName}
+        </h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Here&apos;s what&apos;s happening with your business today.
+        </p>
+      </div>
+
+      {/* 4 Top KPI Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* TOTAL REVENUE */}
+        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Total Revenue</span>
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <span className="font-bold text-sm">₦</span>
+            </div>
+          </div>
+          <div className="mt-4">
+            <div className="text-2xl font-extrabold text-gray-900">{analytics.paidGrossFormatted}</div>
+            <div className="flex items-center gap-1.5 mt-1 text-xs font-semibold text-emerald-600">
+              <span>↑ 12%</span>
+              <span className="text-gray-400 font-normal">vs last 30 days</span>
+            </div>
+          </div>
+        </div>
+
+        {/* PENDING */}
+        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Pending</span>
+            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+              <ClockIcon className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <div className="text-2xl font-extrabold text-gray-900">{analytics.pendingOrdersCount}</div>
+            <div className="text-xs text-gray-500 mt-1">Awaiting confirmation</div>
+          </div>
+        </div>
+
+        {/* PAID */}
+        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Paid</span>
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <CheckIcon className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-4">
+            <div className="text-2xl font-extrabold text-gray-900">{analytics.paidOrdersCount}</div>
+            <div className="text-xs text-gray-500 mt-1">Confirmed payments</div>
+          </div>
+        </div>
+
+        {/* PROCESSING */}
+        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Processing</span>
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="7" width="20" height="14" rx="2" />
+                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+              </svg>
+            </div>
+          </div>
+          <div className="mt-4">
+            <div className="text-2xl font-extrabold text-gray-900">
+              {String(processingOrders.length).padStart(2, "0")}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">In fulfillment</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Middle Row: Revenue Summary Chart & Recent Activity Feed */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left 2 Cols: Revenue Summary Chart */}
+        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-gray-900">Revenue Summary</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Daily performance tracking</p>
+            </div>
+            <div className="flex items-center bg-gray-50 p-1 rounded-xl border border-gray-100 text-xs font-semibold">
+              {(["7D", "30D", "1Y"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    period === p ? "bg-emerald-600 text-white shadow-xs" : "text-gray-500 hover:text-gray-900"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Stylized SVG Trend Curve */}
+          <div className="my-8 relative">
+            <div className="h-44 w-full flex items-end">
+              <svg className="w-full h-full overflow-visible" viewBox="0 0 500 150" fill="none" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#10B981" stopOpacity="0.25" />
+                    <stop offset="100%" stopColor="#10B981" stopOpacity="0.0" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M0 110 C 100 100, 180 130, 260 110 C 340 90, 420 30, 500 45 L 500 150 L 0 150 Z"
+                  fill="url(#revenueGradient)"
+                />
+                <path
+                  d="M0 110 C 100 100, 180 130, 260 110 C 340 90, 420 30, 500 45"
+                  stroke="#10B981"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+
+            {/* X-axis date labels */}
+            <div className="flex justify-between text-[11px] font-semibold text-gray-400 mt-4 px-2">
+              <span>01 OCT</span>
+              <span>08 OCT</span>
+              <span>15 OCT</span>
+              <span>22 OCT</span>
+              <span>29 OCT</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right 1 Col: Recent Activity */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-bold text-gray-900">Recent Activity</h2>
+            <button className="text-gray-400 hover:text-gray-600 text-lg">•••</button>
+          </div>
+
+          <div className="space-y-4 flex-1">
+            {orders.slice(0, 4).map((o, idx) => (
+              <div key={o.id || idx} className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
+                  <WhatsAppBadgeIcon className="w-4 h-4" />
+                </div>
+                <div className="text-xs min-w-0 flex-1">
+                  <div className="text-gray-900">
+                    <span className="font-semibold">{o.customerName}</span> ordered <span className="font-medium">{o.productName}</span>
+                  </div>
+                  <div className="text-gray-400 text-[11px] mt-0.5">
+                    {o.shortCode} • {o.totalAmountFormatted}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
+                ✓
+              </div>
+              <div className="text-xs">
+                <div className="text-gray-900 font-semibold">Payment confirmed via Monnify</div>
+                <div className="text-gray-400 text-[11px] mt-0.5">Server verified escrow settlement</div>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
+                ★
+              </div>
+              <div className="text-xs">
+                <div className="text-gray-900 font-semibold">5-star verified review</div>
+                <div className="text-gray-400 text-[11px] mt-0.5">&quot;Fast delivery and super fresh!&quot;</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Section: Needs Attention Table */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-xs overflow-hidden">
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-base font-bold text-gray-900">Needs Attention</h2>
+            {needsAttention.length > 0 && (
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 border border-rose-100">
+                {needsAttention.length} URGENT
+              </span>
+            )}
+          </div>
+          <button
+            onClick={onViewAllOrders}
+            className="text-xs font-bold text-emerald-600 hover:text-emerald-700"
+          >
+            View All Orders
+          </button>
+        </div>
+
+        {needsAttention.length === 0 ? (
+          <div className="p-8 text-center text-sm text-gray-400">
+            No pending orders requiring attention. Great job!
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50/50 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+                <tr>
+                  <th className="py-3 px-6">Customer</th>
+                  <th className="py-3 px-6">Order Reference</th>
+                  <th className="py-3 px-6">Status / Time Remaining</th>
+                  <th className="py-3 px-6">Amount</th>
+                  <th className="py-3 px-6 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {needsAttention.map((order) => (
+                  <tr key={order.id} className="hover:bg-gray-50/70 transition-all">
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
+                          {order.customerName.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="font-semibold text-gray-900 text-xs">{order.customerName}</div>
+                          <div className="text-[11px] text-gray-400">{order.customerPhone}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4 px-6 font-mono text-xs font-semibold text-gray-700">
+                      {order.shortCode}
+                    </td>
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-600">
+                        <ClockIcon className="w-3.5 h-3.5 text-rose-500" />
+                        <span>Awaiting Transfer</span>
+                      </div>
+                    </td>
+                    <td className="py-4 px-6 font-bold text-gray-900 text-xs">
+                      {order.totalAmountFormatted}
+                    </td>
+                    <td className="py-4 px-6 text-right">
+                      <button
+                        onClick={() => onSelectOrder?.(order)}
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                      >
+                        Inspect
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+

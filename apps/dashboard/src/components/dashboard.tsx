@@ -1,51 +1,48 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
-import type { VendorState } from "@/lib/types";
-import { AnalyticsStrip } from "./analytics-strip";
-import { CatalogPanel } from "./catalog-panel";
-import { ChatPanel } from "./chat-panel";
-import { Header, type SettingsInput } from "./header";
-import { OrdersPanel } from "./orders-panel";
-import { ShippingPanel } from "./shipping-panel";
+import type { VendorState, OrderItem } from "@/lib/types";
 
-type Tab = "orders" | "catalog" | "shipping";
-
-export type RunAction = (action: () => Promise<VendorState>) => Promise<boolean>;
-
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: "orders", label: "🧾 Orders & Monnify Escrow" },
-  { id: "catalog", label: "📦 Inventory & OG Card Preview" },
-  { id: "shipping", label: "🚚 Shipping Zones & Discounts" },
-];
+import { Sidebar, type NavView } from "./sidebar";
+import { TopNav } from "./top-nav";
+import { OverviewView } from "./views/overview-view";
+import { OrdersView } from "./views/orders-view";
+import { ProductsView } from "./views/products-view";
+import { NetworkView } from "./views/network-view";
+import { PaymentsView } from "./views/payments-view";
+import { MarketBoostView } from "./views/market-boost-view";
+import { PaymentLinksView } from "./views/payment-links-view";
+import { SettingsView } from "./views/settings-view";
+import { ChatDrawer } from "./chat-drawer";
 
 export function Dashboard() {
   const [state, setState] = useState<VendorState | null>(null);
-  const [tab, setTab] = useState<Tab>("orders");
+  const [currentView, setCurrentView] = useState<NavView>("overview");
+  const [activeWorkspace, setActiveWorkspace] = useState<"reseller" | "supplier">("reseller");
+  const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
   const [connected, setConnected] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [reloadToken, setReloadToken] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
+  const loadState = useCallback(async () => {
     try {
-      const next = await api.getState();
-      setState(next);
+      const data = await api.getState();
+      setState(data);
       setError(null);
     } catch (err) {
-      setError(describeError(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setInitialLoading(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load, reloadToken]);
+    void loadState();
+  }, [loadState]);
 
-  // Live state synchronization over Server-Sent Events.
+  // Real-time synchronization over Server-Sent Events (SSE)
   useEffect(() => {
     if (typeof window === "undefined" || !("EventSource" in window)) return;
 
@@ -54,183 +51,352 @@ export function Dashboard() {
     source.onerror = () => setConnected(false);
     source.onmessage = (event) => {
       try {
-        setState(JSON.parse(event.data) as VendorState);
+        const next = JSON.parse(event.data) as VendorState;
+        setState(next);
         setConnected(true);
-        setError(null);
       } catch {
-        // Ignore malformed SSE frames; the next valid frame will resync.
+        // Ignore malformed frames
       }
     };
 
     return () => source.close();
-  }, [reloadToken]);
+  }, []);
 
-  const run: RunAction = useCallback(async (action) => {
-    setSyncing(true);
-    setError(null);
+  // Update selected order reference if orders list changes
+  useEffect(() => {
+    if (selectedOrder && state?.orders) {
+      const fresh = state.orders.find((o) => o.id === selectedOrder.id);
+      if (fresh) setSelectedOrder(fresh);
+    }
+  }, [state?.orders, selectedOrder]);
+
+  if (loading || !state) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 rounded-2xl bg-emerald-500 text-white flex items-center justify-center font-black text-xl animate-bounce shadow-lg">
+          C
+        </div>
+        <div className="text-sm font-bold text-gray-900 mt-4">Loading Caterlog Business Manager...</div>
+        <div className="text-xs text-gray-400 mt-1">Connecting to live WhatsApp Coexistence engine</div>
+      </div>
+    );
+  }
+
+  // Handlers for Views
+  const handleAddProduct = async (input: {
+    skuCode?: string;
+    name: string;
+    priceNaira: number;
+    stockTotal: number;
+    primaryImageUrl?: string;
+  }) => {
     try {
-      setState(await action());
+      const next = await api.addProduct({
+        skuCode: input.skuCode || `ITEM-${Date.now().toString().slice(-4)}`,
+        name: input.name,
+        priceNaira: input.priceNaira,
+        stockTotal: input.stockTotal,
+        primaryImageUrl: input.primaryImageUrl,
+      });
+      setState(next);
       return true;
     } catch (err) {
-      setError(describeError(err));
+      alert(err instanceof Error ? err.message : String(err));
       return false;
-    } finally {
-      setSyncing(false);
     }
-  }, []);
+  };
 
-  const saveSettings = useCallback(
-    (input: SettingsInput) => {
-      void run(() => api.updateSettings(input));
-    },
-    [run]
-  );
+  const handleUpdateStock = async (sku: string, stock: number) => {
+    try {
+      const next = await api.updateStock(sku, stock);
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
 
-  const retry = useCallback(() => {
-    setError(null);
-    setInitialLoading(true);
-    setReloadToken((token) => token + 1);
-  }, []);
+  const handleSimulateTransfer = async (orderCode: string, amountNaira: number) => {
+    try {
+      const res = await api.simulateTransfer(orderCode, amountNaira);
+      if (res.state) setState(res.state);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
 
-  const tabButtons = useMemo(
-    () =>
-      TABS.map(({ id, label }) => (
-        <button
-          key={id}
-          type="button"
-          onClick={() => setTab(id)}
-          className={
-            id === tab
-              ? "px-4 py-2.5 text-sm font-semibold border-b-2 border-emerald-500 text-emerald-400"
-              : "px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent text-gray-400 hover:text-white"
-          }
-        >
-          {label}
-        </button>
-      )),
-    [tab]
-  );
+  const handleMarkDispatched = async (orderCode: string) => {
+    try {
+      const next = await api.dispatchOrder(orderCode);
+      setState(next);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
 
-  if (initialLoading && !state) {
-    return <LoadingScreen />;
-  }
+  const handleUpdateSettings = async (settings: {
+    copilotMode?: "COPILOT" | "FULL_AUTO" | "MANUAL";
+    copilotIdleSeconds?: number;
+    reservationTtlMinutes?: number;
+  }) => {
+    try {
+      const next = await api.updateSettings(settings);
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
 
-  if (!state) {
-    return <FatalErrorScreen message={error} onRetry={retry} />;
-  }
+  const handleAddShippingZone = async (name: string, feeNaira: number) => {
+    try {
+      const next = await api.addShippingZone(name, feeNaira);
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const handleDeleteShippingZone = async (code: number) => {
+    try {
+      const next = await api.deleteShippingZone(code);
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const handleAddDiscount = async (code: string, type: "PERCENTAGE" | "FLAT_KOBO", value: number) => {
+    try {
+      const next = await api.addDiscount({ code, type, value });
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const handleDeleteDiscount = async (code: string) => {
+    try {
+      const next = await api.deleteDiscount(code);
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  // WhatsApp Simulator Handlers
+  const handleSendVendorKeyword = async (text: string, attachedImage?: string) => {
+    const res = await api.simulateWhatsApp({
+      role: "VENDOR_KEYWORD",
+      text,
+      attachedImageUrl: attachedImage,
+    });
+    if (res.state) setState(res.state);
+  };
+
+  const handleSendBuyerInquiry = async (text: string, phash?: string) => {
+    const res = await api.simulateWhatsApp({
+      role: "BUYER_INQUIRY",
+      text,
+      quotedStatusImagePhash: phash,
+      simulateFastForwardIdleTimer: true,
+    });
+    if (res.state) setState(res.state);
+  };
+
+  const handleSendVendorManualEcho = async (text: string) => {
+    const res = await api.simulateWhatsApp({
+      role: "VENDOR_MANUAL_BUYER_REPLY",
+      text,
+    });
+    if (res.state) setState(res.state);
+  };
+
+  const getBreadcrumb = () => {
+    switch (currentView) {
+      case "overview":
+        return "Overview";
+      case "orders":
+        return selectedOrder ? `Orders / ${selectedOrder.shortCode}` : "Orders";
+      case "products":
+        return "Products / Reselling";
+      case "network":
+        return "Network / Find suppliers";
+      case "customers":
+        return "Customers";
+      case "payments":
+        return "Payments / Split transactions";
+      case "market-boost":
+        return "Market Boost / Visibility & performance";
+      case "settings":
+        return "Settings / Sales co-pilot / Setup";
+      case "payment-links":
+        return "Payment Links";
+      default:
+        return "Caterlog Business Manager";
+    }
+  };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header
-        vendor={state.vendor}
-        connected={connected}
-        syncing={syncing}
-        onSaveSettings={saveSettings}
+    <div className="min-h-screen bg-[#F9FAFB] flex text-gray-900 font-sans antialiased">
+      {/* Sidebar Navigation (Matching Figma) */}
+      <Sidebar
+        currentView={currentView}
+        onSelectView={(v) => {
+          setCurrentView(v);
+          setSelectedOrder(null);
+        }}
+        pendingCount={state.analytics.pendingOrdersCount}
+        onOpenNewOrder={() => setCurrentView("payment-links")}
+        activeWorkspace={activeWorkspace}
+        onToggleWorkspace={() =>
+          setActiveWorkspace((prev) => (prev === "reseller" ? "supplier" : "reseller"))
+        }
       />
 
-      {error ? (
-        <div className="border-b border-rose-900/60 bg-rose-950/40 px-6 py-2.5">
-          <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-2 text-xs text-rose-200">
-            <span>⚠️ {error}</span>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={retry}
-                className="font-semibold text-rose-100 underline underline-offset-2"
-              >
-                Retry
-              </button>
-              <button
-                type="button"
-                onClick={() => setError(null)}
-                className="text-rose-300 hover:text-white"
-                aria-label="Dismiss error"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <main className="max-w-[1600px] w-full mx-auto flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
-        <section className="lg:col-span-7 flex flex-col gap-6">
-          <AnalyticsStrip analytics={state.analytics} />
-
-          <div className="flex border-b border-gray-800 gap-2 overflow-x-auto">{tabButtons}</div>
-
-          <div className="animate-fade-up">
-            {tab === "orders" ? (
-              <OrdersPanel orders={state.orders} run={run} />
-            ) : null}
-            {tab === "catalog" ? (
-              <CatalogPanel products={state.products} run={run} />
-            ) : null}
-            {tab === "shipping" ? (
-              <ShippingPanel
-                zones={state.shippingZones}
-                discounts={state.discounts}
-                run={run}
-              />
-            ) : null}
-          </div>
-        </section>
-
-        <ChatPanel
-          messages={state.chatMessages}
-          activeBuyerSession={state.activeBuyerSession}
-          run={run}
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Header */}
+        <TopNav
+          vendor={state.vendor}
+          connected={connected}
+          onOpenSimulator={() => setSimulatorOpen(true)}
+          simulatorOpen={simulatorOpen}
+          breadcrumb={getBreadcrumb()}
+          activeWorkspace={activeWorkspace}
         />
-      </main>
-    </div>
-  );
-}
 
-function describeError(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return String(err);
-}
+        {/* View Surface */}
+        <main className="flex-1 p-8 overflow-y-auto">
+          {error && (
+            <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex justify-between items-center">
+              <span>{error}</span>
+              <button onClick={() => setError(null)} className="text-rose-500 hover:text-rose-700">✕</button>
+            </div>
+          )}
 
-function LoadingScreen() {
-  return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="flex flex-col items-center gap-3 text-center">
-        <div className="h-10 w-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-black text-lg animate-pulse">
-          D
-        </div>
-        <p className="text-sm text-gray-300">Connecting to Caterlog Vendor API…</p>
-        <p className="text-xs text-gray-500">Loading orders, catalog and WhatsApp threads.</p>
+          {currentView === "overview" && (
+            <OverviewView
+              analytics={state.analytics}
+              vendor={state.vendor}
+              orders={state.orders}
+              onSelectOrder={(ord) => {
+                setSelectedOrder(ord);
+                setCurrentView("orders");
+              }}
+              onViewAllOrders={() => setCurrentView("orders")}
+            />
+          )}
+
+          {currentView === "orders" && (
+            <OrdersView
+              orders={state.orders}
+              selectedOrder={selectedOrder}
+              onSelectOrder={setSelectedOrder}
+              onSimulateTransfer={handleSimulateTransfer}
+              onMarkDispatched={handleMarkDispatched}
+              onNavigateToPayments={() => setCurrentView("payments")}
+            />
+          )}
+
+          {currentView === "products" && (
+            <ProductsView
+              products={state.products}
+              onAddProduct={handleAddProduct}
+              onUpdateStock={handleUpdateStock}
+              onNavigateToNetwork={() => setCurrentView("network")}
+            />
+          )}
+
+          {currentView === "network" && (
+            <NetworkView
+              onMirrorProducts={() => setCurrentView("products")}
+            />
+          )}
+
+          {currentView === "payments" && (
+            <PaymentsView
+              onNavigateToOrder={(code) => {
+                const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
+                if (target) {
+                  setSelectedOrder(target);
+                  setCurrentView("orders");
+                }
+              }}
+            />
+          )}
+
+          {currentView === "market-boost" && (
+            <MarketBoostView />
+          )}
+
+          {currentView === "payment-links" && (
+            <PaymentLinksView
+              products={state.products}
+              orders={state.orders}
+              vendorName={state.vendor.businessName}
+            />
+          )}
+
+          {currentView === "customers" && (
+            <div className="max-w-5xl mx-auto space-y-6">
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">Customers</h1>
+              <p className="text-sm text-gray-500">View customer transaction history and direct WhatsApp communication links.</p>
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-xs p-6 divide-y divide-gray-100">
+                {state.orders.map((o) => (
+                  <div key={o.id} className="py-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-gray-900">{o.customerName}</div>
+                      <div className="text-xs text-gray-400">{o.customerPhone}</div>
+                    </div>
+                    <a
+                      href={`https://wa.me/${o.customerPhone.replace(/\+/g, "")}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    >
+                      Message on WhatsApp
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {currentView === "settings" && (
+            <SettingsView
+              vendor={state.vendor}
+              shippingZones={state.shippingZones}
+              discounts={state.discounts}
+              onUpdateSettings={handleUpdateSettings}
+              onAddShippingZone={handleAddShippingZone}
+              onDeleteShippingZone={handleDeleteShippingZone}
+              onAddDiscount={handleAddDiscount}
+              onDeleteDiscount={handleDeleteDiscount}
+            />
+          )}
+        </main>
       </div>
-    </div>
-  );
-}
 
-function FatalErrorScreen({
-  message,
-  onRetry,
-}: {
-  message: string | null;
-  onRetry: () => void;
-}) {
-  return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="max-w-md w-full bg-gray-900 border border-gray-800 rounded-2xl p-6 text-center space-y-3">
-        <div className="text-3xl">📡</div>
-        <h1 className="text-lg font-bold text-white">Cannot reach the Caterlog API</h1>
-        <p className="text-xs text-gray-400 break-words">
-          {message ?? "The API did not respond. Is it running on port 4000?"}
-        </p>
-        <p className="text-xs text-gray-500">
-          Start it with <code className="text-emerald-400">npm run dev:api</code>, then retry.
-        </p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-4 py-2 rounded-lg"
-        >
-          Retry connection
-        </button>
-      </div>
+      {/* Slide-over WhatsApp Live Simulator Drawer */}
+      <ChatDrawer
+        isOpen={simulatorOpen}
+        onClose={() => setSimulatorOpen(false)}
+        chatMessages={state.chatMessages}
+        onSendVendorKeyword={handleSendVendorKeyword}
+        onSendBuyerInquiry={handleSendBuyerInquiry}
+        onSendVendorManualEcho={handleSendVendorManualEcho}
+      />
     </div>
   );
 }

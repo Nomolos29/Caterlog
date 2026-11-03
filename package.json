@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:api": "node --experimental-strip-types --watch apps/api/src/server.ts",
+    "check:env": "node --experimental-strip-types scripts/check-env.ts",
     "dev:dashboard": "npm --workspace=@caterlog/dashboard run dev",
     "start": "node --experimental-strip-types apps/api/src/server.ts",
     "start:dashboard": "npm --workspace=@caterlog/dashboard run start",
@@ -26,6 +27,8 @@
   },
   "devDependencies": {
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9"
   }
 }
-

@@ -28,7 +28,6 @@ export class HttpError extends Error {
 
 export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
   const sseClients = new Set<http.ServerResponse>();
-  const whatsappSandboxMock = (process.env.WHATSAPP_SANDBOX_MOCK ?? "true") !== "false";
 
   // Broadcast live state updates over Server-Sent Events (SSE) to connected Web Dashboards
   engine.eventBus.on("*", () => {
@@ -73,7 +72,27 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
 
       // 1. Health Check
       if (req.method === "GET" && path === "/health") {
-        return sendJson(res, 200, { status: "ok", stage: "Stage 1 — Chat Commerce Core" });
+        return sendJson(res, 200, {
+          status: "ok",
+          stage: "Stage 1 — Chat Commerce Core",
+          integrations: {
+            monnify: engine.monnify.getMode(),
+            whatsapp: engine.whatsapp.getMode(),
+            catalog: engine.catalog.getMode(),
+          },
+        });
+      }
+
+      // 1b. Integration Modes & Credential Readiness (redacted)
+      if (req.method === "GET" && path === "/api/v1/integrations/status") {
+        return sendJson(res, 200, {
+          integrations: engine.getIntegrationStatus(),
+          catalogSync: {
+            mode: engine.catalog.getMode(),
+            lastSyncedAt: engine.catalog.getIntegrationStatus().lastSyncedAt,
+            publishedItems: engine.catalog.getIntegrationStatus().publishedItems,
+          },
+        });
       }
 
       // 2. Real-Time SSE Stream for Dashboard Synchronization
@@ -137,8 +156,8 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       if (req.method === "POST" && path === "/webhooks/whatsapp") {
         const rawBody = await readRawBody(req);
 
-        // Verify Meta's `x-hub-signature-256` HMAC when not running in sandbox mode.
-        if (!whatsappSandboxMock) {
+        // Verify Meta's `x-hub-signature-256` HMAC when running against the live Graph API.
+        if (!engine.whatsapp.isMockMode()) {
           const signature = req.headers["x-hub-signature-256"];
           if (
             typeof signature !== "string" ||
@@ -400,6 +419,40 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, engine.serializeState());
       }
 
+      // 15c. Dashboard REST API: Manually Verify Pending Payment via Monnify Search
+      if (
+        req.method === "POST" &&
+        path.startsWith("/api/v1/vendor/orders/") &&
+        path.endsWith("/verify-payment")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/vendor/orders/", "").replace("/verify-payment", "")
+        );
+        const result = await engine.verifyOrderPayment(shortCode);
+        if (!result) {
+          throw new HttpError(404, `Order "${shortCode}" not found.`);
+        }
+        return sendJson(res, 200, {
+          status: result.status,
+          applied: result.applied,
+          remainingBalanceKobo: result.remainingBalanceKobo.toString(),
+          overpaidAmountKobo: result.overpaidAmountKobo.toString(),
+          state: engine.serializeState(),
+        });
+      }
+
+      // 15d. Dashboard REST API: Publish Inventory to the WhatsApp Business Catalog
+      if (req.method === "POST" && path === "/api/v1/vendor/catalog/sync") {
+        const rawBody = await readRawBody(req);
+        const body = rawBody
+          ? (JSON.parse(rawBody) as { deleteMissing?: boolean })
+          : {};
+        const result = await engine.syncWhatsAppCatalog({
+          deleteMissing: body.deleteMissing ?? true,
+        });
+        return sendJson(res, 200, { result, state: engine.serializeState() });
+      }
+
       // 16. Local Simulator Endpoint: WhatsApp Vendor Keyword OR Buyer Inquiry (`POST /api/v1/simulate/whatsapp`)
       if (req.method === "POST" && path === "/api/v1/simulate/whatsapp") {
         const body = JSON.parse(await readRawBody(req)) as {
@@ -438,6 +491,12 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
 
       // 17. Local Simulator Endpoint: Monnify Bank Transfer (`POST /api/v1/simulate/monnify-transfer`)
       if (req.method === "POST" && path === "/api/v1/simulate/monnify-transfer") {
+        if (!engine.monnify.isMockMode()) {
+          throw new HttpError(
+            409,
+            `Manual transfer simulation is disabled while MONNIFY_MODE=${engine.monnify.getMode()}. Use the Monnify Bank Simulator for sandbox transfers, or switch MONNIFY_MODE=mock for local testing.`
+          );
+        }
         const body = JSON.parse(await readRawBody(req)) as {
           orderShortCode: string;
           amountNaira: number;
@@ -541,8 +600,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   expiryTimer.unref();
 
   server.listen(port, () => {
+    const status = engine.getIntegrationStatus();
     console.log(`🚀 Caterlog Stage 1 API & Webhook Server listening on http://localhost:${port}`);
     console.log(`   • Vendor Dashboard:  ${process.env.DASHBOARD_URL ?? "http://localhost:3000"}`);
+    console.log(
+      `   • Modes:             Monnify=${status.monnify.mode}  WhatsApp=${status.whatsapp.mode}  Catalog=${status.catalog.mode}`
+    );
+    for (const issue of status.issues) {
+      console.warn(`   ⚠️  [${issue.severity}] ${issue.variable}: ${issue.message}`);
+    }
     console.log(`   • WhatsApp Webhook:  http://localhost:${port}/webhooks/whatsapp`);
     console.log(`   • Monnify Webhook:   http://localhost:${port}/webhooks/monnify`);
     console.log(`   • Dynamic OG Card:   http://localhost:${port}/og/product/SHOE-01`);

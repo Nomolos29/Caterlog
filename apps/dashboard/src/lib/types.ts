@@ -155,6 +155,7 @@ export interface BuyerSession {
 }
 
 export interface VendorState {
+
   vendor: Vendor;
   activeBuyerSession: BuyerSession | null;
   analytics: Analytics;
@@ -176,3 +177,12 @@ export interface MonnifySimulationResult {
   remainingBalanceKobo: string;
   state: VendorState;
 }
+
+export type ProductItem = Product;
+export type OrderItem = Order;
+export type VendorProfile = Vendor;
+export type ShippingZoneItem = ShippingZone;
+export type DiscountItem = Discount;
+export type ChatMessageItem = ChatMessage;
+export type VendorAnalytics = Analytics;
+
