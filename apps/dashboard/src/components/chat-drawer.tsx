@@ -46,8 +46,15 @@ export function ChatDrawer({
   };
 
   return (
-    <div className="fixed inset-y-0 right-0 w-full max-w-md bg-white border-l border-gray-200 shadow-2xl z-50 flex flex-col justify-between">
-      {/* Drawer Header */}
+    <>
+      {/* Mobile/Tablet Backdrop */}
+      <div
+        onClick={onClose}
+        className="fixed inset-0 bg-black/40 backdrop-blur-2xs z-50 transition-opacity animate-in fade-in duration-150"
+      />
+
+      <div className="fixed inset-y-0 right-0 w-full sm:max-w-md bg-white border-l border-gray-200 shadow-2xl z-50 flex flex-col justify-between animate-in slide-in-from-right duration-200">
+        {/* Drawer Header */}
       <div className="p-4 bg-gray-900 text-white flex items-center justify-between border-b border-gray-800">
         <div className="flex items-center gap-2">
           <WhatsAppBadgeIcon className="w-5 h-5 text-emerald-400" />
@@ -218,5 +225,6 @@ export function ChatDrawer({
         </div>
       </form>
     </div>
+    </>
   );
 }

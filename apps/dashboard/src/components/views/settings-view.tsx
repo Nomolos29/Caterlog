@@ -193,7 +193,7 @@ export function SettingsView({
         </div>
 
         {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
           <button
             onClick={() => setActiveTab("setup")}
             className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
@@ -250,8 +250,8 @@ export function SettingsView({
             </span>
           </div>
 
-          <div className="border border-gray-100 rounded-xl overflow-hidden">
-            <table className="w-full text-left text-xs">
+          <div className="border border-gray-100 rounded-xl overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[560px]">
               <thead className="bg-gray-50/80 text-gray-500 border-b border-gray-100 font-semibold uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="px-4 py-3">Code</th>
@@ -829,7 +829,7 @@ export function SettingsView({
         </div>
 
         {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
           <button
             onClick={() => setActiveTab("setup")}
             className="pb-2.5 text-gray-500 hover:text-gray-900"
@@ -1182,7 +1182,7 @@ export function SettingsView({
         </div>
 
         {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
           <button
             onClick={() => setActiveTab("setup")}
             className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
@@ -1612,7 +1612,7 @@ export function SettingsView({
       </div>
 
       {/* Tab Strip */}
-      <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+      <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
         <button
           onClick={() => setActiveTab("setup")}
           className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"

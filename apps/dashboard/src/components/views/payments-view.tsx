@@ -969,7 +969,7 @@ export function PaymentsView({ initialTab = "splits", onNavigateToOrder }: Payme
       </div>
 
       {/* Tab Strip */}
-      <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+      <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
         <button
           onClick={() => setActiveTab("splits")}
           className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer active:scale-95"

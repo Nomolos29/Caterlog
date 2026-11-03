@@ -705,7 +705,7 @@ export function MarketBoostView({ initialTab = "visibility" }: MarketBoostViewPr
       </div>
 
       {/* Tab Strip */}
-      <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+      <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
         <button
           onClick={() => setActiveTab("setup")}
           className="pb-2.5 text-gray-500 hover:text-gray-900"

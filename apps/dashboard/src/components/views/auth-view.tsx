@@ -62,7 +62,7 @@ export function AuthView({
   if (mode === "login") {
     return (
       <div className="min-h-screen bg-[#F8F9FA] flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-[440px] bg-white rounded-2xl border border-gray-200 p-8 sm:p-10 shadow-xs space-y-6">
+        <div className="w-full max-w-[440px] bg-white rounded-2xl border border-gray-200 p-6 sm:p-10 shadow-xs space-y-6">
           {/* Logo badge */}
           <div className="flex flex-col items-center text-center">
             <div className="w-12 h-12 rounded-xl bg-[#00c068] text-white flex items-center justify-center font-black text-2xl shadow-xs mb-3">

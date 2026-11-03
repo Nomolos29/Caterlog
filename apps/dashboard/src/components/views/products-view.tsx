@@ -973,28 +973,28 @@ export function ProductsView({
         )}
 
         {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
           <button
             onClick={() => setActiveTab("all")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             All products
           </button>
           <button
             onClick={() => setActiveTab("my-inventory")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             My inventory
           </button>
           <button
             onClick={() => setActiveTab("reselling")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
+            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
           >
             Reselling ({resellingList.length})
           </button>
           <button
             onClick={() => setActiveTab("exceptions")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             Selling exceptions (3)
           </button>
@@ -1238,28 +1238,28 @@ export function ProductsView({
       )}
 
       {/* Tab Strip */}
-      <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+      <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
         <button
           onClick={() => setActiveTab("all")}
-          className={`pb-2.5 ${activeTab === "all" ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold" : "text-gray-500 hover:text-gray-900"}`}
+          className={`pb-2.5 cursor-pointer ${activeTab === "all" ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold" : "text-gray-500 hover:text-gray-900"}`}
         >
           All products
         </button>
         <button
           onClick={() => setActiveTab("my-inventory")}
-          className={`pb-2.5 ${activeTab === "my-inventory" ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold" : "text-gray-500 hover:text-gray-900"}`}
+          className={`pb-2.5 cursor-pointer ${activeTab === "my-inventory" ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold" : "text-gray-500 hover:text-gray-900"}`}
         >
           My inventory
         </button>
         <button
           onClick={() => setActiveTab("reselling")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900"
+          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
         >
           Reselling ({resellingList.length})
         </button>
         <button
           onClick={() => setActiveTab("exceptions")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900"
+          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
         >
           Selling exceptions (3)
         </button>

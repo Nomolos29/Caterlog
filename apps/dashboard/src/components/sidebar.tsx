@@ -75,7 +75,7 @@ export function Sidebar({
   };
 
   const sidebarContent = (
-    <div className="flex flex-col justify-between h-full">
+    <div className="flex flex-col justify-between h-full overflow-y-auto">
       <div>
         {/* Brand Header */}
         <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
