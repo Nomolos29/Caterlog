@@ -524,3 +524,4 @@ export function VerificationView({ onBack, onComplete }: VerificationViewProps) 
     </div>
   );
 }
+

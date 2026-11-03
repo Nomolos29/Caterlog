@@ -16,11 +16,15 @@ import { MarketBoostView } from "./views/market-boost-view";
 import { PaymentLinksView } from "./views/payment-links-view";
 import { SettingsView } from "./views/settings-view";
 import { AnalyticsView } from "./views/analytics-view";
+import { VerificationView } from "./views/verification-view";
+import { TeamView } from "./views/team-view";
+import { NotificationsView } from "./views/notifications-view";
 import { ChatDrawer } from "./chat-drawer";
 
 export function Dashboard() {
   const [state, setState] = useState<VendorState | null>(null);
   const [currentView, setCurrentView] = useState<NavView>("overview");
+  const [settingsTab, setSettingsTab] = useState<"setup" | "conversations" | "detail" | "shipping" | "general">("setup");
   const [activeWorkspace, setActiveWorkspace] = useState<"reseller" | "supplier">("reseller");
   const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
   const [connected, setConnected] = useState(false);
@@ -234,7 +238,7 @@ export function Dashboard() {
       case "products":
         return "Products / Reselling";
       case "network":
-        return "Network / Find suppliers";
+        return "Network / My suppliers";
       case "customers":
         return "Customers / Directory";
       case "payments":
@@ -243,8 +247,16 @@ export function Dashboard() {
         return "Market Boost / Visibility & performance";
       case "analytics":
         return "Analytics / Performance & reports";
+      case "team":
+        return "Team & Roles / Activity log";
+      case "verification":
+        return "Verification / Business KYC";
+      case "notifications":
+        return "Notifications & Alerts / System & Activity";
       case "settings":
-        return "Settings / Sales co-pilot / Setup";
+        return settingsTab === "shipping"
+          ? "Settings / Delivery & Shipping"
+          : "Settings / Sales co-pilot / Setup";
       case "payment-links":
         return "Payment Links";
       default:
@@ -260,6 +272,9 @@ export function Dashboard() {
         onSelectView={(v) => {
           setCurrentView(v);
           setSelectedOrder(null);
+          if (v === "settings") {
+            setSettingsTab("setup");
+          }
         }}
         pendingCount={state.analytics.pendingOrdersCount}
         onOpenNewOrder={() => setCurrentView("payment-links")}
@@ -294,7 +309,17 @@ export function Dashboard() {
           onSelectProduct={() => {
             setCurrentView("products");
           }}
-          onNavigateToView={(v) => setCurrentView(v as NavView)}
+          onNavigateToView={(v) => {
+            if (v === "shipping") {
+              setCurrentView("settings");
+              setSettingsTab("shipping");
+            } else {
+              if (v === "settings") {
+                setSettingsTab("setup");
+              }
+              setCurrentView(v as NavView);
+            }
+          }}
         />
 
         {/* View Surface */}
@@ -396,8 +421,35 @@ export function Dashboard() {
             />
           )}
 
+          {currentView === "team" && (
+            <TeamView />
+          )}
+
+          {currentView === "verification" && (
+            <VerificationView
+              onBack={() => setCurrentView("overview")}
+              onComplete={() => setCurrentView("overview")}
+            />
+          )}
+
+          {currentView === "notifications" && (
+            <NotificationsView
+              onNavigateToOrder={(code) => {
+                const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
+                if (target) {
+                  setSelectedOrder(target);
+                  setCurrentView("orders");
+                }
+              }}
+              onNavigateToPayments={() => setCurrentView("payments")}
+              onNavigateToProducts={() => setCurrentView("products")}
+            />
+          )}
+
           {currentView === "settings" && (
             <SettingsView
+              key={settingsTab}
+              initialTab={settingsTab}
               vendor={state.vendor}
               shippingZones={state.shippingZones}
               discounts={state.discounts}

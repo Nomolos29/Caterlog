@@ -12,6 +12,7 @@ import {
   AnalyticsIcon,
   TeamIcon,
   ShieldCheckIcon,
+  BellIcon,
   PlusIcon,
 } from "./icons";
 
@@ -26,6 +27,7 @@ export type NavView =
   | "analytics"
   | "team"
   | "verification"
+  | "notifications"
   | "settings"
   | "payment-links";
 
@@ -61,6 +63,7 @@ export function Sidebar({
     { id: "analytics", label: "Analytics", icon: <AnalyticsIcon className="w-5 h-5" /> },
     { id: "team", label: "Team & Audit", icon: <TeamIcon className="w-5 h-5" /> },
     { id: "verification", label: "Verification", icon: <ShieldCheckIcon className="w-5 h-5" /> },
+    { id: "notifications", label: "Notifications", icon: <BellIcon className="w-5 h-5" /> },
     { id: "settings", label: "Settings", icon: <SettingsIcon className="w-5 h-5" /> },
   ];
 
@@ -123,23 +126,19 @@ export function Sidebar({
         </nav>
       </div>
 
-      {/* Footer Navigation & Workspace Switcher */}
+      {/* Footer Navigation & Merchant Store Card */}
       <div className="p-4 space-y-3">
-        {/* Workspace Card */}
-        <div className="bg-[#f3f4f8] rounded-xl p-3 border border-transparent hover:border-gray-200 transition-colors">
-          <div className="font-semibold text-xs text-gray-900">
-            {isReseller ? "Nia Stores" : "Aroko Wholesale"}
+        {/* Merchant Store Card */}
+        <div className="bg-[#f3f4f8] rounded-xl p-3 border border-transparent">
+          <div className="font-semibold text-xs text-gray-900 flex items-center justify-between">
+            <span>Nia Stores</span>
+            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-full">
+              ✓ Verified
+            </span>
           </div>
-          <div className="text-[11px] text-gray-500 mt-0.5">
-            {isReseller ? "Reseller workspace · NGN" : "Supplier workspace · NGN"}
+          <div className="text-[11px] text-gray-500 mt-1">
+            Active Store · NGN Escrow
           </div>
-          <button
-            onClick={onToggleWorkspace}
-            className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-1 mt-1 transition-colors cursor-pointer"
-          >
-            <span>Switch account</span>
-            <span>↗</span>
-          </button>
         </div>
 
         {/* Solid Green Primary Action Button */}

@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import type { VendorProfile, ShippingZoneItem, DiscountItem } from "@/lib/types";
 
 interface SettingsViewProps {
   vendor: VendorProfile;
   shippingZones: ShippingZoneItem[];
   discounts: DiscountItem[];
-  initialTab?: "setup" | "conversations" | "detail" | "general";
+  initialTab?: "setup" | "conversations" | "detail" | "shipping" | "general";
   onUpdateSettings: (settings: {
     copilotMode?: "COPILOT" | "FULL_AUTO" | "MANUAL";
     copilotIdleSeconds?: number;
@@ -54,8 +54,48 @@ export function SettingsView({
   onDeleteDiscount,
   onNavigateToOrder,
 }: SettingsViewProps) {
-  // Tabs: 'setup' | 'conversations' | 'detail' | 'general'
-  const [activeTab, setActiveTab] = useState<"setup" | "conversations" | "detail" | "general">(initialTab);
+  // Tabs: 'setup' | 'conversations' | 'detail' | 'shipping' | 'general'
+  const [activeTab, setActiveTab] = useState<"setup" | "conversations" | "detail" | "shipping" | "general">(initialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  // Shipping form states
+  const [addZoneModalOpen, setAddZoneModalOpen] = useState(false);
+  const [newZoneName, setNewZoneName] = useState("");
+  const [newZoneFee, setNewZoneFee] = useState("");
+  const [newZoneSpeed, setNewZoneSpeed] = useState("24-48 Hours");
+  const [freeShippingThreshold, setFreeShippingThreshold] = useState("40000");
+  const [freeShippingActive, setFreeShippingActive] = useState(true);
+  const [pickupEnabled, setPickupEnabled] = useState(true);
+  const [pickupHubAddress, setPickupHubAddress] = useState("Ikeja Fulfillment Hub, 14 Allen Avenue, Ikeja, Lagos");
+  const [defaultCourier, setDefaultCourier] = useState("In-house Dispatch & Gokada");
+  const [courierPhone, setCourierPhone] = useState("+234 803 999 1234");
+  const [shippingSavedToast, setShippingSavedToast] = useState<string | null>(null);
+
+  const handleCreateShippingZone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newZoneName || !newZoneFee) return;
+    const ok = await onAddShippingZone(newZoneName.trim(), Number(newZoneFee));
+    if (ok) {
+      setAddZoneModalOpen(false);
+      setNewZoneName("");
+      setNewZoneFee("");
+      setShippingSavedToast("✓ Shipping zone added successfully!");
+      setTimeout(() => setShippingSavedToast(null), 3000);
+    }
+  };
+
+  const handleDeleteZone = async (code: number) => {
+    const ok = await onDeleteShippingZone(code);
+    if (ok) {
+      setShippingSavedToast("✓ Shipping zone removed.");
+      setTimeout(() => setShippingSavedToast(null), 3000);
+    }
+  };
 
   // Setup form states
   const [copilotEnabled, setCopilotEnabled] = useState(true);
@@ -129,6 +169,355 @@ export function SettingsView({
     setReplySuccess(true);
     setTimeout(() => setReplySuccess(false), 3000);
   };
+
+  /* -------------------------------------------------------------------------- */
+  /* Screen: Settings · Delivery & Shipping Zones                               */
+  /* -------------------------------------------------------------------------- */
+  if (activeTab === "shipping") {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto pb-24">
+        {/* Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Delivery &amp; Shipping</h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Configure delivery rates, pickup hubs, courier partners, and free delivery thresholds for live WhatsApp &amp; web checkout.
+            </p>
+          </div>
+          <button
+            onClick={() => setAddZoneModalOpen(true)}
+            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors self-start sm:self-center flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>+ Add Shipping Zone</span>
+          </button>
+        </div>
+
+        {/* Tab Strip */}
+        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+          <button
+            onClick={() => setActiveTab("setup")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Setup
+          </button>
+          <button
+            onClick={() => setActiveTab("conversations")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Conversations
+          </button>
+          <button
+            onClick={() => {
+              setStateFilter("Needs you");
+              setActiveTab("conversations");
+            }}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Escalations (1)
+          </button>
+          <button
+            onClick={() => setActiveTab("shipping")}
+            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
+          >
+            Delivery &amp; Shipping
+          </button>
+          <button
+            onClick={() => setActiveTab("general")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 ml-auto cursor-pointer"
+          >
+            Shop &amp; Webhooks
+          </button>
+        </div>
+
+        {shippingSavedToast && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2">
+            <span>✓</span>
+            <span>{shippingSavedToast}</span>
+          </div>
+        )}
+
+        {/* Section 1: Active Delivery Zones */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">Active Delivery Zones</h3>
+              <p className="text-xs text-gray-500">
+                Customers selecting these zones during WhatsApp chat or link checkout will be charged these exact rates.
+              </p>
+            </div>
+            <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full">
+              {shippingZones.length} {shippingZones.length === 1 ? "zone" : "zones"} active
+            </span>
+          </div>
+
+          <div className="border border-gray-100 rounded-xl overflow-hidden">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-gray-50/80 text-gray-500 border-b border-gray-100 font-semibold uppercase tracking-wider text-[10px]">
+                <tr>
+                  <th className="px-4 py-3">Code</th>
+                  <th className="px-4 py-3">Zone Coverage</th>
+                  <th className="px-4 py-3">Delivery Fee</th>
+                  <th className="px-4 py-3">Estimated Speed</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {shippingZones.map((z) => (
+                  <tr key={z.id} className="hover:bg-gray-50/60 transition-colors">
+                    <td className="px-4 py-3.5 font-mono text-gray-500 font-semibold">#{z.code}</td>
+                    <td className="px-4 py-3.5 font-bold text-gray-900">{z.name}</td>
+                    <td className="px-4 py-3.5 font-bold text-emerald-700">{z.feeFormatted}</td>
+                    <td className="px-4 py-3.5 text-gray-600">
+                      {z.code === 1 ? "Same Day / 24h" : z.code === 2 ? "24 - 48 Hours" : "2 - 4 Business Days"}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                        Active
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <button
+                        onClick={() => handleDeleteZone(z.code)}
+                        className="px-2.5 py-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                        title="Remove Zone"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {shippingZones.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-gray-400 text-xs">
+                      No shipping zones configured yet. Add your first zone below.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Section 2: Free Shipping Threshold & Rules */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">Free Shipping Incentive</h3>
+              <p className="text-xs text-gray-500">
+                Automatically waive delivery fee when order cart value meets or exceeds your threshold.
+              </p>
+            </div>
+            <button
+              onClick={() => setFreeShippingActive(!freeShippingActive)}
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+                freeShippingActive ? "bg-[#0d5c3a]" : "bg-gray-200"
+              }`}
+            >
+              <div
+                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                  freeShippingActive ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          {freeShippingActive && (
+            <div className="pt-2 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Minimum Order Value for Free Delivery (₦)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-gray-400 text-xs font-bold">₦</span>
+                  <input
+                    type="number"
+                    value={freeShippingThreshold}
+                    onChange={(e) => setFreeShippingThreshold(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-semibold"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 leading-relaxed bg-emerald-50/50 p-3 rounded-xl border border-emerald-100">
+                Co-Pilot will proactively notify buyers: &quot;Add ₦X more to qualify for Free Delivery across Lagos!&quot;
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Section 3: Customer Self-Pickup Hub */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">Store / Warehouse Pickup Hub</h3>
+              <p className="text-xs text-gray-500">
+                Allow customers to choose ₦0 self-collection from your store or pickup location.
+              </p>
+            </div>
+            <button
+              onClick={() => setPickupEnabled(!pickupEnabled)}
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+                pickupEnabled ? "bg-[#0d5c3a]" : "bg-gray-200"
+              }`}
+            >
+              <div
+                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                  pickupEnabled ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          {pickupEnabled && (
+            <div className="pt-2 border-t border-gray-100 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Pickup Hub Address &amp; Landmarks
+                </label>
+                <input
+                  type="text"
+                  value={pickupHubAddress}
+                  onChange={(e) => setPickupHubAddress(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-medium"
+                />
+              </div>
+              <div className="text-[11px] text-gray-500 flex items-center gap-1.5">
+                <span>📍</span>
+                <span>Operating hours: Monday – Saturday, 9:00 AM – 6:00 PM WAT</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Section 4: Courier & Logistics Partner Integration */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900">Courier Dispatch Partners</h3>
+            <p className="text-xs text-gray-500">
+              Default courier service assigned to orders when you click &quot;Dispatch Order&quot;.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                Primary Delivery Courier
+              </label>
+              <select
+                value={defaultCourier}
+                onChange={(e) => setDefaultCourier(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-semibold bg-white cursor-pointer"
+              >
+                <option value="In-house Dispatch & Gokada">In-house Dispatch &amp; Gokada</option>
+                <option value="GIG Logistics (Nationwide)">GIG Logistics (Nationwide)</option>
+                <option value="Kwik Delivery Express">Kwik Delivery Express</option>
+                <option value="DHL Express Nigeria">DHL Express Nigeria</option>
+                <option value="Max.ng On-demand">Max.ng On-demand</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                Dispatch Coordinator / Rider Hotline
+              </label>
+              <input
+                type="text"
+                value={courierPhone}
+                onChange={(e) => setCourierPhone(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-medium font-mono"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Modal: Add Zone */}
+        {addZoneModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm">Add Delivery Zone</h3>
+                <button
+                  onClick={() => setAddZoneModalOpen(false)}
+                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateShippingZone} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Zone Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Lekki Phase 1 & Ikoyi"
+                    value={newZoneName}
+                    onChange={(e) => setNewZoneName(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Flat Rate Fee (₦)</label>
+                  <input
+                    type="number"
+                    required
+                    placeholder="e.g. 3500"
+                    value={newZoneFee}
+                    onChange={(e) => setNewZoneFee(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Estimated Speed</label>
+                  <select
+                    value={newZoneSpeed}
+                    onChange={(e) => setNewZoneSpeed(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 cursor-pointer"
+                  >
+                    <option value="Same Day Express">Same Day Express</option>
+                    <option value="24-48 Hours">24-48 Hours (Standard)</option>
+                    <option value="2-4 Business Days">2-4 Business Days (Nationwide)</option>
+                  </select>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddZoneModalOpen(false)}
+                    className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg cursor-pointer"
+                  >
+                    Save Zone
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Sticky Bottom Save Bar */}
+        <div className="fixed bottom-0 left-0 lg:left-64 right-0 bg-white border-t border-gray-200 py-3 px-6 sm:px-8 flex items-center justify-end gap-3 z-30 shadow-lg">
+          <button
+            onClick={() => {
+              setShippingSavedToast("✓ Delivery & shipping settings saved.");
+              setTimeout(() => setShippingSavedToast(null), 3000);
+            }}
+            className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs cursor-pointer"
+          >
+            Save Delivery Settings
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   /* -------------------------------------------------------------------------- */
   /* Screen 3: Settings · Sales co-pilot conversation detail                     */
@@ -458,13 +847,19 @@ export function SettingsView({
               setStateFilter("Needs you");
               setActiveTab("conversations");
             }}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             Escalations (1)
           </button>
           <button
+            onClick={() => setActiveTab("shipping")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Delivery &amp; Shipping
+          </button>
+          <button
             onClick={() => setActiveTab("general")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 ml-auto"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 ml-auto cursor-pointer"
           >
             Shop &amp; Webhooks
           </button>
@@ -805,13 +1200,19 @@ export function SettingsView({
               setStateFilter("Needs you");
               setActiveTab("conversations");
             }}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             Escalations (1)
           </button>
           <button
+            onClick={() => setActiveTab("shipping")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Delivery &amp; Shipping
+          </button>
+          <button
             onClick={() => setActiveTab("general")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 ml-auto"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 ml-auto cursor-pointer"
           >
             Shop &amp; Webhooks
           </button>
@@ -1214,19 +1615,25 @@ export function SettingsView({
       <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
         <button
           onClick={() => setActiveTab("setup")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900"
+          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
         >
           Sales co-pilot
         </button>
         <button
           onClick={() => setActiveTab("conversations")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900"
+          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
         >
           Conversations
         </button>
         <button
+          onClick={() => setActiveTab("shipping")}
+          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+        >
+          Delivery &amp; Shipping
+        </button>
+        <button
           onClick={() => setActiveTab("general")}
-          className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold ml-auto"
+          className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold ml-auto cursor-pointer"
         >
           Shop &amp; Webhooks
         </button>

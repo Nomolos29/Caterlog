@@ -1,985 +1,849 @@
 "use client";
 
 import React, { useState } from "react";
+import { FilterIcon, CheckIcon } from "../icons";
 
 interface NetworkViewProps {
-  initialTab?: "find" | "catalog" | "resellers";
+  initialTab?: "my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers";
   onMirrorProducts?: (selectedSkus?: string[]) => void;
 }
 
-export function NetworkView({ initialTab = "find", onMirrorProducts }: NetworkViewProps) {
-  // Tabs: 'find' | 'catalog' | 'resellers'
-  const [activeTab, setActiveTab] = useState<"find" | "catalog" | "resellers">(initialTab);
+interface SupplierProduct {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  wholesaleCost: number;
+  suggestedRetail: number;
+  stock: number;
+  imageUrl: string;
+  moq: number;
+}
 
-  // Find suppliers filters
-  const [searchQuery, setSearchQuery] = useState("Home & living");
-  const [categoryFilter, setCategoryFilter] = useState("Home & living");
-  const [locationFilter, setLocationFilter] = useState("Lagos, Nigeria");
-  const [accessFilter, setAccessFilter] = useState("Open to resellers");
+interface SupplierProfile {
+  id: string;
+  name: string;
+  slug: string;
+  verified: boolean;
+  cacNumber: string;
+  category: string;
+  location: string;
+  warehouseAddress: string;
+  phone: string;
+  whatsapp: string;
+  rating: number;
+  totalFulfilled: number;
+  subAccountCode: string;
+  leadTime: string;
+  cutoffTime: string;
+  wholesaleTerms: {
+    moqDropship: number;
+    moqWholesale: number;
+    settlementTerms: string;
+    returnWindow: string;
+    suggestedMargin: string;
+    inventorySync: string;
+  };
+  products: SupplierProduct[];
+}
+
+const SUPPLIERS_DATA: SupplierProfile[] = [
+  {
+    id: "sup-1",
+    name: "Aroko Wholesale",
+    slug: "aroko-wholesale",
+    verified: true,
+    cacNumber: "RC-1928401",
+    category: "Kitchenware & Home Living",
+    location: "Lagos, Nigeria",
+    warehouseAddress: "Warehouse 3B, International Trade Fair Complex, Badagry Expressway, Lagos",
+    phone: "+234 802 888 1920",
+    whatsapp: "2348028881920",
+    rating: 4.9,
+    totalFulfilled: 1420,
+    subAccountCode: "SUB-AW-001",
+    leadTime: "Same day dispatch if ordered before 1:00 PM; 24h pickup at Ikeja hub",
+    cutoffTime: "1:00 PM WAT daily",
+    wholesaleTerms: {
+      moqDropship: 1,
+      moqWholesale: 5,
+      settlementTerms: "Instant escrow split via Monnify upon customer payment confirmation (0 net days)",
+      returnWindow: "48-hour return window for transit damage with unboxing video/photo proof",
+      suggestedMargin: "25% – 35% gross retail margin",
+      inventorySync: "Real-time webhook inventory reservations with automatic 15-minute hold TTL",
+    },
+    products: [
+      {
+        id: "p1",
+        sku: "AW-FL750",
+        name: "Stainless Steel Vacuum Flask · 750ml",
+        category: "Drinkware",
+        wholesaleCost: 8000,
+        suggestedRetail: 10000,
+        stock: 42,
+        imageUrl: "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
+        moq: 1,
+      },
+      {
+        id: "p2",
+        sku: "AW-LB1200",
+        name: "Insulated Lunch Box · 1.2L Double Compartment",
+        category: "Storage",
+        wholesaleCost: 6000,
+        suggestedRetail: 7500,
+        stock: 28,
+        imageUrl: "https://images.unsplash.com/photo-1544816155-12df9643f363?w=500&auto=format&fit=crop&q=60",
+        moq: 1,
+      },
+      {
+        id: "p3",
+        sku: "AW-SJ1000",
+        name: "Borosilicate Glass Storage Jar · 1L Airtight",
+        category: "Storage",
+        wholesaleCost: 3000,
+        suggestedRetail: 4000,
+        stock: 62,
+        imageUrl: "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60",
+        moq: 1,
+      },
+      {
+        id: "p4",
+        sku: "AW-AF5500",
+        name: "5.5L Digital Touchscreen Hot Air Fryer",
+        category: "Appliances",
+        wholesaleCost: 48000,
+        suggestedRetail: 65000,
+        stock: 15,
+        imageUrl: "https://images.unsplash.com/photo-1585659722983-3a675dabf23d?w=500&auto=format&fit=crop&q=60",
+        moq: 1,
+      },
+      {
+        id: "p5",
+        sku: "AW-EK2000",
+        name: "Electric Borosilicate Glass Kettle 2.0L",
+        category: "Appliances",
+        wholesaleCost: 14000,
+        suggestedRetail: 19500,
+        stock: 34,
+        imageUrl: "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=500&auto=format&fit=crop&q=60",
+        moq: 1,
+      },
+      {
+        id: "p6",
+        sku: "AW-KU1200",
+        name: "Silicone Kitchen Utensils 12-Piece Set",
+        category: "Kitchen Tools",
+        wholesaleCost: 9500,
+        suggestedRetail: 13500,
+        stock: 50,
+        imageUrl: "https://images.unsplash.com/photo-1590794056226-79ef3a8147e1?w=500&auto=format&fit=crop&q=60",
+        moq: 1,
+      },
+    ],
+  },
+  {
+    id: "sup-2",
+    name: "MegaKitch Importers",
+    slug: "megakitch-importers",
+    verified: true,
+    cacNumber: "RC-2049182",
+    category: "Kitchen Organizers & Storage",
+    location: "Alaba, Lagos",
+    warehouseAddress: "Section C, Alaba International Market, Ojo, Lagos",
+    phone: "+234 814 333 4455",
+    whatsapp: "2348143334455",
+    rating: 4.8,
+    totalFulfilled: 890,
+    subAccountCode: "SUB-MK-002",
+    leadTime: "Next-day dispatch for all Mainland & Island deliveries",
+    cutoffTime: "3:00 PM WAT daily",
+    wholesaleTerms: {
+      moqDropship: 1,
+      moqWholesale: 2,
+      settlementTerms: "Instant Monnify escrow split on order payment",
+      returnWindow: "72-hour factory defect replacement",
+      suggestedMargin: "30% – 45% gross retail margin",
+      inventorySync: "Daily morning inventory reconciliation",
+    },
+    products: [
+      {
+        id: "p7",
+        sku: "MK-CRT30",
+        name: "3-Tier Rolling Heavy Duty Metal Utility Cart",
+        category: "Organizers",
+        wholesaleCost: 18000,
+        suggestedRetail: 25000,
+        stock: 20,
+        imageUrl: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=500&auto=format&fit=crop&q=60",
+        moq: 1,
+      },
+      {
+        id: "p8",
+        sku: "MK-SP160",
+        name: "16-Jar Rotating Carousel Spice Rack",
+        category: "Organizers",
+        wholesaleCost: 7500,
+        suggestedRetail: 11000,
+        stock: 45,
+        imageUrl: "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60",
+        moq: 1,
+      },
+    ],
+  },
+];
+
+export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: NetworkViewProps) {
+  // Connected suppliers list
+  const [connectedSuppliers, setConnectedSuppliers] = useState<SupplierProfile[]>(SUPPLIERS_DATA);
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierProfile>(SUPPLIERS_DATA[0]);
+
+  // Default to my-suppliers first, unless user has 0 connected suppliers
+  const [activeTab, setActiveTab] = useState<"my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers">(
+    connectedSuppliers.length > 0 ? "my-suppliers" : "find-suppliers"
+  );
 
   // Supplier Catalog selection
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>(["flask", "lunchbox", "jar"]);
+  const [selectedProductSkus, setSelectedProductSkus] = useState<string[]>(["AW-FL750", "AW-LB1200", "AW-SJ1000"]);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogCategory, setCatalogCategory] = useState("ALL");
+  const [mirrorToast, setMirrorToast] = useState<string | null>(null);
+
+  // Supplier Messaging Modal
   const [supplierMsgModal, setSupplierMsgModal] = useState(false);
-  const [supplierMsgText, setSupplierMsgText] = useState("Hello Aroko Wholesale, we have mirrored your drinkware catalog and would like to confirm fulfillment lead times.");
-  const [supplierMsgSent, setSupplierMsgSent] = useState(false);
+  const [supplierMsgText, setSupplierMsgText] = useState(
+    `Hello ${selectedSupplier.name}, we have mirrored your catalog products and would like to confirm fulfillment dispatch turnaround for Lagos deliveries.`
+  );
 
   // Resellers permission states
-  const [viewCostsStock, setViewCostsStock] = useState(true);
-  const [setRetailPrices, setSetRetailPrices] = useState(true);
-  const [editMasterInventory, setEditMasterInventory] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteSent, setInviteSent] = useState(false);
-  const [permsSaved, setPermsSaved] = useState(false);
-  const [catalogAccessModal, setCatalogAccessModal] = useState(false);
 
-  const [catalogPermissions, setCatalogPermissions] = useState({
-    drinkware: "Open · 1 linked",
-    kitchen: "Open · 1 linked",
-    storage: "Open · 1 linked",
-    seasonal: "Restricted · Not shared",
-  });
-
-  const toggleSelect = (id: string) => {
-    if (selectedProductIds.includes(id)) {
-      setSelectedProductIds(selectedProductIds.filter((p) => p !== id));
+  const toggleSelectSku = (sku: string) => {
+    if (selectedProductSkus.includes(sku)) {
+      setSelectedProductSkus(selectedProductSkus.filter((s) => s !== sku));
     } else {
-      setSelectedProductIds([...selectedProductIds, id]);
+      setSelectedProductSkus([...selectedProductSkus, sku]);
     }
   };
 
-  /* -------------------------------------------------------------------------- */
-  /* Screen 8: Network · Supplier catalog (Aroko Wholesale)                     */
-  /* -------------------------------------------------------------------------- */
-  if (activeTab === "catalog") {
-    return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-16">
-        {/* Breadcrumb & Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="text-xs text-gray-500 mb-1 flex items-center gap-1.5">
-              <button
-                onClick={() => setActiveTab("find")}
-                className="hover:text-emerald-700 underline"
-              >
-                Network / Find suppliers
-              </button>
-              <span>/</span>
-              <span>Aroko Wholesale</span>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Aroko Wholesale</h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Home &amp; living wholesaler · Lagos, Nigeria
-            </p>
-            <div className="flex flex-wrap items-center gap-2 mt-2">
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Verified identity
-              </span>
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Open to resellers
-              </span>
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                Inventory synced just now
-              </span>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              if (onMirrorProducts) onMirrorProducts(selectedProductIds);
-            }}
-            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors self-start sm:self-center"
-          >
-            <span>Mirror {selectedProductIds.length} products</span>
-            <span>→</span>
-          </button>
+  const handleSelectAllInCatalog = (filteredProducts: SupplierProduct[]) => {
+    const allSkus = filteredProducts.map((p) => p.sku);
+    const allSelected = allSkus.every((s) => selectedProductSkus.includes(s));
+    if (allSelected) {
+      setSelectedProductSkus(selectedProductSkus.filter((s) => !allSkus.includes(s)));
+    } else {
+      setSelectedProductSkus(Array.from(new Set([...selectedProductSkus, ...allSkus])));
+    }
+  };
+
+  const handleMirrorSelected = () => {
+    if (onMirrorProducts) {
+      onMirrorProducts(selectedProductSkus);
+    }
+    setMirrorToast(`✓ Successfully mirrored ${selectedProductSkus.length} products to your reselling inventory!`);
+    setTimeout(() => setMirrorToast(null), 3000);
+  };
+
+  const handleViewSupplierCatalog = (sup: SupplierProfile) => {
+    setSelectedSupplier(sup);
+    setActiveTab("supplier-catalog");
+  };
+
+  // Filter products in catalog view
+  const catalogProducts = selectedSupplier.products.filter((p) => {
+    const matchesSearch =
+      p.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+      p.sku.toLowerCase().includes(catalogSearch.toLowerCase());
+    const matchesCat = catalogCategory === "ALL" || p.category === catalogCategory;
+    return matchesSearch && matchesCat;
+  });
+
+  const uniqueCategories = Array.from(new Set(selectedSupplier.products.map((p) => p.category)));
+
+  return (
+    <div className="space-y-6 sm:space-y-8 max-w-7xl mx-auto pb-16">
+      {/* Toast Notification */}
+      {mirrorToast && (
+        <div className="fixed top-18 right-8 z-50 bg-[#0d5c3a] text-white px-4 py-2.5 rounded-xl shadow-lg text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+          <span>✓</span>
+          <span>{mirrorToast}</span>
         </div>
+      )}
 
-        {/* Catalog Tabs */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
-          <button className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold">
-            Catalog (24)
-          </button>
-          <button
-            onClick={() => alert("Aroko Wholesale: Homeware and kitchen goods importer registered under CAC RC-982341. Ikeja central logistics hub.")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            Business details
-          </button>
-          <button
-            onClick={() => alert("Wholesale Terms: Minimum order quantity 1 unit. All prices quoted in NGN. Shared real-time stock pool.")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            Wholesale terms
-          </button>
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">Supplier Network</h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
+            Partner with verified Nigerian wholesale importers, mirror live product stock, and split payments via Monnify.
+          </p>
         </div>
+        <div className="flex items-center gap-2">
+          {activeTab === "supplier-catalog" && (
+            <button
+              onClick={handleMirrorSelected}
+              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-2"
+            >
+              <span>Publish ({selectedProductSkus.length}) to My Store</span>
+            </button>
+          )}
+        </div>
+      </div>
 
-        {/* 2 Column Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column (2 Cols) */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Product selection card */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">Select products to mirror</h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {selectedProductIds.length} selected · Your storefront uses your own selling prices
-                </p>
-              </div>
+      {/* Main Tab Strip: My Suppliers FIRST! Then Find Suppliers, then Catalog, then Resellers */}
+      <div className="flex border-b border-gray-200 text-xs font-semibold gap-6 overflow-x-auto pb-0.5">
+        <button
+          onClick={() => setActiveTab("my-suppliers")}
+          className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+            activeTab === "my-suppliers"
+              ? "border-emerald-600 text-emerald-700 font-bold"
+              : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
+          }`}
+        >
+          My Suppliers ({connectedSuppliers.length})
+        </button>
 
-              <input
-                type="text"
-                placeholder="Search name or SKU"
-                value={catalogSearch}
-                onChange={(e) => setCatalogSearch(e.target.value)}
-                className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
-              />
+        <button
+          onClick={() => setActiveTab("find-suppliers")}
+          className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+            activeTab === "find-suppliers"
+              ? "border-emerald-600 text-emerald-700 font-bold"
+              : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
+          }`}
+        >
+          Find Suppliers (Directory)
+        </button>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs min-w-[500px]">
-                  <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                    <tr>
-                      <th className="px-4 py-3">Product</th>
-                      <th className="px-4 py-3">Cost / Stock</th>
-                      <th className="px-4 py-3 text-right">Selection</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 text-gray-700">
-                    {/* 1. Flask */}
-                    <tr
-                      onClick={() => toggleSelect("flask")}
-                      className="cursor-pointer hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="px-4 py-3.5 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-lg">
-                          🧴
-                        </div>
-                        <div>
-                          <div className="font-semibold text-gray-900">Stainless flask</div>
-                          <div className="text-[11px] text-gray-400">750ml · AW-FL750</div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="font-medium text-gray-900">₦8,000</div>
-                        <div className="text-[11px] text-emerald-700 font-semibold">42 available</div>
-                      </td>
-                      <td className="px-4 py-3.5 text-right">
-                        {selectedProductIds.includes("flask") ? (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            ✓ Selected
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-gray-100 text-gray-600">
-                            Select
-                          </span>
-                        )}
-                      </td>
-                    </tr>
+        {activeTab === "supplier-catalog" && (
+          <button
+            onClick={() => setActiveTab("supplier-catalog")}
+            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-bold whitespace-nowrap cursor-pointer active:scale-95"
+          >
+            {selectedSupplier.name} · All Products
+          </button>
+        )}
 
-                    {/* 2. Lunch box */}
-                    <tr
-                      onClick={() => toggleSelect("lunchbox")}
-                      className="cursor-pointer hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="px-4 py-3.5 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-lg">
-                          🍱
-                        </div>
-                        <div>
-                          <div className="font-semibold text-gray-900">Lunch box · 1.2L</div>
-                          <div className="text-[11px] text-gray-400">AW-LB1200</div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="font-medium text-gray-900">₦6,000</div>
-                        <div className="text-[11px] text-emerald-700 font-semibold">28 available</div>
-                      </td>
-                      <td className="px-4 py-3.5 text-right">
-                        {selectedProductIds.includes("lunchbox") ? (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            ✓ Selected
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-gray-100 text-gray-600">
-                            Select
-                          </span>
-                        )}
-                      </td>
-                    </tr>
+        <button
+          onClick={() => setActiveTab("my-resellers")}
+          className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+            activeTab === "my-resellers"
+              ? "border-emerald-600 text-emerald-700 font-bold"
+              : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
+          }`}
+        >
+          My Resellers (Distribution)
+        </button>
+      </div>
 
-                    {/* 3. Storage jar */}
-                    <tr
-                      onClick={() => toggleSelect("jar")}
-                      className="cursor-pointer hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="px-4 py-3.5 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-lg">
-                          🫙
-                        </div>
-                        <div>
-                          <div className="font-semibold text-gray-900">Storage jar · 1L</div>
-                          <div className="text-[11px] text-gray-400">AW-SJ1000</div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="font-medium text-gray-900">₦3,000</div>
-                        <div className="text-[11px] text-emerald-700 font-semibold">62 available</div>
-                      </td>
-                      <td className="px-4 py-3.5 text-right">
-                        {selectedProductIds.includes("jar") ? (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            ✓ Selected
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-gray-100 text-gray-600">
-                            Select
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-
-                    {/* 4. Travel mug (Sold out) */}
-                    <tr className="opacity-60 bg-gray-50/50">
-                      <td className="px-4 py-3.5 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-lg">
-                          ☕
-                        </div>
-                        <div>
-                          <div className="font-semibold text-gray-700">Travel mug · 400ml</div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="font-medium text-gray-700">₦5,000</div>
-                        <div className="text-[11px] text-gray-400">0 available</div>
-                      </td>
-                      <td className="px-4 py-3.5 text-right">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-200 text-gray-700">
-                          Sold out
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="text-[11px] text-gray-400 pt-1">
-                Showing 4 of 24 products · <button onClick={() => alert("Showing all 24 wholesale items")} className="text-emerald-700 underline">View all products ↗</button>
-              </div>
-            </div>
-
-            {/* Shared stock notice */}
-            <div className="bg-[#ecfdf5] border border-emerald-100 rounded-2xl p-5 text-xs text-emerald-900 space-y-1">
-              <div className="font-bold flex items-center gap-1.5">
-                <span>✓</span>
-                <span>Shared stock, not a stock transfer</span>
-              </div>
-              <p className="text-[11px] text-emerald-800 leading-relaxed">
-                Mirroring creates linked listings in Nia Stores. Aroko keeps the master inventory; confirmed sales update that inventory across all linked catalogs.
-              </p>
-            </div>
-
-            {/* About this supplier */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-2 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">About this supplier</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Aroko supplies drinkware, kitchen essentials and storage products to independent merchants. Product costs and live availability are managed by the supplier.
-              </p>
-              <p className="text-[11px] text-gray-400">
-                Business verification confirms identity, not product quality or delivery performance.
-              </p>
-            </div>
-          </div>
-
-          {/* Right Column (1 Col) */}
-          <div className="space-y-6">
-            {/* Wholesale terms */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">Wholesale terms</h3>
-              <div className="divide-y divide-gray-100">
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Minimum order</span>
-                  <span className="font-semibold text-gray-900">1 unit</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Currency</span>
-                  <span className="font-semibold text-gray-900">NGN</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Fulfilled by</span>
-                  <span className="font-semibold text-gray-900">Aroko Wholesale</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Location</span>
-                  <span className="font-semibold text-gray-900">Ikeja, Lagos</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Delivery</span>
-                  <span className="font-semibold text-gray-900">Confirm per order</span>
-                </div>
-              </div>
-              <p className="text-[11px] text-gray-400">
-                No delivery date is guaranteed here. Pickup or delivery details are agreed before a commitment is sent to the customer.
-              </p>
-            </div>
-
-            {/* Reseller access */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">Reseller access</h3>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                Open to resellers
-              </span>
-              <p className="text-gray-600 leading-relaxed">
-                Mirror this catalog immediately. No approval request is required for this catalog.
-              </p>
-              <p className="text-[11px] text-gray-400">
-                Resellers can change retail prices and channels, but cannot edit supplier stock or costs.
+      {/* ---------------------------------------------------------------------- */}
+      {/* TAB 1: MY SUPPLIERS (FIRST! Shows Business Details & Wholesale Terms)  */}
+      {/* ---------------------------------------------------------------------- */}
+      {activeTab === "my-suppliers" && (
+        <div className="space-y-6">
+          {connectedSuppliers.length === 0 ? (
+            <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
+              <div className="text-4xl">🤝</div>
+              <h3 className="text-base font-bold text-gray-900">No Connected Suppliers Yet</h3>
+              <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                Explore the verified supplier directory to mirror products and start selling kitchenware, electronics, and home goods with zero inventory capital.
               </p>
               <button
-                onClick={() => {
-                  if (onMirrorProducts) onMirrorProducts(selectedProductIds);
-                }}
-                className="w-full py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
+                onClick={() => setActiveTab("find-suppliers")}
+                className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
               >
-                Mirror {selectedProductIds.length} products
+                Find Verified Suppliers →
               </button>
             </div>
+          ) : (
+            <div className="space-y-6">
+              {connectedSuppliers.map((sup) => (
+                <div
+                  key={sup.id}
+                  className="bg-white rounded-3xl border border-gray-100 shadow-2xs p-6 sm:p-8 space-y-6 hover:border-gray-200 transition-colors"
+                >
+                  {/* Supplier Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-gray-100 pb-5">
+                    <div className="flex items-start gap-4">
+                      <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-800 font-extrabold text-xl flex items-center justify-center shrink-0">
+                        {sup.name.charAt(0)}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-lg font-bold text-gray-900">{sup.name}</h2>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                            <CheckIcon className="w-3 h-3" />
+                            <span>Verified Importer</span>
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1 flex flex-wrap items-center gap-3">
+                          <span className="font-mono text-gray-700 font-semibold">{sup.cacNumber}</span>
+                          <span>•</span>
+                          <span>{sup.category}</span>
+                          <span>•</span>
+                          <span className="text-emerald-700 font-semibold">★ {sup.rating} ({sup.totalFulfilled} fulfilled)</span>
+                        </div>
+                      </div>
+                    </div>
 
-            {/* Supplier contact */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">Supplier contact</h3>
-              <div>
-                <div className="font-semibold text-gray-900">Aroko support</div>
-                <p className="text-gray-500 text-[11px] mt-0.5">
-                  Contact through Caterlog for product and fulfillment questions.
-                </p>
+                    <div className="flex items-center gap-2 self-start sm:self-center">
+                      <a
+                        href={`https://wa.me/${sup.whatsapp}?text=${encodeURIComponent(
+                          `Hello ${sup.name}, reaching out from Nia Stores regarding our wholesale partnership on Caterlog.`
+                        )}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3.5 py-2 rounded-xl border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 text-xs font-semibold transition-all shadow-2xs hover:shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                      >
+                        <span>WhatsApp Desk</span>
+                        <span>↗</span>
+                      </a>
+                      <button
+                        onClick={() => handleViewSupplierCatalog(sup)}
+                        className="px-4 py-2 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold transition-all shadow-2xs hover:shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                      >
+                        <span>View All Products ({sup.products.length}) →</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2 Column Details: Business Information vs Wholesale Terms */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
+                    {/* Left: Business Details */}
+                    <div className="bg-gray-50/70 rounded-2xl p-5 space-y-3 border border-gray-100">
+                      <div className="text-xs font-bold uppercase tracking-wider text-gray-900 flex items-center gap-2">
+                        <span>🏢</span>
+                        <span>Business & Fulfillment Details</span>
+                      </div>
+                      <div className="space-y-2 text-gray-600">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Warehouse Location:</span>
+                          <span className="font-medium text-gray-900 text-right max-w-[220px]">{sup.warehouseAddress}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Dispatch Cutoff:</span>
+                          <span className="font-semibold text-gray-900">{sup.cutoffTime}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Fulfillment Lead Time:</span>
+                          <span className="font-medium text-gray-900 text-right max-w-[220px]">{sup.leadTime}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Monnify Sub-Account:</span>
+                          <span className="font-mono font-bold text-emerald-800">{sup.subAccountCode} (Escrow Route)</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Contact Line:</span>
+                          <span className="font-mono text-gray-800">{sup.phone}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Wholesale Terms */}
+                    <div className="bg-emerald-50/40 rounded-2xl p-5 space-y-3 border border-emerald-100">
+                      <div className="text-xs font-bold uppercase tracking-wider text-emerald-900 flex items-center gap-2">
+                        <span>📄</span>
+                        <span>Wholesale Agreement & Terms</span>
+                      </div>
+                      <div className="space-y-2 text-gray-700">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Dropship MOQ:</span>
+                          <span className="font-bold text-emerald-950">{sup.wholesaleTerms.moqDropship} unit (No pre-funding)</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Settlement Terms:</span>
+                          <span className="font-medium text-emerald-950 text-right max-w-[220px]">
+                            {sup.wholesaleTerms.settlementTerms}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Suggested Retail Margin:</span>
+                          <span className="font-bold text-emerald-800">{sup.wholesaleTerms.suggestedMargin}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Damages & Returns:</span>
+                          <span className="font-medium text-gray-800 text-right max-w-[220px]">
+                            {sup.wholesaleTerms.returnWindow}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Inventory Sync:</span>
+                          <span className="font-medium text-gray-800 text-right max-w-[220px]">
+                            {sup.wholesaleTerms.inventorySync}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quick Catalog Preview Bar */}
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold text-gray-700">Popular Catalog Items</span>
+                      <button
+                        onClick={() => handleViewSupplierCatalog(sup)}
+                        className="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                      >
+                        Browse all {sup.products.length} products →
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {sup.products.slice(0, 3).map((prod) => (
+                        <div
+                          key={prod.id}
+                          className="p-3 rounded-2xl border border-gray-100 bg-gray-50/50 flex items-center gap-3"
+                        >
+                          <img src={prod.imageUrl} alt={prod.name} className="w-12 h-12 rounded-xl object-cover shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-xs text-gray-900 truncate">{prod.name}</div>
+                            <div className="text-[11px] text-gray-500 mt-0.5">
+                              Wholesale: <span className="font-bold text-emerald-800">₦{prod.wholesaleCost.toLocaleString()}</span>
+                            </div>
+                            <div className="text-[10px] text-gray-400">Stock: {prod.stock} units</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* TAB 2: SUPPLIER CATALOG (View All Products from a Supplier)             */}
+      {/* ---------------------------------------------------------------------- */}
+      {activeTab === "supplier-catalog" && (
+        <div className="space-y-6">
+          {/* Back button & Supplier Context Banner */}
+          <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <button
+                onClick={() => setActiveTab("my-suppliers")}
+                className="text-xs font-semibold text-gray-500 hover:text-gray-900 mb-2 flex items-center gap-1 cursor-pointer"
+              >
+                ← Back to My Suppliers
+              </button>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-gray-900">{selectedSupplier.name} · Wholesale Catalog</h2>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                  {selectedSupplier.products.length} Products
+                </span>
               </div>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Warehouse: {selectedSupplier.warehouseAddress} · Lead time: {selectedSupplier.leadTime}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setSupplierMsgModal(true)}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
+                className="px-3.5 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
               >
-                Message supplier
+                Message Supplier
+              </button>
+              <button
+                onClick={handleMirrorSelected}
+                className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+              >
+                Mirror Selected ({selectedProductSkus.length})
               </button>
             </div>
           </div>
-        </div>
 
-        {/* Message Supplier Dialog */}
-        {supplierMsgModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="font-bold text-gray-900 text-sm">Message Aroko Wholesale</h3>
-                <button onClick={() => setSupplierMsgModal(false)} className="text-gray-400 hover:text-gray-600">
-                  ✕
+          {/* Search & Category Filter Bar */}
+          <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-gray-400 text-xs">🔍</span>
+              <input
+                type="text"
+                placeholder="Search products by title or SKU..."
+                value={catalogSearch}
+                onChange={(e) => setCatalogSearch(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <button
+                onClick={() => setCatalogCategory("ALL")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  catalogCategory === "ALL"
+                    ? "bg-emerald-600 text-white shadow-2xs"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                All Categories
+              </button>
+              {uniqueCategories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setCatalogCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                    catalogCategory === cat
+                      ? "bg-emerald-600 text-white shadow-2xs"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Supplier All Products Table */}
+          <div className="bg-white rounded-3xl border border-gray-100 shadow-2xs overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={catalogProducts.length > 0 && catalogProducts.every((p) => selectedProductSkus.includes(p.sku))}
+                  onChange={() => handleSelectAllInCatalog(catalogProducts)}
+                  className="rounded text-emerald-600 cursor-pointer"
+                />
+                <span>Select all in view ({catalogProducts.length})</span>
+              </label>
+              <span className="text-xs text-gray-400 font-medium">
+                {selectedProductSkus.length} of {selectedSupplier.products.length} selected to mirror
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm min-w-[700px]">
+                <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+                  <tr>
+                    <th className="py-3 px-6 w-12">Select</th>
+                    <th className="py-3 px-6">Product</th>
+                    <th className="py-3 px-6">Category</th>
+                    <th className="py-3 px-6">Wholesale Cost</th>
+                    <th className="py-3 px-6">Suggested Retail</th>
+                    <th className="py-3 px-6">Gross Margin</th>
+                    <th className="py-3 px-6">Stock Available</th>
+                    <th className="py-3 px-6 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {catalogProducts.map((p) => {
+                    const isSelected = selectedProductSkus.includes(p.sku);
+                    const margin = p.suggestedRetail - p.wholesaleCost;
+                    const marginPct = Math.round((margin / p.suggestedRetail) * 100);
+                    return (
+                      <tr key={p.id} className={`hover:bg-gray-50/60 transition-colors ${isSelected ? "bg-emerald-50/20" : ""}`}>
+                        <td className="py-3.5 px-6">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectSku(p.sku)}
+                            className="rounded text-emerald-600 cursor-pointer"
+                          />
+                        </td>
+                        <td className="py-3.5 px-6">
+                          <div className="flex items-center gap-3">
+                            <img src={p.imageUrl} alt={p.name} className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                            <div>
+                              <div className="font-bold text-gray-900">{p.name}</div>
+                              <div className="text-[11px] font-mono text-gray-400 mt-0.5">{p.sku}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-6 text-gray-600">{p.category}</td>
+                        <td className="py-3.5 px-6 font-bold text-gray-900">₦{p.wholesaleCost.toLocaleString()}</td>
+                        <td className="py-3.5 px-6 font-medium text-gray-600">₦{p.suggestedRetail.toLocaleString()}</td>
+                        <td className="py-3.5 px-6 font-bold text-emerald-700">
+                          +{marginPct}% (₦{margin.toLocaleString()})
+                        </td>
+                        <td className="py-3.5 px-6">
+                          <span className={`font-semibold ${p.stock < 15 ? "text-amber-600 font-bold" : "text-gray-900"}`}>
+                            {p.stock} units
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-6 text-right">
+                          <button
+                            onClick={() => toggleSelectSku(p.sku)}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                              isSelected
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {isSelected ? "✓ Mirrored" : "+ Mirror SKU"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* TAB 3: FIND SUPPLIERS (Verified Directory)                             */}
+      {/* ---------------------------------------------------------------------- */}
+      {activeTab === "find-suppliers" && (
+        <div className="space-y-6">
+          {/* Directory Hero */}
+          <div className="bg-white rounded-3xl border border-gray-100 p-6 sm:p-8 shadow-2xs space-y-4">
+            <h2 className="text-base font-bold text-gray-900">Verified Nigerian Supplier Directory</h2>
+            <p className="text-xs text-gray-500 max-w-2xl leading-relaxed">
+              Connect with verified Lagos and nationwide importers. All suppliers in Caterlog are CAC verified and bound by standard Monnify split escrow settlement terms.
+            </p>
+          </div>
+
+          {/* Directory Supplier Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {SUPPLIERS_DATA.map((sup) => (
+              <div
+                key={sup.id}
+                className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs space-y-5 hover:border-emerald-300 transition-all flex flex-col justify-between"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-base text-gray-900">{sup.name}</h3>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800">
+                          CAC Verified
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5 font-mono">{sup.cacNumber} · {sup.category}</div>
+                    </div>
+                    <span className="text-xs font-bold text-emerald-700">★ {sup.rating}</span>
+                  </div>
+
+                  <p className="text-xs text-gray-600 leading-relaxed">
+                    Warehouse: {sup.warehouseAddress}. Fulfillment cutoff: {sup.cutoffTime}.
+                  </p>
+
+                  <div className="bg-gray-50 rounded-2xl p-3.5 space-y-1.5 text-xs text-gray-600">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Dropship MOQ:</span>
+                      <span className="font-semibold text-gray-900">{sup.wholesaleTerms.moqDropship} unit</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Escrow Settlement:</span>
+                      <span className="font-semibold text-emerald-700">Instant via Monnify</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Catalog Size:</span>
+                      <span className="font-semibold text-gray-900">{sup.products.length} Products Available</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    onClick={() => handleViewSupplierCatalog(sup)}
+                    className="flex-1 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold py-2.5 px-4 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all text-center"
+                  >
+                    View Products &amp; Terms
+                  </button>
+                  <a
+                    href={`https://wa.me/${sup.whatsapp}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3.5 py-2.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl cursor-pointer transition-all"
+                  >
+                    WhatsApp
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* TAB 4: MY RESELLERS (Downstream Network Distribution)                  */}
+      {/* ---------------------------------------------------------------------- */}
+      {activeTab === "my-resellers" && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl border border-gray-100 p-6 sm:p-8 shadow-2xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">My Resellers Network</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Manage sub-resellers authorized to mirror your products and sell downstream.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="email"
+                  placeholder="reseller@example.ng"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500"
+                />
+                <button
+                  onClick={() => {
+                    if (inviteEmail) {
+                      setInviteSent(true);
+                      setTimeout(() => setInviteSent(false), 3000);
+                      setInviteEmail("");
+                    }
+                  }}
+                  className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs cursor-pointer active:scale-95"
+                >
+                  {inviteSent ? "✓ Sent" : "Invite Reseller"}
                 </button>
               </div>
+            </div>
+
+            {/* Reseller Permissions Summary */}
+            <div className="border border-gray-100 rounded-2xl p-4 bg-gray-50/50 flex flex-wrap gap-4 text-xs text-gray-600">
+              <span className="font-bold text-gray-900">Default Reseller Permissions:</span>
+              <span>✓ View shared wholesale stock</span>
+              <span>✓ Set custom retail markup</span>
+              <span>✕ Cannot edit master catalog inventory</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Message Supplier Modal */}
+      {supplierMsgModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4 animate-in fade-in">
+            <div className="flex justify-between items-center border-b pb-3">
+              <div>
+                <h3 className="font-bold text-gray-900 text-sm">Message {selectedSupplier.name}</h3>
+                <p className="text-xs text-gray-400">Direct WhatsApp wholesale desk inquiry</p>
+              </div>
+              <button onClick={() => setSupplierMsgModal(false)} className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer">
+                ✕
+              </button>
+            </div>
+            <div>
               <textarea
                 rows={4}
                 value={supplierMsgText}
                 onChange={(e) => setSupplierMsgText(e.target.value)}
                 className="w-full text-xs p-3 border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600"
               />
-              {supplierMsgSent && (
-                <div className="text-xs text-emerald-800 bg-emerald-50 p-2 rounded">
-                  ✓ Message dispatched to Aroko Wholesale representative!
-                </div>
-              )}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setSupplierMsgSent(true);
-                    setTimeout(() => {
-                      setSupplierMsgSent(false);
-                      setSupplierMsgModal(false);
-                    }, 1200);
-                  }}
-                  className="flex-1 py-2 bg-[#0d5c3a] text-white text-xs font-semibold rounded-lg hover:bg-[#0b4b2f]"
-                >
-                  Send Message
-                </button>
-                <button
-                  onClick={() => setSupplierMsgModal(false)}
-                  className="px-4 py-2 border border-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
             </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  /* -------------------------------------------------------------------------- */
-  /* Screen 9: Network · My resellers (Supplier Perspective)                    */
-  /* -------------------------------------------------------------------------- */
-  if (activeTab === "resellers") {
-    return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-16">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="text-xs text-gray-500 mb-1">Network / My resellers</div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">My resellers</h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Manage who mirrors your catalogs and what they can access.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              const el = document.getElementById("invite-section");
-              if (el) el.scrollIntoView({ behavior: "smooth" });
-            }}
-            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors self-start sm:self-center"
-          >
-            Invite reseller
-          </button>
-        </div>
-
-        {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
-          <button
-            onClick={() => setActiveTab("find")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            Find suppliers
-          </button>
-          <button
-            onClick={() => setActiveTab("catalog")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            My suppliers (1)
-          </button>
-          <button
-            onClick={() => setActiveTab("resellers")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
-          >
-            My resellers (1)
-          </button>
-        </div>
-
-        {/* Banner */}
-        <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs space-y-1">
-          <div className="font-bold text-emerald-900 flex items-center gap-1.5">
-            <span>✓</span>
-            <span>Drinkware is open to resellers</span>
-          </div>
-          <p className="text-[11px] text-emerald-800 leading-relaxed">
-            Nia Stores mirrored products immediately because the catalog is marked Open to resellers. Restricted catalogs have separate access controls; this is not a universal approval policy.
-          </p>
-        </div>
-
-        {/* Connected Resellers Table Card */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
-          <div className="p-5 border-b border-gray-100">
-            <h3 className="text-sm font-bold text-gray-900">Connected resellers</h3>
-            <p className="text-xs text-gray-400 mt-0.5">1 relationship · Aroko Wholesale</p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[600px]">
-              <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                <tr>
-                  <th className="px-5 py-3">Reseller</th>
-                  <th className="px-4 py-3">Catalogs / Listings</th>
-                  <th className="px-4 py-3">Access</th>
-                  <th className="px-4 py-3">Sales</th>
-                  <th className="px-5 py-3 text-right">Manage</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-gray-700">
-                <tr>
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-gray-900">Nia Stores</div>
-                    <div className="text-[11px] text-gray-400">Verified · Lagos</div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="text-gray-900 font-medium">Drinkware, Kitchen, Storage</div>
-                    <div className="text-[11px] text-gray-400">3 linked products</div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                      Open catalog
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-semibold text-gray-900">₦50,000</div>
-                    <div className="text-[11px] text-gray-400">3 paid orders</div>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => {
-                        const el = document.getElementById("permissions-card");
-                        if (el) el.scrollIntoView({ behavior: "smooth" });
-                      }}
-                      className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-                    >
-                      Manage access
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* 2 Column Bottom: Permissions & Catalog Visibility / Invite */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Nia Stores Permissions Card */}
-          <div id="permissions-card" className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900">Nia Stores · permissions</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Connected 3 Nov 2026 · Mirrored from open catalogs</p>
-            </div>
-
-            <div className="divide-y divide-gray-100">
-              <div className="py-3 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-gray-900">View wholesale costs &amp; live stock</div>
-                  <div className="text-[11px] text-gray-400">Read-only access to linked product source data.</div>
-                </div>
-                <button
-                  onClick={() => setViewCostsStock(!viewCostsStock)}
-                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                    viewCostsStock ? "bg-[#0d5c3a]" : "bg-gray-200"
-                  }`}
-                >
-                  <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      viewCostsStock ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="py-3 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-gray-900">Set retail prices &amp; channels</div>
-                  <div className="text-[11px] text-gray-400">Reseller controls their own markup and storefront.</div>
-                </div>
-                <button
-                  onClick={() => setSetRetailPrices(!setRetailPrices)}
-                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                    setRetailPrices ? "bg-[#0d5c3a]" : "bg-gray-200"
-                  }`}
-                >
-                  <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      setRetailPrices ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="py-3 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-gray-900">Edit master inventory</div>
-                  <div className="text-[11px] text-gray-400">Not permitted. Stock remains supplier-owned.</div>
-                </div>
-                <button
-                  onClick={() => setEditMasterInventory(!editMasterInventory)}
-                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                    editMasterInventory ? "bg-[#0d5c3a]" : "bg-gray-200"
-                  }`}
-                >
-                  <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      editMasterInventory ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-
-            {/* Warning callout */}
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1">
-              <div className="font-bold text-amber-900 flex items-center gap-1.5">
-                <span>⚠</span>
-                <span>Restrict future access</span>
-              </div>
-              <p className="text-[11px] text-amber-800 leading-relaxed">
-                Changing a catalog to restricted stops new mirroring. Review existing reseller access explicitly; do not disrupt paid orders awaiting fulfillment.
-              </p>
-            </div>
-
             <div className="flex justify-end gap-2 pt-2">
-              {permsSaved && (
-                <span className="text-xs font-semibold text-emerald-700 mr-auto self-center">
-                  ✓ Permissions updated
-                </span>
-              )}
               <button
-                onClick={() => setPermsSaved(false)}
-                className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                onClick={() => setSupplierMsgModal(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 text-xs rounded-xl cursor-pointer"
               >
-                Discard
+                Cancel
               </button>
-              <button
-                onClick={() => {
-                  setPermsSaved(true);
-                  setTimeout(() => setPermsSaved(false), 2500);
-                }}
-                className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+              <a
+                href={`https://wa.me/${selectedSupplier.whatsapp}?text=${encodeURIComponent(supplierMsgText)}`}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setSupplierMsgModal(false)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl cursor-pointer"
               >
-                Save permissions
-              </button>
-            </div>
-          </div>
-
-          {/* Right Column: Catalog Visibility & Invite */}
-          <div className="space-y-6">
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">Catalog visibility</h3>
-              <div className="divide-y divide-gray-100">
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-600">Drinkware</span>
-                  <span className="font-semibold text-gray-900">{catalogPermissions.drinkware}</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-600">Kitchen essentials</span>
-                  <span className="font-semibold text-gray-900">{catalogPermissions.kitchen}</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-600">Storage</span>
-                  <span className="font-semibold text-gray-900">{catalogPermissions.storage}</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-600">Seasonal bundles</span>
-                  <span className="font-semibold text-rose-700">{catalogPermissions.seasonal}</span>
-                </div>
-              </div>
-              <button
-                onClick={() => setCatalogAccessModal(true)}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-              >
-                Edit catalog access
-              </button>
-            </div>
-
-            {/* Invite a reseller card */}
-            <div id="invite-section" className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">Invite a reseller</h3>
-              <div>
-                <label className="block text-[11px] font-semibold text-gray-500 mb-1">
-                  Business email
-                </label>
-                <input
-                  type="email"
-                  placeholder="Enter a business email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
-                />
-              </div>
-              <p className="text-[11px] text-gray-400">
-                Invites grant only the catalogs you select. No pending invitations.
-              </p>
-              {inviteSent && (
-                <div className="text-[11px] text-emerald-700 bg-emerald-50 p-2 rounded">
-                  ✓ Invitation email dispatched to {inviteEmail}
-                </div>
-              )}
-              <button
-                onClick={() => {
-                  if (inviteEmail) {
-                    setInviteSent(true);
-                    setTimeout(() => {
-                      setInviteSent(false);
-                      setInviteEmail("");
-                    }, 3000);
-                  }
-                }}
-                disabled={!inviteEmail}
-                className="w-full py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-800 text-xs font-semibold rounded-lg transition-colors"
-              >
-                Send invitation
-              </button>
+                Send via WhatsApp
+              </a>
             </div>
           </div>
         </div>
-
-        {/* Catalog Access Modal */}
-        {catalogAccessModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-xl">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="font-bold text-gray-900 text-sm">Edit Catalog Visibility</h3>
-                <button onClick={() => setCatalogAccessModal(false)} className="text-gray-400 hover:text-gray-600">
-                  ✕
-                </button>
-              </div>
-              <div className="space-y-3 text-xs">
-                {Object.entries(catalogPermissions).map(([key, val]) => (
-                  <div key={key} className="flex justify-between items-center">
-                    <span className="capitalize">{key}</span>
-                    <button
-                      onClick={() =>
-                        setCatalogPermissions((prev) => ({
-                          ...prev,
-                          [key]: prev[key as keyof typeof prev].includes("Open")
-                            ? "Restricted · Not shared"
-                            : "Open · 1 linked",
-                        }))
-                      }
-                      className="px-2.5 py-1 text-xs border rounded-lg hover:bg-gray-50"
-                    >
-                      {val.includes("Open") ? "Set Restricted" : "Set Open"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={() => setCatalogAccessModal(false)}
-                className="w-full py-2 bg-[#0d5c3a] text-white text-xs font-semibold rounded-lg hover:bg-[#0b4b2f]"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  /* -------------------------------------------------------------------------- */
-  /* Screen 7: Network · Find suppliers                                         */
-  /* -------------------------------------------------------------------------- */
-  return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-16">
-      {/* Header */}
-      <div>
-        <div className="text-xs text-gray-500 mb-1">Network / Find suppliers</div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Find suppliers</h1>
-        <p className="text-xs text-gray-500 mt-0.5">
-          Discover wholesale catalogs. Connect stock, set your margin and start selling.
-        </p>
-      </div>
-
-      {/* Tab Strip */}
-      <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
-        <button
-          onClick={() => setActiveTab("find")}
-          className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
-        >
-          Find suppliers
-        </button>
-        <button
-          onClick={() => setActiveTab("catalog")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900"
-        >
-          My suppliers (1)
-        </button>
-        <button
-          onClick={() => setActiveTab("resellers")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900"
-        >
-          My resellers
-        </button>
-      </div>
-
-      {/* Directory Filter Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-white p-4 rounded-2xl border border-gray-200 shadow-xs">
-        <div>
-          <label className="block text-[11px] font-semibold text-gray-500 mb-1">Search the directory</label>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
-          />
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold text-gray-500 mb-1">Category</label>
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
-          >
-            <option>Home &amp; living</option>
-            <option>Electronics</option>
-            <option>Fashion</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold text-gray-500 mb-1">Location</label>
-          <select
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
-          >
-            <option>Lagos, Nigeria</option>
-            <option>Abuja, Nigeria</option>
-            <option>Ibadan, Nigeria</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold text-gray-500 mb-1">Access</label>
-          <select
-            value={accessFilter}
-            onChange={(e) => setAccessFilter(e.target.value)}
-            className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
-          >
-            <option>Open to resellers</option>
-            <option>Requires request</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Status Bar */}
-      <div className="flex items-center justify-between text-xs text-gray-500">
-        <div>1 verified supplier · 3 matching catalogs</div>
-        <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-[10px]">
-          ● Live inventory
-        </span>
-      </div>
-
-      {/* Verified Supplier Card: Aroko Wholesale */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-bold text-gray-900">Aroko Wholesale</h3>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                Verified
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Verified business · Lagos, Nigeria · Home &amp; living
-            </p>
-          </div>
-          <button
-            onClick={() => setActiveTab("catalog")}
-            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors self-start sm:self-center"
-          >
-            <span>View supplier &amp; catalog</span>
-            <span>→</span>
-          </button>
-        </div>
-
-        <p className="text-xs text-gray-700 leading-relaxed max-w-3xl">
-          Practical everyday homeware for independent shops. Mirror selected products and sell from one shared stock pool.
-        </p>
-
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-            Open to resellers
-          </span>
-          <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-600">
-            24 live products
-          </span>
-        </div>
-
-        <div className="text-[11px] text-gray-500">
-          Wholesale from ₦3,000 · Minimum 1 unit · Pickup or merchant-arranged delivery
-        </div>
-
-        {/* 3 Categories preview */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-          <div
-            onClick={() => setActiveTab("catalog")}
-            className="p-4 bg-gray-50/70 border border-gray-100 rounded-xl hover:border-emerald-300 cursor-pointer transition-all space-y-1"
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-xl">🧴</span>
-              <div>
-                <div className="font-semibold text-xs text-gray-900">Drinkware</div>
-                <div className="text-[10px] text-gray-400">8 products · from ₦5,000</div>
-              </div>
-            </div>
-            <div className="text-[11px] font-medium text-emerald-700 pt-1">126 units available</div>
-            <div className="text-[11px] text-gray-400 flex items-center gap-1">Browse products ↗</div>
-          </div>
-
-          <div
-            onClick={() => setActiveTab("catalog")}
-            className="p-4 bg-gray-50/70 border border-gray-100 rounded-xl hover:border-emerald-300 cursor-pointer transition-all space-y-1"
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-xl">🍱</span>
-              <div>
-                <div className="font-semibold text-xs text-gray-900">Kitchen essentials</div>
-                <div className="text-[10px] text-gray-400">10 products · from ₦6,000</div>
-              </div>
-            </div>
-            <div className="text-[11px] font-medium text-emerald-700 pt-1">84 units available</div>
-            <div className="text-[11px] text-gray-400 flex items-center gap-1">Browse products ↗</div>
-          </div>
-
-          <div
-            onClick={() => setActiveTab("catalog")}
-            className="p-4 bg-gray-50/70 border border-gray-100 rounded-xl hover:border-emerald-300 cursor-pointer transition-all space-y-1"
-          >
-            <div className="flex items-center gap-2">
-              <span className="text-xl">🫙</span>
-              <div>
-                <div className="font-semibold text-xs text-gray-900">Storage &amp; organisation</div>
-                <div className="text-[10px] text-gray-400">6 products · from ₦3,000</div>
-              </div>
-            </div>
-            <div className="text-[11px] font-medium text-emerald-700 pt-1">62 units available</div>
-            <div className="text-[11px] text-gray-400 flex items-center gap-1">Browse products ↗</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom 2 Cards: No results & One connected catalog */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-          <div>
-            <h3 className="text-xs font-bold text-gray-900">Can&apos;t find a match?</h3>
-            <p className="text-[11px] text-gray-400">No-results treatment</p>
-          </div>
-          <p className="text-gray-600 leading-relaxed">
-            No suppliers match &ldquo;Electronics&rdquo; in this location. Remove a category or expand your location to search again.
-          </p>
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              onClick={() => {
-                setSearchQuery("Home & living");
-                setCategoryFilter("Home & living");
-                setLocationFilter("Lagos, Nigeria");
-              }}
-              className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-            >
-              Clear filters
-            </button>
-            <button
-              onClick={() => alert("Showing all available wholesale categories")}
-              className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-            >
-              Browse all categories
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-          <h3 className="text-xs font-bold text-gray-900">One connected catalog</h3>
-          <div className="divide-y divide-gray-100">
-            <div className="py-2 flex justify-between">
-              <span className="text-gray-500">Supplier owns</span>
-              <span className="font-semibold text-gray-900">Master stock &amp; costs</span>
-            </div>
-            <div className="py-2 flex justify-between">
-              <span className="text-gray-500">You control</span>
-              <span className="font-semibold text-gray-900">Retail price &amp; channels</span>
-            </div>
-          </div>
-          <p className="text-[11px] text-gray-400 leading-relaxed">
-            Open catalogs mirror immediately. Restricted catalogs show their own access requirements.
-          </p>
-        </div>
-      </div>
-
-      {/* Demonstration disclaimer */}
-      <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-xs flex items-start gap-3">
-        <span className="text-gray-400 font-bold">ℹ</span>
-        <div className="text-gray-600">
-          <span className="font-bold text-gray-800">Shared demonstration assumptions</span>
-          <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-            Fictional Nigerian businesses and illustrative policies/pricing. Open-catalog access, approval rules, fee/refund liability and settlement timing need confirmation. Examples use a ₦300 fee borne by Nia Stores; no shipping is charged in the sample order. Market Boost is illustrated at ₦15,000/month. Exception panels are separate scenarios.
-          </p>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

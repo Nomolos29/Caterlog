@@ -207,32 +207,41 @@ export function TopNav({
                   ))}
                 </div>
 
-                <div className="pt-2 border-t border-gray-100 text-center">
+                <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
+                  <button
+                    onClick={() => {
+                      setNotificationsOpen(false);
+                      onNavigateToView?.("notifications");
+                    }}
+                    className="font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                  >
+                    View All in Alerts Center →
+                  </button>
                   <button
                     onClick={() => {
                       setNotificationsOpen(false);
                       onNavigateToView?.("settings");
                     }}
-                    className="text-xs font-bold text-gray-500 hover:text-gray-900"
+                    className="text-gray-400 hover:text-gray-700 cursor-pointer"
                   >
-                    Notification Preferences →
+                    Preferences
                   </button>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Profile Avatar & Quick Account Switcher */}
+          {/* Profile Avatar & Account Menu */}
           <div className="relative">
             <button
               onClick={() => {
                 setProfileOpen(!profileOpen);
                 setNotificationsOpen(false);
               }}
-              className="w-7 h-7 rounded-full bg-[#eef2ff] text-[#1e1b4b] border border-indigo-200 flex items-center justify-center font-bold text-xs hover:ring-2 hover:ring-emerald-400 transition-all ml-1"
+              className="w-7 h-7 rounded-full bg-[#eef2ff] text-[#1e1b4b] border border-indigo-200 flex items-center justify-center font-bold text-xs hover:ring-2 hover:ring-emerald-400 transition-all ml-1 cursor-pointer"
               title="Merchant Account"
             >
-              {initials}
+              NS
             </button>
 
             {/* Profile Dropdown */}
@@ -240,7 +249,7 @@ export function TopNav({
               <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-gray-100 p-4 z-50">
                 <div className="flex items-center gap-3 pb-3 border-b border-gray-100">
                   <div className="w-10 h-10 rounded-full bg-[#eef2ff] text-[#1e1b4b] flex items-center justify-center font-bold text-sm shrink-0">
-                    {initials}
+                    NS
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-gray-900 truncate">{vendor.businessName}</div>
@@ -260,17 +269,6 @@ export function TopNav({
                 <div className="py-2 space-y-1">
                   <button
                     onClick={() => {
-                      onToggleWorkspace?.();
-                      setProfileOpen(false);
-                    }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center justify-between cursor-pointer"
-                  >
-                    <span>Switch to {activeWorkspace === "reseller" ? "Aroko Wholesale" : "Nia Stores"}</span>
-                    <span className="text-[10px] text-gray-400 font-mono">↗</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
                       onNavigateToView?.("verification");
                       setProfileOpen(false);
                     }}
@@ -281,12 +279,32 @@ export function TopNav({
 
                   <button
                     onClick={() => {
+                      onNavigateToView?.("shipping");
+                      setProfileOpen(false);
+                    }}
+                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+                  >
+                    Delivery &amp; Shipping Zones
+                  </button>
+
+                  <button
+                    onClick={() => {
                       onNavigateToView?.("team");
                       setProfileOpen(false);
                     }}
                     className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
                   >
-                    Team & Activity Audit Log
+                    Team &amp; Activity Audit Log
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      onNavigateToView?.("notifications");
+                      setProfileOpen(false);
+                    }}
+                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+                  >
+                    Notification Center
                   </button>
 
                   <button
@@ -296,14 +314,14 @@ export function TopNav({
                     }}
                     className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
                   >
-                    Settings & Integrations
+                    Settings &amp; Webhooks
                   </button>
 
                   <a
                     href="https://wa.me/2348000000000"
                     target="_blank"
                     rel="noreferrer"
-                    className="block px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    className="block px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
                   >
                     Merchant Support (WhatsApp)
                   </a>

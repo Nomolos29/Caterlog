@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import type { ProductItem } from "@/lib/types";
 import { PlusIcon } from "../icons";
+import { ProductEditorModal } from "./product-editor-modal";
 
 interface ProductsViewProps {
   products: ProductItem[];
@@ -99,6 +100,10 @@ export function ProductsView({
   const [supplierMsgText, setSupplierMsgText] = useState("Hi Aroko Wholesale, can you confirm if same-day delivery to Lekki before 4pm is feasible for Order CT-1042?");
   const [supplierMsgSent, setSupplierMsgSent] = useState(false);
   const [internalNote, setInternalNote] = useState("Awaiting supplier delivery confirmation");
+
+  // Product Editor & Add Modal
+  const [editorModalOpen, setEditorModalOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<ProductItem | null>(null);
 
   // Standard product add modal
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1157,11 +1162,14 @@ export function ProductsView({
           <p className="text-sm text-gray-500 mt-0.5">Manage your digital inventory and live WhatsApp catalog.</p>
         </div>
         <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-semibold text-xs py-2 px-3.5 rounded-lg flex items-center gap-2 shadow-xs transition-colors self-start sm:self-center"
+          onClick={() => {
+            setEditingProduct(null);
+            setEditorModalOpen(true);
+          }}
+          className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-semibold text-xs py-2 px-3.5 rounded-lg flex items-center gap-2 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 self-start sm:self-center"
         >
           <PlusIcon className="w-4 h-4" />
-          <span>{showAddForm ? "Close Form" : "Add Product"}</span>
+          <span>Add Product &amp; Variants</span>
         </button>
       </div>
 
@@ -1240,11 +1248,18 @@ export function ProductsView({
       {/* Products Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {products.map((p) => (
-          <div key={p.id} className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-xs">
-            <div className="h-44 bg-gray-50 flex items-center justify-center border-b border-gray-100">
+          <div
+            key={p.id}
+            onClick={() => {
+              setEditingProduct(p);
+              setEditorModalOpen(true);
+            }}
+            className="bg-white rounded-2xl border border-gray-100 hover:border-gray-300 overflow-hidden shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
+          >
+            <div className="h-44 bg-gray-50 flex items-center justify-center border-b border-gray-100 overflow-hidden">
               {p.primaryImageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={p.primaryImageUrl} alt={p.name} className="h-full w-full object-cover" />
+                <img src={p.primaryImageUrl} alt={p.name} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200" />
               ) : (
                 <div className="text-3xl">📦</div>
               )}
@@ -1252,7 +1267,9 @@ export function ProductsView({
             <div className="p-5 space-y-3">
               <div className="flex justify-between items-start">
                 <div>
-                  <h3 className="font-bold text-gray-900 text-sm">{p.name}</h3>
+                  <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-700 transition-colors">
+                    {p.name}
+                  </h3>
                   <div className="text-[11px] font-mono text-gray-400 mt-0.5">{p.skuCode}</div>
                 </div>
                 <div className="font-bold text-emerald-800 text-sm">
@@ -1267,6 +1284,30 @@ export function ProductsView({
           </div>
         ))}
       </div>
+
+      {/* Full Product & Variant Editor Modal */}
+      <ProductEditorModal
+        isOpen={editorModalOpen}
+        product={editingProduct}
+        onClose={() => {
+          setEditorModalOpen(false);
+          setEditingProduct(null);
+        }}
+        onSave={async (data) => {
+          if (editingProduct) {
+            await onUpdateStock(editingProduct.skuCode, data.stockTotal);
+          } else {
+            await onAddProduct({
+              name: data.name,
+              skuCode: data.skuCode,
+              priceNaira: data.priceNaira,
+              stockTotal: data.stockTotal,
+              primaryImageUrl: data.primaryImageUrl,
+            });
+          }
+          return true;
+        }}
+      />
     </div>
   );
 }
