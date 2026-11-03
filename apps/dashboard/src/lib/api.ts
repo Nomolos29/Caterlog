@@ -167,6 +167,33 @@ export const api = {
       ...jsonBody(input),
     });
   },
+
+  syncWhatsAppCatalog(deleteMissing = true): Promise<{
+    result: {
+      attempted: number;
+      upserted: number;
+      deleted: number;
+      failed: Array<{ skuCode: string; error: string }>;
+      mode: "mock" | "live";
+      catalogId: string | null;
+    };
+    state: VendorState;
+  }> {
+    return request<{
+      result: {
+        attempted: number;
+        upserted: number;
+        deleted: number;
+        failed: Array<{ skuCode: string; error: string }>;
+        mode: "mock" | "live";
+        catalogId: string | null;
+      };
+      state: VendorState;
+    }>("/api/v1/vendor/catalog/sync", {
+      method: "POST",
+      ...jsonBody({ deleteMissing }),
+    });
+  },
 };
 
 export type { Order };

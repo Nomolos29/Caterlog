@@ -16,6 +16,7 @@ interface TopNavProps {
   onSelectOrder?: (order: OrderItem) => void;
   onSelectProduct?: (sku: string) => void;
   onNavigateToView?: (view: string) => void;
+  onSignOut?: () => void;
 }
 
 interface NotificationItem {
@@ -41,6 +42,7 @@ export function TopNav({
   onSelectOrder,
   onSelectProduct,
   onNavigateToView,
+  onSignOut,
 }: TopNavProps) {
   const initials = activeWorkspace === "reseller" ? "NS" : "AW";
 
@@ -325,6 +327,19 @@ export function TopNav({
                   >
                     Merchant Support (WhatsApp)
                   </a>
+
+                  <div className="pt-2 border-t border-gray-100">
+                    <button
+                      onClick={() => {
+                        setProfileOpen(false);
+                        onSignOut?.();
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 cursor-pointer flex items-center justify-between transition-colors"
+                    >
+                      <span>Sign out</span>
+                      <span className="text-[10px] text-gray-400">Esc</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

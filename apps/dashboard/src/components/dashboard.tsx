@@ -19,9 +19,17 @@ import { AnalyticsView } from "./views/analytics-view";
 import { VerificationView } from "./views/verification-view";
 import { TeamView } from "./views/team-view";
 import { NotificationsView } from "./views/notifications-view";
+import { AuthView } from "./views/auth-view";
 import { ChatDrawer } from "./chat-drawer";
 
 export function Dashboard() {
+  const [authSession, setAuthSession] = useState<{
+    email: string;
+    businessName: string;
+  } | null>({
+    email: "owner@niastores.example",
+    businessName: "Nia Stores",
+  });
   const [state, setState] = useState<VendorState | null>(null);
   const [currentView, setCurrentView] = useState<NavView>("overview");
   const [settingsTab, setSettingsTab] = useState<"setup" | "conversations" | "detail" | "shipping" | "general">("setup");
@@ -76,6 +84,18 @@ export function Dashboard() {
       if (fresh) setSelectedOrder(fresh);
     }
   }, [state?.orders, selectedOrder]);
+
+  if (!authSession) {
+    return (
+      <AuthView
+        initialMode="login"
+        onLoginSuccess={(user) => {
+          setAuthSession(user);
+          void loadState();
+        }}
+      />
+    );
+  }
 
   if (loading || !state) {
     return (
@@ -201,6 +221,17 @@ export function Dashboard() {
     }
   };
 
+  const handleSyncWhatsAppCatalog = async () => {
+    try {
+      const res = await api.syncWhatsAppCatalog(true);
+      if (res.state) setState(res.state);
+      return res.result;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  };
+
   // WhatsApp Simulator Handlers
   const handleSendVendorKeyword = async (text: string, attachedImage?: string) => {
     const res = await api.simulateWhatsApp({
@@ -320,6 +351,7 @@ export function Dashboard() {
               setCurrentView(v as NavView);
             }
           }}
+          onSignOut={() => setAuthSession(null)}
         />
 
         {/* View Surface */}
@@ -365,6 +397,7 @@ export function Dashboard() {
               onUpdateStock={handleUpdateStock}
               onNavigateToNetwork={() => setCurrentView("network")}
               onNavigateToSettings={() => setCurrentView("settings")}
+              onSyncWhatsAppCatalog={handleSyncWhatsAppCatalog}
             />
           )}
 

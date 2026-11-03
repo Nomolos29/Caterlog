@@ -18,6 +18,13 @@ interface ProductsViewProps {
   onUpdateStock: (sku: string, stock: number) => Promise<boolean>;
   onNavigateToNetwork?: (tab?: string) => void;
   onNavigateToSettings?: (tab?: string, subId?: string) => void;
+  onSyncWhatsAppCatalog?: () => Promise<{
+    attempted: number;
+    upserted: number;
+    deleted: number;
+    mode: string;
+    catalogId: string | null;
+  } | null>;
 }
 
 interface ResellingItem {
@@ -71,10 +78,31 @@ export function ProductsView({
   onUpdateStock,
   onNavigateToNetwork,
   onNavigateToSettings,
+  onSyncWhatsAppCatalog,
 }: ProductsViewProps) {
   // Tabs: 'all' | 'my-inventory' | 'reselling' | 'exceptions' | 'mirror-wizard'
   const [activeTab, setActiveTab] = useState<"all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard">(initialTab);
   const [resellingList, setResellingList] = useState<ResellingItem[]>(INITIAL_RESELLING);
+
+  // WhatsApp catalog sync state
+  const [syncingCatalog, setSyncingCatalog] = useState(false);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
+
+  const handleSyncCatalog = async () => {
+    if (!onSyncWhatsAppCatalog) return;
+    setSyncingCatalog(true);
+    try {
+      const res = await onSyncWhatsAppCatalog();
+      if (res) {
+        setSyncToast(
+          `✓ WhatsApp Catalog Synced! ${res.upserted} product(s) published to Meta (${res.mode} mode).`
+        );
+        setTimeout(() => setSyncToast(null), 4000);
+      }
+    } finally {
+      setSyncingCatalog(false);
+    }
+  };
 
   // Reselling state
   const [searchReselling, setSearchReselling] = useState("");
@@ -914,17 +942,35 @@ export function ProductsView({
               Your prices. Supplier inventory. Every linked listing stays in sync.
             </p>
           </div>
-          <button
-            onClick={() => {
-              if (onNavigateToNetwork) onNavigateToNetwork("catalog");
-              else setActiveTab("mirror-wizard");
-            }}
-            className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-medium text-xs py-2 px-3.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-colors self-start sm:self-center"
-          >
-            <span>Find more products</span>
-            <span>→</span>
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            <button
+              onClick={handleSyncCatalog}
+              disabled={syncingCatalog}
+              className="px-3.5 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-60"
+              title="Push product pricing and stock updates to WhatsApp Business Catalog"
+            >
+              <span className={syncingCatalog ? "animate-spin" : ""}>🔄</span>
+              <span>{syncingCatalog ? "Syncing..." : "Sync WhatsApp Catalog"}</span>
+            </button>
+            <button
+              onClick={() => {
+                if (onNavigateToNetwork) onNavigateToNetwork("catalog");
+                else setActiveTab("mirror-wizard");
+              }}
+              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-medium text-xs py-2 px-3.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            >
+              <span>Find more products</span>
+              <span>→</span>
+            </button>
+          </div>
         </div>
+
+        {syncToast && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2 animate-in fade-in">
+            <span>✓</span>
+            <span>{syncToast}</span>
+          </div>
+        )}
 
         {/* Tab Strip */}
         <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
@@ -1161,17 +1207,35 @@ export function ProductsView({
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Products</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage your digital inventory and live WhatsApp catalog.</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingProduct(null);
-            setEditorModalOpen(true);
-          }}
-          className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-semibold text-xs py-2 px-3.5 rounded-lg flex items-center gap-2 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 self-start sm:self-center"
-        >
-          <PlusIcon className="w-4 h-4" />
-          <span>Add Product &amp; Variants</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <button
+            onClick={handleSyncCatalog}
+            disabled={syncingCatalog}
+            className="px-3.5 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-60"
+            title="Push product pricing and stock updates to WhatsApp Business Catalog"
+          >
+            <span className={syncingCatalog ? "animate-spin" : ""}>🔄</span>
+            <span>{syncingCatalog ? "Syncing..." : "Sync WhatsApp Catalog"}</span>
+          </button>
+          <button
+            onClick={() => {
+              setEditingProduct(null);
+              setEditorModalOpen(true);
+            }}
+            className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-semibold text-xs py-2 px-3.5 rounded-lg flex items-center gap-2 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+          >
+            <PlusIcon className="w-4 h-4" />
+            <span>Add Product &amp; Variants</span>
+          </button>
+        </div>
       </div>
+
+      {syncToast && (
+        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2 animate-in fade-in">
+          <span>✓</span>
+          <span>{syncToast}</span>
+        </div>
+      )}
 
       {/* Tab Strip */}
       <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
