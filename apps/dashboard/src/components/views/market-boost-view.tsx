@@ -2,9 +2,18 @@
 
 import React, { useState } from "react";
 
-export function MarketBoostView() {
+interface MarketBoostViewProps {
+  initialTab?: "visibility" | "setup" | "subscription";
+}
+
+export function MarketBoostView({ initialTab = "visibility" }: MarketBoostViewProps) {
   // Tabs: 'visibility' | 'setup' | 'subscription'
-  const [activeTab, setActiveTab] = useState<"visibility" | "setup" | "subscription">("visibility");
+  const [activeTab, setActiveTab] = useState<"visibility" | "setup" | "subscription">(initialTab);
+
+  // Listing status
+  const [listingPublished, setListingPublished] = useState(true);
+  const [showDirPreviewModal, setShowDirPreviewModal] = useState(false);
+  const [showResellerModal, setShowResellerModal] = useState(false);
 
   // Listing setup form states
   const [businessName, setBusinessName] = useState("Aroko Wholesale");
@@ -24,18 +33,23 @@ export function MarketBoostView() {
   const [featStorage, setFeatStorage] = useState(true);
   const [featSeasonal, setFeatSeasonal] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
+  const [publishSuccess, setPublishSuccess] = useState(false);
 
   // Subscription checkout form states
   const [billingEmail, setBillingEmail] = useState("billing@aroko.example");
   const [agreedTerms, setAgreedTerms] = useState(true);
   const [paying, setPaying] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [autoRenew, setAutoRenew] = useState(true);
+
+  const featuredCatalogsCount = [featDrinkware, featKitchen, featStorage, featSeasonal].filter(Boolean).length;
 
   const handlePayAndActivate = () => {
     setPaying(true);
     setTimeout(() => {
       setPaying(false);
       setPaymentSuccess(true);
+      setListingPublished(true);
       setTimeout(() => {
         setActiveTab("visibility");
         setPaymentSuccess(false);
@@ -48,7 +62,7 @@ export function MarketBoostView() {
   /* -------------------------------------------------------------------------- */
   if (activeTab === "subscription") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Header */}
         <div>
           <div className="text-xs text-gray-500 mb-1">Market Boost / Subscription</div>
@@ -151,7 +165,7 @@ export function MarketBoostView() {
                   type="email"
                   value={billingEmail}
                   onChange={(e) => setBillingEmail(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg"
+                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
                 />
               </div>
 
@@ -253,7 +267,7 @@ export function MarketBoostView() {
               </p>
               <button
                 onClick={() => setActiveTab("visibility")}
-                className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold block pt-1"
+                className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold block pt-1 text-left"
               >
                 Next → Visibility &amp; performance
               </button>
@@ -269,7 +283,7 @@ export function MarketBoostView() {
   /* -------------------------------------------------------------------------- */
   if (activeTab === "setup") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-20">
+      <div className="space-y-6 max-w-6xl mx-auto pb-24">
         {/* Header */}
         <div>
           <div className="text-xs text-gray-500 mb-1">Market Boost / Listing setup</div>
@@ -328,7 +342,7 @@ export function MarketBoostView() {
                   type="text"
                   value={businessName}
                   onChange={(e) => setBusinessName(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg"
+                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
                 />
               </div>
 
@@ -342,6 +356,7 @@ export function MarketBoostView() {
                   >
                     <option>Home &amp; living</option>
                     <option>Kitchenware</option>
+                    <option>Storage &amp; Organization</option>
                   </select>
                 </div>
                 <div>
@@ -353,6 +368,7 @@ export function MarketBoostView() {
                   >
                     <option>Lagos, Nigeria</option>
                     <option>Abuja, Nigeria</option>
+                    <option>Ibadan, Nigeria</option>
                   </select>
                 </div>
               </div>
@@ -363,7 +379,7 @@ export function MarketBoostView() {
                   rows={3}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg resize-none"
+                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg resize-none focus:outline-none focus:border-emerald-600"
                 />
               </div>
             </div>
@@ -528,7 +544,7 @@ export function MarketBoostView() {
                 <div className="divide-y divide-gray-100 text-[11px] pt-1">
                   <div className="py-1 flex justify-between">
                     <span className="text-gray-400">Catalogs featured</span>
-                    <span className="font-semibold text-gray-900">3 · 24 products</span>
+                    <span className="font-semibold text-gray-900">{featuredCatalogsCount} catalogs</span>
                   </div>
                   <div className="py-1 flex justify-between">
                     <span className="text-gray-400">Wholesale from</span>
@@ -539,8 +555,11 @@ export function MarketBoostView() {
                     <span className="font-semibold text-gray-900">{moq}</span>
                   </div>
                 </div>
-                <button className="w-full py-1.5 border border-gray-200 rounded text-gray-700 text-xs">
-                  View supplier &amp; catalog
+                <button
+                  onClick={() => setShowDirPreviewModal(true)}
+                  className="w-full py-1.5 border border-gray-200 rounded text-gray-700 text-xs hover:bg-gray-50"
+                >
+                  View full preview ↗
                 </button>
               </div>
             </div>
@@ -559,8 +578,8 @@ export function MarketBoostView() {
                   <span>Catalogs &amp; terms selected</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-gray-400">○</span>
-                  <span className="text-gray-500">Activate Market Boost subscription</span>
+                  <span className="text-emerald-600 font-bold">✓</span>
+                  <span className="text-gray-900 font-medium">Activate Market Boost subscription</span>
                 </div>
               </div>
 
@@ -579,7 +598,7 @@ export function MarketBoostView() {
         </div>
 
         {/* Sticky Bottom Bar */}
-        <div className="fixed bottom-0 left-64 right-0 bg-white border-t border-gray-200 py-3 px-8 flex items-center justify-between z-10 shadow-lg text-xs">
+        <div className="fixed bottom-0 left-0 lg:left-64 right-0 bg-white border-t border-gray-200 py-3 px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 z-30 shadow-lg text-xs">
           <span className="text-gray-400 text-[11px]">
             Activate your subscription to enable publishing.
           </span>
@@ -587,6 +606,11 @@ export function MarketBoostView() {
             {draftSaved && (
               <span className="text-xs font-semibold text-emerald-700 mr-2">
                 ✓ Draft saved
+              </span>
+            )}
+            {publishSuccess && (
+              <span className="text-xs font-semibold text-emerald-700 mr-2">
+                ✓ Listing published to supplier directory!
               </span>
             )}
             <button
@@ -605,13 +629,55 @@ export function MarketBoostView() {
               Review &amp; continue
             </button>
             <button
-              onClick={() => setActiveTab("subscription")}
-              className="px-4 py-2 border border-gray-200 text-gray-400 text-xs font-medium rounded-lg"
+              onClick={() => {
+                setPublishSuccess(true);
+                setListingPublished(true);
+                setTimeout(() => {
+                  setPublishSuccess(false);
+                  setActiveTab("visibility");
+                }, 1500);
+              }}
+              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
             >
               Publish listing
             </button>
           </div>
         </div>
+
+        {/* Directory Preview Modal */}
+        {showDirPreviewModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm">Directory Card Preview</h3>
+                <button onClick={() => setShowDirPreviewModal(false)} className="text-gray-400 hover:text-gray-600">
+                  ✕
+                </button>
+              </div>
+              <div className="border border-gray-200 rounded-xl p-5 space-y-3 bg-gray-50/50">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="text-base font-bold text-gray-900">{businessName}</div>
+                    <div className="text-xs text-gray-500">{location} · {category}</div>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                    Verified
+                  </span>
+                </div>
+                <p className="text-xs text-gray-700">{description}</p>
+                <div className="text-xs font-semibold text-emerald-700">
+                  {startingPrice} starting wholesale price · {moq} MOQ
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDirPreviewModal(false)}
+                className="w-full py-2 bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg hover:bg-gray-200"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -620,7 +686,7 @@ export function MarketBoostView() {
   /* Screen 15: Market Boost · Visibility and performance (Default View)         */
   /* -------------------------------------------------------------------------- */
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+    <div className="space-y-6 max-w-6xl mx-auto pb-16">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -632,7 +698,7 @@ export function MarketBoostView() {
         </div>
         <button
           onClick={() => setActiveTab("setup")}
-          className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium"
+          className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium transition-colors self-start sm:self-center"
         >
           Edit listing
         </button>
@@ -665,8 +731,12 @@ export function MarketBoostView() {
         <div>
           <div className="flex items-center gap-2">
             <h3 className="text-base font-bold text-gray-900">Aroko Wholesale · Directory listing</h3>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-              Active · Published
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                listingPublished ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-600"
+              }`}
+            >
+              {listingPublished ? "Active · Published" : "Unpublished · Draft"}
             </span>
           </div>
           <p className="text-xs text-gray-500 mt-1">
@@ -688,7 +758,7 @@ export function MarketBoostView() {
           </div>
           <button
             onClick={() => setActiveTab("subscription")}
-            className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg font-medium"
+            className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg font-medium transition-colors"
           >
             Manage renewal
           </button>
@@ -769,7 +839,7 @@ export function MarketBoostView() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[500px]">
                 <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                   <tr>
                     <th className="px-5 py-3">Reseller</th>
@@ -779,8 +849,11 @@ export function MarketBoostView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-gray-700">
-                  <tr>
-                    <td className="px-5 py-3.5 font-semibold text-gray-900">Nia Stores</td>
+                  <tr
+                    onClick={() => setShowResellerModal(true)}
+                    className="hover:bg-gray-50 cursor-pointer"
+                  >
+                    <td className="px-5 py-3.5 font-semibold text-gray-900">Nia Stores ↗</td>
                     <td className="px-4 py-3.5 text-gray-500">3 Nov 2026</td>
                     <td className="px-4 py-3.5">3 products</td>
                     <td className="px-5 py-3.5 text-right font-bold text-gray-900">₦50,000</td>
@@ -791,7 +864,7 @@ export function MarketBoostView() {
 
             <div className="p-4 border-t border-gray-100">
               <button
-                onClick={() => alert("Opening reseller relationship management")}
+                onClick={() => setShowResellerModal(true)}
                 className="text-xs text-gray-700 hover:text-gray-900 font-medium"
               >
                 Manage reseller relationship →
@@ -808,11 +881,15 @@ export function MarketBoostView() {
             <div className="divide-y divide-gray-100">
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Directory</span>
-                <span className="font-semibold text-emerald-700">Visible</span>
+                <span className={listingPublished ? "font-semibold text-emerald-700" : "font-semibold text-gray-400"}>
+                  {listingPublished ? "Visible" : "Hidden"}
+                </span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Supplier profile</span>
-                <span className="font-semibold text-emerald-700">Published</span>
+                <span className={listingPublished ? "font-semibold text-emerald-700" : "font-semibold text-gray-400"}>
+                  {listingPublished ? "Published" : "Draft"}
+                </span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Catalog access</span>
@@ -822,16 +899,20 @@ export function MarketBoostView() {
 
             <div className="space-y-2 pt-1">
               <button
-                onClick={() => alert("Previewing directory listing")}
+                onClick={() => setShowDirPreviewModal(true)}
                 className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium rounded-lg"
               >
                 Preview directory listing
               </button>
               <button
-                onClick={() => alert("Unpublishing listing")}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-rose-700 font-medium rounded-lg"
+                onClick={() => setListingPublished(!listingPublished)}
+                className={`w-full py-2 border font-medium rounded-lg transition-colors ${
+                  listingPublished
+                    ? "border-gray-200 hover:bg-gray-50 text-rose-700"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                }`}
               >
-                Unpublish listing
+                {listingPublished ? "Unpublish listing" : "Publish listing"}
               </button>
             </div>
           </div>
@@ -841,9 +922,16 @@ export function MarketBoostView() {
             <h3 className="text-xs font-bold text-gray-900">Renewal preferences</h3>
 
             <div className="divide-y divide-gray-100">
-              <div className="py-2 flex justify-between">
+              <div className="py-2 flex justify-between items-center">
                 <span className="text-gray-500">Automatic renewal</span>
-                <span className="font-semibold text-gray-900">On</span>
+                <button
+                  onClick={() => setAutoRenew(!autoRenew)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    autoRenew ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {autoRenew ? "On" : "Off"}
+                </button>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Payment source</span>
@@ -887,7 +975,67 @@ export function MarketBoostView() {
           Renew for ₦15,000/month
         </button>
       </div>
+
+      {/* Modals for Reseller & Preview */}
+      {showResellerModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-gray-900 text-sm">Reseller: Nia Stores</h3>
+              <button onClick={() => setShowResellerModal(false)} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
+            </div>
+            <div className="text-xs space-y-2 text-gray-700">
+              <p><strong>Status:</strong> Active &amp; Mirrored</p>
+              <p><strong>Connected Date:</strong> 3 Nov 2026</p>
+              <p><strong>Mirrored Catalogs:</strong> Drinkware, Kitchen essentials, Storage (3 items)</p>
+              <p><strong>Paid Sales Generated:</strong> ₦50,000 (3 orders)</p>
+              <p><strong>Latest Fulfillment:</strong> Order CT-1042 (2 units stainless flask)</p>
+            </div>
+            <button
+              onClick={() => setShowResellerModal(false)}
+              className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-lg"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showDirPreviewModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-gray-900 text-sm">Directory Card Preview</h3>
+              <button onClick={() => setShowDirPreviewModal(false)} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
+            </div>
+            <div className="border border-gray-200 rounded-xl p-5 space-y-3 bg-gray-50/50">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="text-base font-bold text-gray-900">{businessName}</div>
+                  <div className="text-xs text-gray-500">{location} · {category}</div>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                  Verified
+                </span>
+              </div>
+              <p className="text-xs text-gray-700">{description}</p>
+              <div className="text-xs font-semibold text-emerald-700">
+                {startingPrice} starting wholesale price · {moq} MOQ
+              </div>
+            </div>
+            <button
+              onClick={() => setShowDirPreviewModal(false)}
+              className="w-full py-2 bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg hover:bg-gray-200"
+            >
+              Close Preview
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-

@@ -10,10 +10,12 @@ import { OverviewView } from "./views/overview-view";
 import { OrdersView } from "./views/orders-view";
 import { ProductsView } from "./views/products-view";
 import { NetworkView } from "./views/network-view";
+import { CustomersView } from "./views/customers-view";
 import { PaymentsView } from "./views/payments-view";
 import { MarketBoostView } from "./views/market-boost-view";
 import { PaymentLinksView } from "./views/payment-links-view";
 import { SettingsView } from "./views/settings-view";
+import { AnalyticsView } from "./views/analytics-view";
 import { ChatDrawer } from "./chat-drawer";
 
 export function Dashboard() {
@@ -23,6 +25,7 @@ export function Dashboard() {
   const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
   const [connected, setConnected] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -233,11 +236,13 @@ export function Dashboard() {
       case "network":
         return "Network / Find suppliers";
       case "customers":
-        return "Customers";
+        return "Customers / Directory";
       case "payments":
         return "Payments / Split transactions";
       case "market-boost":
         return "Market Boost / Visibility & performance";
+      case "analytics":
+        return "Analytics / Performance & reports";
       case "settings":
         return "Settings / Sales co-pilot / Setup";
       case "payment-links":
@@ -249,7 +254,7 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] flex text-gray-900 font-sans antialiased">
-      {/* Sidebar Navigation (Matching Figma) */}
+      {/* Sidebar Navigation (Desktop Persistent + Mobile Sliding Drawer) */}
       <Sidebar
         currentView={currentView}
         onSelectView={(v) => {
@@ -262,6 +267,8 @@ export function Dashboard() {
         onToggleWorkspace={() =>
           setActiveWorkspace((prev) => (prev === "reseller" ? "supplier" : "reseller"))
         }
+        mobileOpen={mobileNavOpen}
+        onCloseMobile={() => setMobileNavOpen(false)}
       />
 
       {/* Main Content Area */}
@@ -274,10 +281,24 @@ export function Dashboard() {
           simulatorOpen={simulatorOpen}
           breadcrumb={getBreadcrumb()}
           activeWorkspace={activeWorkspace}
+          onToggleWorkspace={() =>
+            setActiveWorkspace((prev) => (prev === "reseller" ? "supplier" : "reseller"))
+          }
+          onOpenMobileNav={() => setMobileNavOpen(true)}
+          orders={state.orders}
+          products={state.products}
+          onSelectOrder={(ord) => {
+            setSelectedOrder(ord);
+            setCurrentView("orders");
+          }}
+          onSelectProduct={() => {
+            setCurrentView("products");
+          }}
+          onNavigateToView={(v) => setCurrentView(v as NavView)}
         />
 
         {/* View Surface */}
-        <main className="flex-1 p-8 overflow-y-auto">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
           {error && (
             <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex justify-between items-center">
               <span>{error}</span>
@@ -295,6 +316,8 @@ export function Dashboard() {
                 setCurrentView("orders");
               }}
               onViewAllOrders={() => setCurrentView("orders")}
+              onNavigateToPayments={() => setCurrentView("payments")}
+              onFilterOrdersByStatus={() => setCurrentView("orders")}
             />
           )}
 
@@ -306,6 +329,7 @@ export function Dashboard() {
               onSimulateTransfer={handleSimulateTransfer}
               onMarkDispatched={handleMarkDispatched}
               onNavigateToPayments={() => setCurrentView("payments")}
+              onNavigateToSettings={() => setCurrentView("settings")}
             />
           )}
 
@@ -315,12 +339,26 @@ export function Dashboard() {
               onAddProduct={handleAddProduct}
               onUpdateStock={handleUpdateStock}
               onNavigateToNetwork={() => setCurrentView("network")}
+              onNavigateToSettings={() => setCurrentView("settings")}
             />
           )}
 
           {currentView === "network" && (
             <NetworkView
               onMirrorProducts={() => setCurrentView("products")}
+            />
+          )}
+
+          {currentView === "customers" && (
+            <CustomersView
+              orders={state.orders}
+              onSelectOrder={(ord) => {
+                setSelectedOrder(ord);
+                setCurrentView("orders");
+              }}
+              onNavigateToPaymentLinks={(customerName) => {
+                setCurrentView("payment-links");
+              }}
             />
           )}
 
@@ -340,37 +378,22 @@ export function Dashboard() {
             <MarketBoostView />
           )}
 
+          {currentView === "analytics" && (
+            <AnalyticsView
+              analytics={state.analytics}
+              orders={state.orders}
+              products={state.products}
+              onNavigateToOrders={() => setCurrentView("orders")}
+              onNavigateToPayments={() => setCurrentView("payments")}
+            />
+          )}
+
           {currentView === "payment-links" && (
             <PaymentLinksView
               products={state.products}
               orders={state.orders}
               vendorName={state.vendor.businessName}
             />
-          )}
-
-          {currentView === "customers" && (
-            <div className="max-w-5xl mx-auto space-y-6">
-              <h1 className="text-2xl font-bold tracking-tight text-gray-900">Customers</h1>
-              <p className="text-sm text-gray-500">View customer transaction history and direct WhatsApp communication links.</p>
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-xs p-6 divide-y divide-gray-100">
-                {state.orders.map((o) => (
-                  <div key={o.id} className="py-4 flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-bold text-gray-900">{o.customerName}</div>
-                      <div className="text-xs text-gray-400">{o.customerPhone}</div>
-                    </div>
-                    <a
-                      href={`https://wa.me/${o.customerPhone.replace(/\+/g, "")}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                    >
-                      Message on WhatsApp
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
           )}
 
           {currentView === "settings" && (
@@ -383,6 +406,13 @@ export function Dashboard() {
               onDeleteShippingZone={handleDeleteShippingZone}
               onAddDiscount={handleAddDiscount}
               onDeleteDiscount={handleDeleteDiscount}
+              onNavigateToOrder={(code) => {
+                const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
+                if (target) {
+                  setSelectedOrder(target);
+                  setCurrentView("orders");
+                }
+              }}
             />
           )}
         </main>

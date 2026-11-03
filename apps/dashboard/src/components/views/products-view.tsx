@@ -6,6 +6,7 @@ import { PlusIcon } from "../icons";
 
 interface ProductsViewProps {
   products: ProductItem[];
+  initialTab?: "all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard";
   onAddProduct: (input: {
     skuCode?: string;
     name: string;
@@ -14,17 +15,65 @@ interface ProductsViewProps {
     primaryImageUrl?: string;
   }) => Promise<boolean>;
   onUpdateStock: (sku: string, stock: number) => Promise<boolean>;
-  onNavigateToNetwork?: () => void;
+  onNavigateToNetwork?: (tab?: string) => void;
+  onNavigateToSettings?: (tab?: string, subId?: string) => void;
 }
+
+interface ResellingItem {
+  id: string;
+  name: string;
+  sku: string;
+  supplier: string;
+  stock: number;
+  cost: number;
+  sellingPrice: number;
+  status: "Synced" | "Paused";
+}
+
+const INITIAL_RESELLING: ResellingItem[] = [
+  {
+    id: "r1",
+    name: "Stainless flask · 750ml",
+    sku: "AW-FL750",
+    supplier: "Aroko Wholesale",
+    stock: 42,
+    cost: 8000,
+    sellingPrice: 10000,
+    status: "Synced",
+  },
+  {
+    id: "r2",
+    name: "Lunch box · 1.2L",
+    sku: "AW-LB1200",
+    supplier: "Aroko Wholesale",
+    stock: 28,
+    cost: 6000,
+    sellingPrice: 7500,
+    status: "Synced",
+  },
+  {
+    id: "r3",
+    name: "Storage jar · 1L",
+    sku: "AW-SJ1000",
+    supplier: "Aroko Wholesale",
+    stock: 62,
+    cost: 3000,
+    sellingPrice: 4000,
+    status: "Synced",
+  },
+];
 
 export function ProductsView({
   products,
+  initialTab = "reselling",
   onAddProduct,
   onUpdateStock,
   onNavigateToNetwork,
+  onNavigateToSettings,
 }: ProductsViewProps) {
   // Tabs: 'all' | 'my-inventory' | 'reselling' | 'exceptions' | 'mirror-wizard'
-  const [activeTab, setActiveTab] = useState<"all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard">("reselling");
+  const [activeTab, setActiveTab] = useState<"all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard">(initialTab);
+  const [resellingList, setResellingList] = useState<ResellingItem[]>(INITIAL_RESELLING);
 
   // Reselling state
   const [searchReselling, setSearchReselling] = useState("");
@@ -40,11 +89,15 @@ export function ProductsView({
   const [instagramChannel, setInstagramChannel] = useState(false);
   const [wizardSuccess, setWizardSuccess] = useState(false);
 
-  // Exceptions Workbench filter
+  // Exceptions Workbench state
   const [exceptionFilter, setExceptionFilter] = useState<"all" | "price" | "stock" | "automation">("all");
   const [proposedPrice, setProposedPrice] = useState("10500");
   const [exception1Resolved, setException1Resolved] = useState(false);
   const [stockRechecked, setStockRechecked] = useState(false);
+  const [customerNotified, setCustomerNotified] = useState(false);
+  const [supplierMsgModal, setSupplierMsgModal] = useState(false);
+  const [supplierMsgText, setSupplierMsgText] = useState("Hi Aroko Wholesale, can you confirm if same-day delivery to Lekki before 4pm is feasible for Order CT-1042?");
+  const [supplierMsgSent, setSupplierMsgSent] = useState(false);
   const [internalNote, setInternalNote] = useState("Awaiting supplier delivery confirmation");
 
   // Standard product add modal
@@ -80,12 +133,42 @@ export function ProductsView({
     }
   };
 
+  const handlePublishWizard = () => {
+    setWizardSuccess(true);
+    setResellingList((prev) =>
+      prev.map((item) => {
+        if (item.sku === "AW-FL750") return { ...item, sellingPrice: Number(flaskPrice) || item.sellingPrice };
+        if (item.sku === "AW-LB1200") return { ...item, sellingPrice: Number(lunchBoxPrice) || item.sellingPrice };
+        if (item.sku === "AW-SJ1000") return { ...item, sellingPrice: Number(jarPrice) || item.sellingPrice };
+        return item;
+      })
+    );
+    setTimeout(() => {
+      setActiveTab("reselling");
+      setWizardSuccess(false);
+    }, 1200);
+  };
+
+  const handleToggleListingPause = (sku: string) => {
+    setResellingList((prev) =>
+      prev.map((item) =>
+        item.sku === sku
+          ? { ...item, status: item.status === "Synced" ? "Paused" : "Synced" }
+          : item
+      )
+    );
+  };
+
   /* -------------------------------------------------------------------------- */
   /* Screen 5: Products · Mirror and set margins (Wizard)                        */
   /* -------------------------------------------------------------------------- */
   if (activeTab === "mirror-wizard") {
+    const fPrice = Number(flaskPrice) || 8000;
+    const lPrice = Number(lunchBoxPrice) || 6000;
+    const jPrice = Number(jarPrice) || 3000;
+
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-16">
+      <div className="space-y-6 max-w-6xl mx-auto pb-24">
         {/* Breadcrumb & Title */}
         <div>
           <div className="text-xs text-gray-500 mb-1">
@@ -100,10 +183,15 @@ export function ProductsView({
         </div>
 
         {/* 3-Step Wizard Navigation */}
-        <div className="flex items-center gap-3 text-xs font-semibold">
-          <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-            ✓ Select products
-          </span>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs font-semibold">
+          <button
+            onClick={() => {
+              if (onNavigateToNetwork) onNavigateToNetwork("catalog");
+            }}
+            className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+          >
+            ✓ 1 Select products
+          </button>
           <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
             2 Set prices
           </span>
@@ -116,11 +204,11 @@ export function ProductsView({
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
           <div>
             <h3 className="text-sm font-bold text-gray-900">Your linked products</h3>
-            <p className="text-xs text-gray-400">Supplier: Aroko Wholesale · Open catalog · No approval needed</p>
+            <p className="text-xs text-gray-400 mt-0.5">Supplier: Aroko Wholesale · Open catalog · No approval needed</p>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[620px]">
               <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 <tr>
                   <th className="px-4 py-3">Product / Supplier SKU</th>
@@ -145,15 +233,17 @@ export function ProductsView({
                         type="number"
                         value={flaskPrice}
                         onChange={(e) => setFlaskPrice(e.target.value)}
-                        className="w-28 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs"
+                        className={`w-28 px-2.5 py-1.5 border rounded-lg text-xs ${
+                          fPrice < 8000 ? "border-rose-400 bg-rose-50" : "border-gray-200"
+                        }`}
                       />
                     </div>
                   </td>
                   <td className="px-4 py-3.5">
-                    {Math.round(((Number(flaskPrice) - 8000) / 8000) * 100)}%
+                    {Math.round(((fPrice - 8000) / 8000) * 100)}%
                   </td>
                   <td className="px-4 py-3.5 text-right font-medium text-emerald-700">
-                    ₦{(Number(flaskPrice) - 8000).toLocaleString()} · {Math.round(((Number(flaskPrice) - 8000) / Number(flaskPrice)) * 100)}%
+                    ₦{(fPrice - 8000).toLocaleString()} · {Math.round(((fPrice - 8000) / (fPrice || 1)) * 100)}%
                   </td>
                 </tr>
 
@@ -176,10 +266,10 @@ export function ProductsView({
                     </div>
                   </td>
                   <td className="px-4 py-3.5">
-                    {Math.round(((Number(lunchBoxPrice) - 6000) / 6000) * 100)}%
+                    {Math.round(((lPrice - 6000) / 6000) * 100)}%
                   </td>
                   <td className="px-4 py-3.5 text-right font-medium text-emerald-700">
-                    ₦{(Number(lunchBoxPrice) - 6000).toLocaleString()} · {Math.round(((Number(lunchBoxPrice) - 6000) / Number(lunchBoxPrice)) * 100)}%
+                    ₦{(lPrice - 6000).toLocaleString()} · {Math.round(((lPrice - 6000) / (lPrice || 1)) * 100)}%
                   </td>
                 </tr>
 
@@ -202,10 +292,10 @@ export function ProductsView({
                     </div>
                   </td>
                   <td className="px-4 py-3.5">
-                    {Math.round(((Number(jarPrice) - 3000) / 3000) * 100)}%
+                    {Math.round(((jPrice - 3000) / 3000) * 100)}%
                   </td>
                   <td className="px-4 py-3.5 text-right font-medium text-emerald-700">
-                    ₦{(Number(jarPrice) - 3000).toLocaleString()} · {Math.round(((Number(jarPrice) - 3000) / Number(jarPrice)) * 100)}%
+                    ₦{(jPrice - 3000).toLocaleString()} · {Math.round(((jPrice - 3000) / (jPrice || 1)) * 100)}%
                   </td>
                 </tr>
               </tbody>
@@ -265,7 +355,9 @@ export function ProductsView({
               <div className="flex items-center justify-between py-2">
                 <div>
                   <div className="text-xs font-semibold text-gray-900">Instagram</div>
-                  <div className="text-[11px] text-gray-400">Not connected · Connect in Settings before publishing.</div>
+                  <div className="text-[11px] text-gray-400">
+                    {instagramChannel ? "Connected · Published" : "Not connected · Connect in Settings before publishing."}
+                  </div>
                 </div>
                 <button
                   onClick={() => setInstagramChannel(!instagramChannel)}
@@ -304,11 +396,11 @@ export function ProductsView({
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Featured price</span>
-                <span className="font-semibold text-gray-900">₦10,000 / flask</span>
+                <span className="font-semibold text-gray-900">₦{fPrice.toLocaleString()} / flask</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Two-unit sale</span>
-                <span className="font-semibold text-gray-900">₦20,000</span>
+                <span className="font-semibold text-gray-900">₦{(fPrice * 2).toLocaleString()}</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Supplier allocation</span>
@@ -316,7 +408,7 @@ export function ProductsView({
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Gross margin</span>
-                <span className="font-semibold text-emerald-700">₦4,000</span>
+                <span className="font-semibold text-emerald-700">₦{((fPrice - 8000) * 2).toLocaleString()}</span>
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Sample rep fee</span>
@@ -324,7 +416,9 @@ export function ProductsView({
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Net rep earnings</span>
-                <span className="font-bold text-emerald-800">₦3,700</span>
+                <span className="font-bold text-emerald-800">
+                  ₦{Math.max(0, (fPrice - 8000) * 2 - 300).toLocaleString()}
+                </span>
               </div>
             </div>
 
@@ -335,30 +429,26 @@ export function ProductsView({
         </div>
 
         {/* Sticky Bottom Wizard Bar */}
-        <div className="fixed bottom-0 left-64 right-0 bg-white border-t border-gray-200 py-3 px-8 flex items-center justify-end gap-3 z-10 shadow-lg">
+        <div className="fixed bottom-0 left-0 lg:left-64 right-0 bg-white border-t border-gray-200 py-3 px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-end gap-3 z-30 shadow-lg">
           {wizardSuccess && (
             <span className="text-xs font-semibold text-emerald-700 mr-auto">
               ✓ 3 products successfully published with live supplier sync!
             </span>
           )}
-          <button
-            onClick={() => setActiveTab("reselling")}
-            className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            Back to catalog
-          </button>
-          <button
-            onClick={() => {
-              setWizardSuccess(true);
-              setTimeout(() => {
-                setActiveTab("reselling");
-                setWizardSuccess(false);
-              }, 1200);
-            }}
-            className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs"
-          >
-            Publish 3 linked products
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab("reselling")}
+              className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Back to catalog
+            </button>
+            <button
+              onClick={handlePublishWizard}
+              className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs"
+            >
+              Publish 3 linked products
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -369,7 +459,7 @@ export function ProductsView({
   /* -------------------------------------------------------------------------- */
   if (activeTab === "exceptions") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Header */}
         <div>
           <div className="text-xs text-gray-500 mb-1">
@@ -410,10 +500,10 @@ export function ProductsView({
         </div>
 
         {/* Sub-Filter Tabs */}
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setExceptionFilter("all")}
-            className={`px-3 py-1 rounded-full text-xs font-medium ${
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
               exceptionFilter === "all" ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-gray-100 text-gray-600"
             }`}
           >
@@ -421,7 +511,7 @@ export function ProductsView({
           </button>
           <button
             onClick={() => setExceptionFilter("price")}
-            className={`px-3 py-1 rounded-full text-xs font-medium ${
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
               exceptionFilter === "price" ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-gray-100 text-gray-600"
             }`}
           >
@@ -429,7 +519,7 @@ export function ProductsView({
           </button>
           <button
             onClick={() => setExceptionFilter("stock")}
-            className={`px-3 py-1 rounded-full text-xs font-medium ${
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
               exceptionFilter === "stock" ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-gray-100 text-gray-600"
             }`}
           >
@@ -437,7 +527,7 @@ export function ProductsView({
           </button>
           <button
             onClick={() => setExceptionFilter("automation")}
-            className={`px-3 py-1 rounded-full text-xs font-medium ${
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
               exceptionFilter === "automation" ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-gray-100 text-gray-600"
             }`}
           >
@@ -468,8 +558,12 @@ export function ProductsView({
                   Aroko Wholesale → Stainless flask · AW-FL750
                 </p>
               </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                {exception1Resolved ? "Resolved" : "Review required"}
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                  exception1Resolved ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                }`}
+              >
+                {exception1Resolved ? "Resolved · Reopened" : "Review required"}
               </span>
             </div>
 
@@ -484,13 +578,21 @@ export function ProductsView({
               </div>
               <div>
                 <div className="text-[11px] text-gray-400 uppercase font-semibold">Your Selling Price</div>
-                <div className="text-sm font-bold text-gray-900 mt-1">₦10,000</div>
+                <div className="text-sm font-bold text-gray-900 mt-1">
+                  ₦{exception1Resolved ? Number(proposedPrice).toLocaleString() : "10,000"}
+                </div>
               </div>
               <div>
                 <div className="text-[11px] text-gray-400 uppercase font-semibold">Gross Margin Impact</div>
                 <div className="text-xs font-semibold text-amber-800 mt-1">
-                  ₦2,000 → ₦1,500 / unit <br />
-                  <span className="text-[10px] text-gray-500">20% → 15%</span>
+                  {exception1Resolved ? (
+                    <span className="text-emerald-700">₦2,000 / unit (19.0%)</span>
+                  ) : (
+                    <>
+                      ₦2,000 → ₦1,500 / unit <br />
+                      <span className="text-[10px] text-gray-500">20% → 15%</span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -504,7 +606,7 @@ export function ProductsView({
                   type="number"
                   value={proposedPrice}
                   onChange={(e) => setProposedPrice(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg"
+                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
                 />
                 <p className="text-[11px] text-gray-500 mt-1.5">
                   Restores ₦2,000 gross profit per unit; margin becomes 19.0%.
@@ -516,17 +618,31 @@ export function ProductsView({
 
               <div className="space-y-3">
                 <p className="text-xs text-gray-600">
-                  Listing paused for review. Accept the new supplier cost and confirm your price before reopening checkout.
+                  {exception1Resolved
+                    ? "New price applied and listing resumed. Customers can checkout at the updated price."
+                    : "Listing paused for review. Accept the new supplier cost and confirm your price before reopening checkout."}
                 </p>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setException1Resolved(true)}
-                    className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+                    onClick={() => {
+                      setException1Resolved(true);
+                      setResellingList((prev) =>
+                        prev.map((item) =>
+                          item.sku === "AW-FL750"
+                            ? { ...item, sellingPrice: Number(proposedPrice) || 10500, status: "Synced" }
+                            : item
+                        )
+                      );
+                    }}
+                    className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
                   >
-                    Accept &amp; apply ₦{Number(proposedPrice).toLocaleString()}
+                    Accept &amp; apply ₦{Number(proposedPrice || 0).toLocaleString()}
                   </button>
                   <button
-                    onClick={() => alert("Listing remains paused")}
+                    onClick={() => {
+                      setException1Resolved(false);
+                      handleToggleListingPause("AW-FL750");
+                    }}
                     className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
                   >
                     Keep paused
@@ -598,7 +714,7 @@ export function ProductsView({
                     }}
                     className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
                   >
-                    {stockRechecked ? "Rechecking..." : "Recheck stock"}
+                    {stockRechecked ? "Rechecking Aroko stock..." : "Recheck stock"}
                   </button>
                 </div>
               </div>
@@ -609,15 +725,23 @@ export function ProductsView({
                 <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-800 leading-relaxed">
                   &ldquo;The flask sold out before payment completed. Your payment link has been disabled and you have not been charged. We can let you know when it is back in stock.&rdquo;
                 </div>
+                {customerNotified && (
+                  <div className="text-[11px] text-emerald-800 bg-emerald-50 p-2 rounded">
+                    ✓ Notification sent to customer on WhatsApp.
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button
-                    onClick={() => alert("Notification sent to customer on WhatsApp")}
-                    className="px-3.5 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+                    onClick={() => {
+                      setCustomerNotified(true);
+                      setTimeout(() => setCustomerNotified(false), 3000);
+                    }}
+                    className="px-3.5 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
                   >
                     Notify customer
                   </button>
                   <button
-                    onClick={() => alert("Opening draft checkout CT-D204")}
+                    onClick={() => alert("Draft checkout CT-D204 status: Disabled (No payment collected)")}
                     className="px-3.5 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
                   >
                     View draft checkout
@@ -679,13 +803,17 @@ export function ProductsView({
                 </p>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => alert("Redirecting to Settings Sales co-pilot conversation")}
-                    className="px-3.5 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+                    onClick={() => {
+                      if (onNavigateToSettings) {
+                        onNavigateToSettings("detail", "WA-0882");
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
                   >
                     Take over in Settings →
                   </button>
                   <button
-                    onClick={() => alert("Opening supplier messaging modal")}
+                    onClick={() => setSupplierMsgModal(true)}
                     className="px-3.5 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
                   >
                     Message supplier
@@ -699,9 +827,54 @@ export function ProductsView({
                     type="text"
                     value={internalNote}
                     onChange={(e) => setInternalNote(e.target.value)}
-                    className="w-full text-xs px-3 py-1.5 border border-gray-200 rounded-lg"
+                    className="w-full text-xs px-3 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
                   />
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Message Supplier Modal */}
+        {supplierMsgModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm">Message Aroko Wholesale</h3>
+                <button onClick={() => setSupplierMsgModal(false)} className="text-gray-400 hover:text-gray-600">
+                  ✕
+                </button>
+              </div>
+              <textarea
+                rows={4}
+                value={supplierMsgText}
+                onChange={(e) => setSupplierMsgText(e.target.value)}
+                className="w-full text-xs p-3 border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600"
+              />
+              {supplierMsgSent && (
+                <div className="text-xs text-emerald-800 bg-emerald-50 p-2 rounded">
+                  ✓ Inquiry sent to Aroko Wholesale representative on WhatsApp!
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setSupplierMsgSent(true);
+                    setTimeout(() => {
+                      setSupplierMsgSent(false);
+                      setSupplierMsgModal(false);
+                    }, 1500);
+                  }}
+                  className="flex-1 py-2 bg-[#0d5c3a] text-white text-xs font-semibold rounded-lg hover:bg-[#0b4b2f]"
+                >
+                  Send Message
+                </button>
+                <button
+                  onClick={() => setSupplierMsgModal(false)}
+                  className="px-4 py-2 border border-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           </div>
@@ -714,8 +887,20 @@ export function ProductsView({
   /* Screen 4: Products · Reselling                                             */
   /* -------------------------------------------------------------------------- */
   if (activeTab === "reselling") {
+    const filteredReselling = resellingList.filter((item) => {
+      if (searchReselling.trim()) {
+        const q = searchReselling.toLowerCase();
+        if (!item.name.toLowerCase().includes(q) && !item.sku.toLowerCase().includes(q)) {
+          return false;
+        }
+      }
+      if (selectedStatus === "In stock" && item.stock <= 0) return false;
+      if (selectedStatus === "Paused" && item.status !== "Paused") return false;
+      return true;
+    });
+
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -725,8 +910,11 @@ export function ProductsView({
             </p>
           </div>
           <button
-            onClick={() => setActiveTab("mirror-wizard")}
-            className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-medium text-xs py-2 px-3.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-colors"
+            onClick={() => {
+              if (onNavigateToNetwork) onNavigateToNetwork("catalog");
+              else setActiveTab("mirror-wizard");
+            }}
+            className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-medium text-xs py-2 px-3.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-colors self-start sm:self-center"
           >
             <span>Find more products</span>
             <span>→</span>
@@ -751,7 +939,7 @@ export function ProductsView({
             onClick={() => setActiveTab("reselling")}
             className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
           >
-            Reselling (3)
+            Reselling ({resellingList.length})
           </button>
           <button
             onClick={() => setActiveTab("exceptions")}
@@ -765,7 +953,7 @@ export function ProductsView({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-[#0d5c3a] text-white rounded-2xl p-5 shadow-xs">
             <div className="text-xs text-emerald-100 font-medium">Linked products</div>
-            <div className="text-3xl font-extrabold mt-1">3</div>
+            <div className="text-3xl font-extrabold mt-1">{resellingList.length}</div>
             <div className="text-[11px] text-emerald-200 mt-2">From Aroko Wholesale</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
@@ -817,7 +1005,7 @@ export function ProductsView({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[640px]">
               <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 <tr>
                   <th className="px-5 py-3">Listing</th>
@@ -829,89 +1017,51 @@ export function ProductsView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-700">
-                {/* 1. Flask */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-gray-900">Stainless flask · 750ml</div>
-                    <div className="text-[11px] text-gray-400">AW-FL750</div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="text-gray-900">Aroko Wholesale</div>
-                    <div className="text-[11px] text-emerald-700 font-medium">42 · Synced</div>
-                  </td>
-                  <td className="px-4 py-3.5 font-medium">₦8,000</td>
-                  <td className="px-4 py-3.5 font-bold text-gray-900">₦10,000</td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-semibold text-emerald-700">₦2,000</div>
-                    <div className="text-[11px] text-gray-400">20% margin</div>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => setActiveTab("mirror-wizard")}
-                      className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-                    >
-                      Edit price
-                    </button>
-                  </td>
-                </tr>
+                {filteredReselling.map((item) => {
+                  const profit = item.sellingPrice - item.cost;
+                  const marginPct = Math.round((profit / item.sellingPrice) * 100);
 
-                {/* 2. Lunch box */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-gray-900">Lunch box · 1.2L</div>
-                    <div className="text-[11px] text-gray-400">AW-LB1200</div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="text-gray-900">Aroko Wholesale</div>
-                    <div className="text-[11px] text-emerald-700 font-medium">28 · Synced</div>
-                  </td>
-                  <td className="px-4 py-3.5 font-medium">₦6,000</td>
-                  <td className="px-4 py-3.5 font-bold text-gray-900">₦7,500</td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-semibold text-emerald-700">₦1,500</div>
-                    <div className="text-[11px] text-gray-400">20% margin</div>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => setActiveTab("mirror-wizard")}
-                      className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-                    >
-                      Edit price
-                    </button>
-                  </td>
-                </tr>
-
-                {/* 3. Storage jar */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-gray-900">Storage jar · 1L</div>
-                    <div className="text-[11px] text-gray-400">AW-SJ1000</div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="text-gray-900">Aroko Wholesale</div>
-                    <div className="text-[11px] text-emerald-700 font-medium">62 · Synced</div>
-                  </td>
-                  <td className="px-4 py-3.5 font-medium">₦3,000</td>
-                  <td className="px-4 py-3.5 font-bold text-gray-900">₦4,000</td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-semibold text-emerald-700">₦1,000</div>
-                    <div className="text-[11px] text-gray-400">25% margin</div>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => setActiveTab("mirror-wizard")}
-                      className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-                    >
-                      Edit price
-                    </button>
-                  </td>
-                </tr>
+                  return (
+                    <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-5 py-3.5">
+                        <div className="font-semibold text-gray-900">{item.name}</div>
+                        <div className="text-[11px] text-gray-400">{item.sku}</div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="text-gray-900">{item.supplier}</div>
+                        <div
+                          className={`text-[11px] font-medium ${
+                            item.status === "Paused" ? "text-amber-700" : "text-emerald-700"
+                          }`}
+                        >
+                          {item.stock} · {item.status}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 font-medium">₦{item.cost.toLocaleString()}</td>
+                      <td className="px-4 py-3.5 font-bold text-gray-900">
+                        ₦{item.sellingPrice.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="font-semibold text-emerald-700">₦{profit.toLocaleString()}</div>
+                        <div className="text-[11px] text-gray-400">{marginPct}% margin</div>
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        <button
+                          onClick={() => setActiveTab("mirror-wizard")}
+                          className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                        >
+                          Edit price
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           <div className="p-4 border-t border-gray-100 text-[11px] text-gray-400">
-            Showing 3 of 3 linked products · Published to storefront and WhatsApp
+            Showing {filteredReselling.length} of {resellingList.length} linked products · Published to storefront and WhatsApp
           </div>
         </div>
 
@@ -939,18 +1089,20 @@ export function ProductsView({
               </p>
             </div>
 
-            <div className="flex gap-2 pt-1">
+            <div className="flex flex-wrap gap-2 pt-1">
               <button
                 onClick={() => setActiveTab("exceptions")}
-                className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+                className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
               >
                 Review selling exceptions →
               </button>
               <button
-                onClick={() => alert("Listing paused")}
-                className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                onClick={() => handleToggleListingPause("AW-FL750")}
+                className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
               >
-                Pause listing
+                {resellingList.find((i) => i.sku === "AW-FL750")?.status === "Paused"
+                  ? "Resume listing"
+                  : "Pause listing"}
               </button>
             </div>
           </div>
@@ -980,10 +1132,10 @@ export function ProductsView({
 
             <button
               onClick={() => {
-                if (onNavigateToNetwork) onNavigateToNetwork();
+                if (onNavigateToNetwork) onNavigateToNetwork("catalog");
                 else setActiveTab("mirror-wizard");
               }}
-              className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+              className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
             >
               View supplier catalog
             </button>
@@ -997,7 +1149,7 @@ export function ProductsView({
   /* Screen: All Products / My Inventory (Original Catalog with tabs)           */
   /* -------------------------------------------------------------------------- */
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+    <div className="space-y-6 max-w-7xl mx-auto pb-16">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -1006,7 +1158,7 @@ export function ProductsView({
         </div>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
-          className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-semibold text-xs py-2 px-3.5 rounded-lg flex items-center gap-2 shadow-xs transition-colors"
+          className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-semibold text-xs py-2 px-3.5 rounded-lg flex items-center gap-2 shadow-xs transition-colors self-start sm:self-center"
         >
           <PlusIcon className="w-4 h-4" />
           <span>{showAddForm ? "Close Form" : "Add Product"}</span>
@@ -1031,7 +1183,7 @@ export function ProductsView({
           onClick={() => setActiveTab("reselling")}
           className="pb-2.5 text-gray-500 hover:text-gray-900"
         >
-          Reselling (3)
+          Reselling ({resellingList.length})
         </button>
         <button
           onClick={() => setActiveTab("exceptions")}

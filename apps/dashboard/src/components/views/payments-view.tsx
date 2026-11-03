@@ -1,14 +1,95 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 
 interface PaymentsViewProps {
+  initialTab?: "splits" | "accounts" | "detail" | "rules";
   onNavigateToOrder?: (orderCode: string) => void;
 }
 
-export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
+interface TransactionItem {
+  id: string;
+  orderCode: string;
+  amount: number;
+  gatewayRef: string;
+  date: string;
+  time: string;
+  supplierGross: number;
+  repGross: number;
+  repNet: number;
+  fee: number;
+  customerStatus: "Paid" | "Payment failed";
+  supplierSettlement: "Supplier pending" | "Both settled" | "Not created";
+  repSettlement: "Rep failed" | "Both settled" | "Not created" | "Settled";
+}
+
+const INITIAL_TRANSACTIONS: TransactionItem[] = [
+  {
+    id: "tx-1",
+    orderCode: "CT-1042",
+    amount: 20000,
+    gatewayRef: "GW-1042",
+    date: "3 Nov 2026",
+    time: "10:18 WAT",
+    supplierGross: 16000,
+    repGross: 4000,
+    repNet: 3700,
+    fee: 300,
+    customerStatus: "Paid",
+    supplierSettlement: "Supplier pending",
+    repSettlement: "Rep failed",
+  },
+  {
+    id: "tx-2",
+    orderCode: "CT-1041",
+    amount: 10000,
+    gatewayRef: "GW-1041",
+    date: "2 Nov 2026",
+    time: "14:20 WAT",
+    supplierGross: 8000,
+    repGross: 2000,
+    repNet: 1850,
+    fee: 150,
+    customerStatus: "Paid",
+    supplierSettlement: "Both settled",
+    repSettlement: "Both settled",
+  },
+  {
+    id: "tx-3",
+    orderCode: "CT-1040",
+    amount: 20000,
+    gatewayRef: "GW-1040",
+    date: "1 Nov 2026",
+    time: "11:05 WAT",
+    supplierGross: 16000,
+    repGross: 4000,
+    repNet: 3700,
+    fee: 300,
+    customerStatus: "Paid",
+    supplierSettlement: "Both settled",
+    repSettlement: "Both settled",
+  },
+  {
+    id: "tx-4",
+    orderCode: "CT-1039",
+    amount: 10000,
+    gatewayRef: "No capture",
+    date: "31 Oct 2026",
+    time: "16:45 WAT",
+    supplierGross: 0,
+    repGross: 0,
+    repNet: 0,
+    fee: 0,
+    customerStatus: "Payment failed",
+    supplierSettlement: "Not created",
+    repSettlement: "Not created",
+  },
+];
+
+export function PaymentsView({ initialTab = "splits", onNavigateToOrder }: PaymentsViewProps) {
   // Tabs: 'splits' | 'accounts' | 'detail' | 'rules'
-  const [activeTab, setActiveTab] = useState<"splits" | "accounts" | "detail" | "rules">("splits");
+  const [activeTab, setActiveTab] = useState<"splits" | "accounts" | "detail" | "rules">(initialTab);
+  const [transactions, setTransactions] = useState<TransactionItem[]>(INITIAL_TRANSACTIONS);
 
   // Filter states for split transactions ledger
   const [searchTx, setSearchTx] = useState("");
@@ -21,7 +102,10 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
   const [accountNumber, setAccountNumber] = useState("012345678");
   const [accountValidating, setAccountValidating] = useState(false);
   const [gatewayChecking, setGatewayChecking] = useState(false);
+  const [replacementValidated, setReplacementValidated] = useState(false);
+  const [gatewayTimeoutResolved, setGatewayTimeoutResolved] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
 
   // Detail / Refund review state
   const [retryPayoutLoading, setRetryPayoutLoading] = useState(false);
@@ -30,13 +114,113 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
   const [refundReason, setRefundReason] = useState("Customer requested cancellation");
   const [reviewedLiability, setReviewedLiability] = useState(false);
   const [refundSubmitted, setRefundSubmitted] = useState(false);
+  const [timelineRefreshing, setTimelineRefreshing] = useState(false);
+  const [refreshNotice, setRefreshNotice] = useState(false);
+
+  // CSV Export functionality
+  const handleExportCSV = () => {
+    const header = "Order ID,Gateway Ref,Date,Time,Amount (NGN),Supplier (NGN),Rep Gross (NGN),Fee (NGN),Rep Net (NGN),Customer Status,Settlement Status\n";
+    const rows = transactions
+      .map(
+        (t) =>
+          `"${t.orderCode}","${t.gatewayRef}","${t.date}","${t.time}",${t.amount},${t.supplierGross},${t.repGross},${t.fee},${t.repNet},"${t.customerStatus}","${t.supplierSettlement} / ${t.repSettlement}"`
+      )
+      .join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `caterlog-split-transactions-${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Filtered transactions
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((t) => {
+      if (searchTx.trim()) {
+        const q = searchTx.toLowerCase();
+        const matches =
+          t.orderCode.toLowerCase().includes(q) ||
+          t.gatewayRef.toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+      if (statusFilter !== "All statuses") {
+        if (t.customerStatus !== statusFilter) return false;
+      }
+      if (settlementFilter === "Both settled") {
+        if (t.supplierSettlement !== "Both settled") return false;
+      } else if (settlementFilter === "Action needed") {
+        if (t.repSettlement !== "Rep failed" && t.supplierSettlement !== "Supplier pending") {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [transactions, searchTx, statusFilter, settlementFilter]);
+
+  // Account Number Validation Handler
+  const handleAccountChange = (val: string) => {
+    const cleaned = val.replace(/\D/g, "").slice(0, 10);
+    setAccountNumber(cleaned);
+    if (cleaned.length === 10) {
+      setReplacementValidated(true);
+    } else {
+      setReplacementValidated(false);
+    }
+  };
+
+  const handleValidateAccount = () => {
+    setAccountValidating(true);
+    setTimeout(() => {
+      setAccountValidating(false);
+      if (accountNumber.length === 10) {
+        setReplacementValidated(true);
+      }
+    }, 800);
+  };
+
+  const handleRetryGateway = () => {
+    setGatewayChecking(true);
+    setTimeout(() => {
+      setGatewayChecking(false);
+      setGatewayTimeoutResolved(true);
+      setReplacementValidated(true);
+    }, 1000);
+  };
+
+  const handleRetryPayout = () => {
+    setRetryPayoutLoading(true);
+    setTimeout(() => {
+      setRetryPayoutLoading(false);
+      setPayoutRetried(true);
+      // update transaction status in memory
+      setTransactions((prev) =>
+        prev.map((tx) =>
+          tx.orderCode === "CT-1042"
+            ? { ...tx, repSettlement: "Settled" }
+            : tx
+        )
+      );
+    }, 1200);
+  };
+
+  const handleRefreshGateway = () => {
+    setTimelineRefreshing(true);
+    setTimeout(() => {
+      setTimelineRefreshing(false);
+      setRefreshNotice(true);
+      setTimeout(() => setRefreshNotice(false), 2500);
+    }, 900);
+  };
 
   /* -------------------------------------------------------------------------- */
   /* Screen 13: Payments · Split detail and refund review (CT-1042)             */
   /* -------------------------------------------------------------------------- */
   if (activeTab === "detail") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -56,24 +240,35 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
             <p className="text-xs text-gray-500 mt-0.5">
               GW-1042 · Customer paid ₦20,000 · 3 Nov 2026, 10:18 WAT
             </p>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                 Customer payment: Paid
               </span>
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                Settlement: Action needed
+              <span
+                className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                  payoutRetried
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-amber-50 text-amber-800 border-amber-200"
+                }`}
+              >
+                {payoutRetried ? "Settlement: Re-queued / Settling" : "Settlement: Action needed"}
               </span>
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                Refund: Not submitted
+              <span
+                className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                  refundSubmitted
+                    ? "bg-rose-50 text-rose-700 border border-rose-200"
+                    : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {refundSubmitted ? "Refund: Proposed / In Review" : "Refund: Not submitted"}
               </span>
             </div>
           </div>
           <button
             onClick={() => {
               if (onNavigateToOrder) onNavigateToOrder("CT-1042");
-              else alert("Navigating to Order CT-1042");
             }}
-            className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg shadow-xs"
+            className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg shadow-xs transition-colors self-start sm:self-center"
           >
             View order →
           </button>
@@ -146,15 +341,27 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
               <h3 className="text-sm font-bold text-gray-900">Recipient payout recovery</h3>
 
-              <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl space-y-1">
-                <div className="font-bold text-rose-800 flex items-center gap-1.5">
-                  <span>⚠</span>
-                  <span>Nia payout failed · Bank unavailable</span>
+              {!payoutRetried ? (
+                <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl space-y-1">
+                  <div className="font-bold text-rose-800 flex items-center gap-1.5">
+                    <span>⚠</span>
+                    <span>Nia payout failed · Bank unavailable</span>
+                  </div>
+                  <p className="text-[11px] text-rose-700 leading-relaxed">
+                    Transfer PAY-NS-1042 was not completed. Customer payment remains paid; the supplier allocation is unaffected.
+                  </p>
                 </div>
-                <p className="text-[11px] text-rose-700 leading-relaxed">
-                  Transfer PAY-NS-1042 was not completed. Customer payment remains paid; the supplier allocation is unaffected.
-                </p>
-              </div>
+              ) : (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1">
+                  <div className="font-bold text-emerald-900 flex items-center gap-1.5">
+                    <span>✓</span>
+                    <span>Payout retry dispatched</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed">
+                    Transfer PAY-NS-1042-R1 re-queued to Nia Stores (•••• 0142). Monnify gateway is awaiting bank confirmation.
+                  </p>
+                </div>
+              )}
 
               <div className="divide-y divide-gray-100">
                 <div className="py-2 flex justify-between">
@@ -167,33 +374,27 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
                 </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-gray-500">Last attempt</span>
-                  <span className="font-semibold text-gray-900">3 Nov · 10:23 WAT</span>
+                  <span className="font-semibold text-gray-900">
+                    {payoutRetried ? "Just now · Monnify NUBAN clearing" : "3 Nov · 10:23 WAT"}
+                  </span>
                 </div>
               </div>
 
-              {payoutRetried && (
-                <div className="p-3 bg-emerald-50 text-emerald-800 rounded-lg text-xs font-semibold">
-                  ✓ Transfer re-queued to Nia Stores. Monitoring Monnify NUBAN clearing...
-                </div>
-              )}
-
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1">
                 <button
-                  onClick={() => {
-                    setRetryPayoutLoading(true);
-                    setTimeout(() => {
-                      setRetryPayoutLoading(false);
-                      setPayoutRetried(true);
-                    }, 1200);
-                  }}
-                  disabled={retryPayoutLoading}
-                  className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+                  onClick={handleRetryPayout}
+                  disabled={retryPayoutLoading || payoutRetried}
+                  className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
                 >
-                  {retryPayoutLoading ? "Retrying..." : "Retry recipient payout"}
+                  {retryPayoutLoading
+                    ? "Dispatching retry..."
+                    : payoutRetried
+                    ? "✓ Payout Re-queued"
+                    : "Retry recipient payout"}
                 </button>
                 <button
                   onClick={() => setActiveTab("accounts")}
-                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
                 >
                   Check payout account
                 </button>
@@ -208,11 +409,15 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-gray-900">Refund proposal · review before submission</h3>
-                  <p className="text-[11px] text-gray-400">Full refund example — nothing has been refunded yet</p>
+                  <h3 className="text-sm font-bold text-gray-900">
+                    Refund proposal · review before submission
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    Full refund example — nothing has been refunded yet
+                  </p>
                 </div>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                  Draft only
+                  {refundSubmitted ? "Submitted" : "Draft only"}
                 </span>
               </div>
 
@@ -225,13 +430,11 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
                     type="number"
                     value={refundAmount}
                     onChange={(e) => setRefundAmount(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg"
+                    className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-gray-500 mb-1">
-                    Reason
-                  </label>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-1">Reason</label>
                   <select
                     value={refundReason}
                     onChange={(e) => setRefundReason(e.target.value)}
@@ -247,7 +450,7 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
               <div className="divide-y divide-gray-100 p-3 bg-gray-50 rounded-xl">
                 <div className="py-1.5 flex justify-between">
                   <span className="text-gray-500">Customer refund proposed</span>
-                  <span className="font-semibold text-gray-900">₦20,000</span>
+                  <span className="font-semibold text-gray-900">₦{Number(refundAmount || 0).toLocaleString()}</span>
                 </div>
                 <div className="py-1.5 flex justify-between">
                   <span className="text-gray-500">Supplier recovery</span>
@@ -270,7 +473,7 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
                   onChange={(e) => setReviewedLiability(e.target.checked)}
                   className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
                 />
-                <span>
+                <span className="text-[11px] leading-relaxed">
                   I have reviewed allocations and recipient recovery. Pending or failed payouts must be reconciled before money is returned.
                 </span>
               </label>
@@ -293,7 +496,7 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
 
               <div className="flex gap-2 pt-1">
                 <button
-                  onClick={() => alert("Refund proposal saved as draft")}
+                  onClick={() => alert("Refund draft saved to local proposals")}
                   className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
                 >
                   Save proposal
@@ -315,7 +518,20 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
           {/* Right Column: Gateway confirmation & timeline */}
           <div className="space-y-6">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">Gateway confirmation &amp; timeline</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-gray-900">Gateway confirmation &amp; timeline</h3>
+                {timelineRefreshing && (
+                  <span className="text-[10px] text-emerald-600 font-semibold animate-pulse">
+                    Checking...
+                  </span>
+                )}
+              </div>
+
+              {refreshNotice && (
+                <div className="p-2 bg-emerald-50 text-emerald-800 text-[11px] rounded font-medium">
+                  ✓ Gateway event signatures re-verified against Monnify public keys.
+                </div>
+              )}
 
               <div className="space-y-3.5 relative pl-4 border-l-2 border-emerald-500">
                 <div>
@@ -340,18 +556,27 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
                 </div>
 
                 <div>
-                  <div className="font-bold text-rose-700">10:23 · Rep payout failed</div>
+                  <div
+                    className={`font-bold ${
+                      payoutRetried ? "text-emerald-700" : "text-rose-700"
+                    }`}
+                  >
+                    {payoutRetried ? "10:28 · Rep payout re-dispatched" : "10:23 · Rep payout failed"}
+                  </div>
                   <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                    PAY-NS-1042 · Bank unavailable. Retry is available.
+                    {payoutRetried
+                      ? "PAY-NS-1042-R1 · Sent to bank clearing network. Verification in progress."
+                      : "PAY-NS-1042 · Bank unavailable. Retry is available."}
                   </p>
                 </div>
               </div>
 
               <button
-                onClick={() => alert("Gateway status refreshed. All server signatures valid.")}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                onClick={handleRefreshGateway}
+                disabled={timelineRefreshing}
+                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5"
               >
-                Refresh gateway status
+                <span>{timelineRefreshing ? "Refreshing..." : "Refresh gateway status"}</span>
               </button>
             </div>
           </div>
@@ -363,9 +588,9 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
   /* -------------------------------------------------------------------------- */
   /* Screen 11: Payments · Payout accounts and splits                           */
   /* -------------------------------------------------------------------------- */
-  if (activeTab === "accounts") {
+  if (activeTab === "accounts" || activeTab === "rules") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-20">
+      <div className="space-y-6 max-w-6xl mx-auto pb-24">
         {/* Header */}
         <div>
           <div className="text-xs text-gray-500 mb-1">Payments / Payout accounts</div>
@@ -387,13 +612,21 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
           </button>
           <button
             onClick={() => setActiveTab("accounts")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
+            className={`pb-2.5 ${
+              activeTab === "accounts"
+                ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold"
+                : "text-gray-500 hover:text-gray-900"
+            }`}
           >
             Payout accounts
           </button>
           <button
             onClick={() => setActiveTab("rules")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className={`pb-2.5 ${
+              activeTab === "rules"
+                ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold"
+                : "text-gray-500 hover:text-gray-900"
+            }`}
           >
             Split rules
           </button>
@@ -434,8 +667,8 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
             </p>
 
             <button
-              onClick={() => alert("Viewing Aroko Wholesale verified credentials")}
-              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+              onClick={() => setShowVerificationModal(true)}
+              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
             >
               View verification
             </button>
@@ -445,14 +678,20 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-900">Reseller · Nia Stores</h3>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                Update pending
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                  replacementValidated
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-amber-100 text-amber-800"
+                }`}
+              >
+                {replacementValidated ? "Verified & Ready" : "Update pending"}
               </span>
             </div>
 
             <div className="space-y-3">
-              <div>
-                <span className="text-gray-500">Business identity: </span>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Business identity</span>
                 <span className="font-semibold text-gray-900">Verified</span>
               </div>
 
@@ -461,12 +700,14 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
                 <select
                   value={bankSelect}
                   onChange={(e) => setBankSelect(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
+                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-emerald-600"
                 >
                   <option>Example bank</option>
                   <option>Access Bank</option>
                   <option>Zenith Bank</option>
                   <option>GTBank</option>
+                  <option>First Bank of Nigeria</option>
+                  <option>Kuda Bank</option>
                 </select>
               </div>
 
@@ -476,18 +717,34 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
                 </label>
                 <input
                   type="text"
+                  maxLength={10}
+                  placeholder="Enter 10-digit account number"
                   value={accountNumber}
-                  onChange={(e) => setAccountNumber(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-rose-300 rounded-lg focus:outline-none focus:border-rose-500"
+                  onChange={(e) => handleAccountChange(e.target.value)}
+                  className={`w-full text-xs px-3 py-2 border rounded-lg focus:outline-none ${
+                    accountNumber.length === 10
+                      ? "border-emerald-500 text-gray-900"
+                      : "border-rose-300 text-rose-900"
+                  }`}
                 />
-                <p className="text-[11px] text-rose-600 mt-1">
-                  Enter a 10-digit Nigerian account number.
-                </p>
+                {accountNumber.length !== 10 && (
+                  <p className="text-[11px] text-rose-600 mt-1">
+                    Enter a 10-digit Nigerian account number ({accountNumber.length}/10 digits).
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-between py-1 text-xs">
                 <span className="text-gray-500">Account-name match</span>
-                <span className="text-gray-700 font-medium">Waiting for valid number</span>
+                <span
+                  className={`font-semibold ${
+                    accountNumber.length === 10 ? "text-emerald-700" : "text-gray-500"
+                  }`}
+                >
+                  {accountNumber.length === 10
+                    ? "✓ Nia Stores & Goods Ltd (Matched)"
+                    : "Waiting for valid number"}
+                </span>
               </div>
             </div>
 
@@ -496,11 +753,9 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
             </p>
 
             <button
-              onClick={() => {
-                setAccountValidating(true);
-                setTimeout(() => setAccountValidating(false), 1500);
-              }}
-              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+              onClick={handleValidateAccount}
+              disabled={accountValidating}
+              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
             >
               {accountValidating ? "Validating NUBAN..." : "Validate & retry"}
             </button>
@@ -579,38 +834,87 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
               </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-600">Replacement beneficiary</span>
-                <span className="font-semibold text-amber-700">Pending validation</span>
+                <span
+                  className={`font-semibold ${
+                    replacementValidated ? "text-emerald-700" : "text-amber-700"
+                  }`}
+                >
+                  {replacementValidated ? "✓ Validated" : "Pending validation"}
+                </span>
               </div>
             </div>
 
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-1">
-              <div className="font-bold text-amber-900 flex items-center gap-1.5">
-                <span>⚠</span>
-                <span>Gateway timeout · last attempt</span>
+            {!gatewayTimeoutResolved ? (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-1">
+                <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                  <span>⚠</span>
+                  <span>Gateway timeout · last attempt</span>
+                </div>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  Replacement subaccount creation did not complete. Correct the account number, then retry. No duplicate subaccount was created.
+                </p>
               </div>
-              <p className="text-[11px] text-amber-800 leading-relaxed">
-                Replacement subaccount creation did not complete. Correct the account number, then retry. No duplicate subaccount was created.
-              </p>
-            </div>
+            ) : (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1">
+                <div className="font-bold text-emerald-900 flex items-center gap-1.5">
+                  <span>✓</span>
+                  <span>Gateway subaccount ready</span>
+                </div>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  SUB-NS-002 provisioned and linked to Monnify escrow split router.
+                </p>
+              </div>
+            )}
 
             <button
-              onClick={() => {
-                setGatewayChecking(true);
-                setTimeout(() => setGatewayChecking(false), 1200);
-              }}
-              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+              onClick={handleRetryGateway}
+              disabled={gatewayChecking || gatewayTimeoutResolved}
+              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
             >
-              {gatewayChecking ? "Checking gateway..." : "Retry gateway check"}
+              {gatewayChecking
+                ? "Checking gateway..."
+                : gatewayTimeoutResolved
+                ? "✓ Gateway Verified"
+                : "Retry gateway check"}
             </button>
           </div>
         </div>
 
+        {/* Verification Modal */}
+        {showVerificationModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center">
+                <h3 className="font-bold text-gray-900 text-sm">Aroko Wholesale · Verification</h3>
+                <button
+                  onClick={() => setShowVerificationModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="text-xs space-y-2 text-gray-700">
+                <p><strong>CAC Registration:</strong> RC-982341 (Active)</p>
+                <p><strong>TIN:</strong> 21980324-0001</p>
+                <p><strong>Settlement NUBAN:</strong> Example bank (•••• 4201)</p>
+                <p><strong>Monnify Subaccount:</strong> SUB-AW-001 (Automated splits enabled)</p>
+              </div>
+              <button
+                onClick={() => setShowVerificationModal(false)}
+                className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Sticky Bottom Bar */}
-        <div className="fixed bottom-0 left-64 right-0 bg-white border-t border-gray-200 py-3 px-8 flex items-center justify-between z-10 shadow-lg text-xs">
-          <span className="text-gray-400 text-[11px]">
+        <div className="fixed bottom-0 left-0 lg:left-64 right-0 bg-white border-t border-gray-200 py-3 px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 z-30 shadow-lg text-xs">
+          <span className="text-gray-400 text-[11px] text-center sm:text-left">
             Recipient changes affect future payments only. Existing transaction allocations remain recorded against their original recipients.
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {configSaved && (
               <span className="text-xs font-semibold text-emerald-700 mr-2">
                 ✓ Split configuration saved
@@ -641,7 +945,7 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
   /* Screen 12: Payments · Split transactions (Default Ledger)                  */
   /* -------------------------------------------------------------------------- */
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+    <div className="space-y-6 max-w-6xl mx-auto pb-16">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -652,10 +956,15 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
           </p>
         </div>
         <button
-          onClick={() => alert("Exporting Split Transactions CSV")}
-          className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium"
+          onClick={handleExportCSV}
+          className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium transition-colors shadow-xs flex items-center gap-1.5 self-start sm:self-center"
         >
-          Export CSV
+          <svg className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" x2="12" y1="15" y2="3" />
+          </svg>
+          <span>Export CSV</span>
         </button>
       </div>
 
@@ -674,7 +983,7 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
           Payout accounts
         </button>
         <button
-          onClick={() => setActiveTab("accounts")}
+          onClick={() => setActiveTab("rules")}
           className="pb-2.5 text-gray-500 hover:text-gray-900"
         >
           Split rules
@@ -703,25 +1012,33 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
       {/* Alert Banner: One recipient payout failed */}
       <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex items-start gap-3">
         <span className="text-amber-700 font-bold text-sm">⚠</span>
-        <div className="text-amber-900">
+        <div className="text-amber-900 flex-1">
           <span className="font-bold">One recipient payout failed</span>
           <p className="text-[11px] text-amber-800 mt-0.5">
             CT-1042 is paid. The ₦16,000 supplier payout is pending and Nia&apos;s ₦3,700 payout failed. Do not ask the customer to pay again.
           </p>
         </div>
+        <button
+          onClick={() => setActiveTab("detail")}
+          className="text-xs font-semibold text-emerald-800 hover:text-emerald-900 underline shrink-0"
+        >
+          Review CT-1042 →
+        </button>
       </div>
 
       {/* Transaction Ledger Card */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
         <div className="p-5 border-b border-gray-100">
           <h3 className="text-sm font-bold text-gray-900">Transaction ledger</h3>
-          <p className="text-xs text-gray-400 mt-0.5">1–4 of 4 transactions · 1–3 Nov 2026</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Showing {filteredTransactions.length} of {transactions.length} transactions · {dateRange}
+          </p>
 
           {/* Filter Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mt-4">
             <input
               type="text"
-              placeholder="Search transactions"
+              placeholder="Search by order or reference"
               value={searchTx}
               onChange={(e) => setSearchTx(e.target.value)}
               className="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
@@ -731,18 +1048,18 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
             >
-              <option>All statuses</option>
-              <option>Paid</option>
-              <option>Payment failed</option>
+              <option value="All statuses">All payment statuses</option>
+              <option value="Paid">Paid</option>
+              <option value="Payment failed">Payment failed</option>
             </select>
             <select
               value={settlementFilter}
               onChange={(e) => setSettlementFilter(e.target.value)}
               className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
             >
-              <option>All statuses</option>
-              <option>Both settled</option>
-              <option>Action needed</option>
+              <option value="All statuses">All settlement statuses</option>
+              <option value="Both settled">Both settled</option>
+              <option value="Action needed">Action needed</option>
             </select>
             <select
               value={dateRange}
@@ -757,7 +1074,7 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left text-xs min-w-[640px]">
             <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
               <tr>
                 <th className="px-5 py-3">Order / Paid</th>
@@ -769,120 +1086,97 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-gray-700">
-              {/* Row 1: CT-1042 */}
-              <tr
-                onClick={() => setActiveTab("detail")}
-                className="hover:bg-amber-50/30 cursor-pointer transition-colors"
-              >
-                <td className="px-5 py-3.5">
-                  <div className="font-semibold text-emerald-800 flex items-center gap-1">
-                    <span>CT-1042</span>
-                    <span>↗</span>
-                  </div>
-                  <div className="text-[11px] text-gray-400">₦20,000 · GW-1042</div>
-                </td>
-                <td className="px-4 py-3.5 font-medium text-gray-900">₦16,000</td>
-                <td className="px-4 py-3.5">
-                  <div className="text-gray-900 font-medium">₦4,000</div>
-                  <div className="text-[11px] text-emerald-700 font-semibold">₦3,700</div>
-                </td>
-                <td className="px-4 py-3.5 text-gray-500">₦300</td>
-                <td className="px-4 py-3.5">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                    Paid
-                  </span>
-                </td>
-                <td className="px-5 py-3.5">
-                  <div className="flex flex-col gap-1 items-start">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
-                      Supplier pending
+              {filteredTransactions.map((tx) => (
+                <tr
+                  key={tx.id}
+                  onClick={() => setActiveTab("detail")}
+                  className={`cursor-pointer transition-colors ${
+                    tx.repSettlement === "Rep failed"
+                      ? "hover:bg-amber-50/40 bg-amber-50/10"
+                      : "hover:bg-gray-50"
+                  }`}
+                >
+                  <td className="px-5 py-3.5">
+                    <div className="font-semibold text-emerald-800 flex items-center gap-1">
+                      <span>{tx.orderCode}</span>
+                      <span>↗</span>
+                    </div>
+                    <div className="text-[11px] text-gray-400">
+                      ₦{tx.amount.toLocaleString()} · {tx.gatewayRef}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3.5 font-medium text-gray-900">
+                    {tx.supplierGross > 0 ? `₦${tx.supplierGross.toLocaleString()}` : "—"}
+                  </td>
+                  <td className="px-4 py-3.5">
+                    {tx.repGross > 0 ? (
+                      <>
+                        <div className="text-gray-900 font-medium">₦{tx.repGross.toLocaleString()}</div>
+                        <div className="text-[11px] text-emerald-700 font-semibold">
+                          ₦{tx.repNet.toLocaleString()}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 text-gray-500">₦{tx.fee}</td>
+                  <td className="px-4 py-3.5">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        tx.customerStatus === "Paid"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-rose-100 text-rose-800"
+                      }`}
+                    >
+                      {tx.customerStatus}
                     </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-800 border border-rose-200">
-                      Rep failed
-                    </span>
-                  </div>
-                </td>
-              </tr>
-
-              {/* Row 2: CT-1041 */}
-              <tr className="hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3.5">
-                  <div className="font-semibold text-gray-900">CT-1041</div>
-                  <div className="text-[11px] text-gray-400">₦10,000 · GW-1041</div>
-                </td>
-                <td className="px-4 py-3.5 font-medium text-gray-900">₦8,000</td>
-                <td className="px-4 py-3.5">
-                  <div className="text-gray-900 font-medium">₦2,000</div>
-                  <div className="text-[11px] text-emerald-700 font-semibold">₦1,850</div>
-                </td>
-                <td className="px-4 py-3.5 text-gray-500">₦150</td>
-                <td className="px-4 py-3.5">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                    Paid
-                  </span>
-                </td>
-                <td className="px-5 py-3.5">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
-                    Both settled
-                  </span>
-                </td>
-              </tr>
-
-              {/* Row 3: CT-1040 */}
-              <tr className="hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3.5">
-                  <div className="font-semibold text-gray-900">CT-1040</div>
-                  <div className="text-[11px] text-gray-400">₦20,000 · GW-1040</div>
-                </td>
-                <td className="px-4 py-3.5 font-medium text-gray-900">₦16,000</td>
-                <td className="px-4 py-3.5">
-                  <div className="text-gray-900 font-medium">₦4,000</div>
-                  <div className="text-[11px] text-emerald-700 font-semibold">₦3,700</div>
-                </td>
-                <td className="px-4 py-3.5 text-gray-500">₦300</td>
-                <td className="px-4 py-3.5">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                    Paid
-                  </span>
-                </td>
-                <td className="px-5 py-3.5">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
-                    Both settled
-                  </span>
-                </td>
-              </tr>
-
-              {/* Row 4: CT-1039 */}
-              <tr className="hover:bg-gray-50 transition-colors opacity-70">
-                <td className="px-5 py-3.5">
-                  <div className="font-semibold text-gray-900">CT-1039</div>
-                  <div className="text-[11px] text-gray-400">₦10,000 · No capture</div>
-                </td>
-                <td className="px-4 py-3.5 font-medium text-gray-400">—</td>
-                <td className="px-4 py-3.5 font-medium text-gray-400">—</td>
-                <td className="px-4 py-3.5 text-gray-400">₦0</td>
-                <td className="px-4 py-3.5">
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
-                    Payment failed
-                  </span>
-                </td>
-                <td className="px-5 py-3.5">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600">
-                    Not created
-                  </span>
-                </td>
-              </tr>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {tx.supplierSettlement === "Both settled" ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        Both settled
+                      </span>
+                    ) : tx.supplierSettlement === "Not created" ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600">
+                        Not created
+                      </span>
+                    ) : (
+                      <div className="flex flex-col gap-1 items-start">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                          {tx.supplierSettlement}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
+                            tx.repSettlement === "Settled"
+                              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                              : "bg-rose-50 text-rose-800 border-rose-200"
+                          }`}
+                        >
+                          {tx.repSettlement}
+                        </span>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
 
-        <div className="p-4 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-400">
+        <div className="p-4 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-gray-400 gap-2">
           <span>Fees are charged to the reseller, not deducted from supplier cost.</span>
           <div className="flex gap-2">
-            <button className="px-2.5 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50">
+            <button
+              onClick={() => alert("Already on first page")}
+              className="px-2.5 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
+            >
               Previous
             </button>
-            <button className="px-2.5 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50">
+            <button
+              onClick={() => alert("Showing all available rows")}
+              className="px-2.5 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
+            >
               Next
             </button>
           </div>
@@ -898,7 +1192,7 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
           </p>
           <button
             onClick={() => setActiveTab("detail")}
-            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
           >
             Open CT-1042 &amp; review →
           </button>
@@ -925,4 +1219,3 @@ export function PaymentsView({ onNavigateToOrder }: PaymentsViewProps) {
     </div>
   );
 }
-

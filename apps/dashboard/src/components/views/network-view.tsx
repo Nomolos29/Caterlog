@@ -3,12 +3,13 @@
 import React, { useState } from "react";
 
 interface NetworkViewProps {
-  onMirrorProducts?: () => void;
+  initialTab?: "find" | "catalog" | "resellers";
+  onMirrorProducts?: (selectedSkus?: string[]) => void;
 }
 
-export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
+export function NetworkView({ initialTab = "find", onMirrorProducts }: NetworkViewProps) {
   // Tabs: 'find' | 'catalog' | 'resellers'
-  const [activeTab, setActiveTab] = useState<"find" | "catalog" | "resellers">("find");
+  const [activeTab, setActiveTab] = useState<"find" | "catalog" | "resellers">(initialTab);
 
   // Find suppliers filters
   const [searchQuery, setSearchQuery] = useState("Home & living");
@@ -19,6 +20,9 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
   // Supplier Catalog selection
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>(["flask", "lunchbox", "jar"]);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [supplierMsgModal, setSupplierMsgModal] = useState(false);
+  const [supplierMsgText, setSupplierMsgText] = useState("Hello Aroko Wholesale, we have mirrored your drinkware catalog and would like to confirm fulfillment lead times.");
+  const [supplierMsgSent, setSupplierMsgSent] = useState(false);
 
   // Resellers permission states
   const [viewCostsStock, setViewCostsStock] = useState(true);
@@ -27,6 +31,14 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteSent, setInviteSent] = useState(false);
   const [permsSaved, setPermsSaved] = useState(false);
+  const [catalogAccessModal, setCatalogAccessModal] = useState(false);
+
+  const [catalogPermissions, setCatalogPermissions] = useState({
+    drinkware: "Open · 1 linked",
+    kitchen: "Open · 1 linked",
+    storage: "Open · 1 linked",
+    seasonal: "Restricted · Not shared",
+  });
 
   const toggleSelect = (id: string) => {
     if (selectedProductIds.includes(id)) {
@@ -41,7 +53,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
   /* -------------------------------------------------------------------------- */
   if (activeTab === "catalog") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Breadcrumb & Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -59,7 +71,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
             <p className="text-xs text-gray-500 mt-0.5">
               Home &amp; living wholesaler · Lagos, Nigeria
             </p>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                 Verified identity
               </span>
@@ -73,9 +85,9 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
           </div>
           <button
             onClick={() => {
-              if (onMirrorProducts) onMirrorProducts();
+              if (onMirrorProducts) onMirrorProducts(selectedProductIds);
             }}
-            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors"
+            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs flex items-center gap-1.5 transition-colors self-start sm:self-center"
           >
             <span>Mirror {selectedProductIds.length} products</span>
             <span>→</span>
@@ -87,10 +99,16 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
           <button className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold">
             Catalog (24)
           </button>
-          <button className="pb-2.5 text-gray-500 hover:text-gray-900">
+          <button
+            onClick={() => alert("Aroko Wholesale: Homeware and kitchen goods importer registered under CAC RC-982341. Ikeja central logistics hub.")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900"
+          >
             Business details
           </button>
-          <button className="pb-2.5 text-gray-500 hover:text-gray-900">
+          <button
+            onClick={() => alert("Wholesale Terms: Minimum order quantity 1 unit. All prices quoted in NGN. Shared real-time stock pool.")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900"
+          >
             Wholesale terms
           </button>
         </div>
@@ -117,7 +135,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
               />
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full text-left text-xs min-w-[500px]">
                   <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                     <tr>
                       <th className="px-4 py-3">Product</th>
@@ -244,7 +262,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
               </div>
 
               <div className="text-[11px] text-gray-400 pt-1">
-                Showing 4 of 24 products · <button className="text-emerald-700 underline">View all products ↗</button>
+                Showing 4 of 24 products · <button onClick={() => alert("Showing all 24 wholesale items")} className="text-emerald-700 underline">View all products ↗</button>
               </div>
             </div>
 
@@ -317,7 +335,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
               </p>
               <button
                 onClick={() => {
-                  if (onMirrorProducts) onMirrorProducts();
+                  if (onMirrorProducts) onMirrorProducts(selectedProductIds);
                 }}
                 className="w-full py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
               >
@@ -335,14 +353,59 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
                 </p>
               </div>
               <button
-                onClick={() => alert("Opening messaging modal with Aroko Wholesale")}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                onClick={() => setSupplierMsgModal(true)}
+                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
               >
                 Message supplier
               </button>
             </div>
           </div>
         </div>
+
+        {/* Message Supplier Dialog */}
+        {supplierMsgModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm">Message Aroko Wholesale</h3>
+                <button onClick={() => setSupplierMsgModal(false)} className="text-gray-400 hover:text-gray-600">
+                  ✕
+                </button>
+              </div>
+              <textarea
+                rows={4}
+                value={supplierMsgText}
+                onChange={(e) => setSupplierMsgText(e.target.value)}
+                className="w-full text-xs p-3 border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600"
+              />
+              {supplierMsgSent && (
+                <div className="text-xs text-emerald-800 bg-emerald-50 p-2 rounded">
+                  ✓ Message dispatched to Aroko Wholesale representative!
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setSupplierMsgSent(true);
+                    setTimeout(() => {
+                      setSupplierMsgSent(false);
+                      setSupplierMsgModal(false);
+                    }, 1200);
+                  }}
+                  className="flex-1 py-2 bg-[#0d5c3a] text-white text-xs font-semibold rounded-lg hover:bg-[#0b4b2f]"
+                >
+                  Send Message
+                </button>
+                <button
+                  onClick={() => setSupplierMsgModal(false)}
+                  className="px-4 py-2 border border-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -352,7 +415,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
   /* -------------------------------------------------------------------------- */
   if (activeTab === "resellers") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -363,8 +426,11 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
             </p>
           </div>
           <button
-            onClick={() => alert("Opening invite reseller dialog")}
-            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+            onClick={() => {
+              const el = document.getElementById("invite-section");
+              if (el) el.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors self-start sm:self-center"
           >
             Invite reseller
           </button>
@@ -411,7 +477,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[600px]">
               <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 <tr>
                   <th className="px-5 py-3">Reseller</th>
@@ -442,7 +508,10 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <button
-                      onClick={() => alert("Viewing permissions for Nia Stores")}
+                      onClick={() => {
+                        const el = document.getElementById("permissions-card");
+                        if (el) el.scrollIntoView({ behavior: "smooth" });
+                      }}
                       className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
                     >
                       Manage access
@@ -457,7 +526,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
         {/* 2 Column Bottom: Permissions & Catalog Visibility / Invite */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Nia Stores Permissions Card */}
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
+          <div id="permissions-card" className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
             <div>
               <h3 className="text-sm font-bold text-gray-900">Nia Stores · permissions</h3>
               <p className="text-xs text-gray-400 mt-0.5">Connected 3 Nov 2026 · Mirrored from open catalogs</p>
@@ -564,23 +633,23 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
               <div className="divide-y divide-gray-100">
                 <div className="py-2 flex justify-between">
                   <span className="text-gray-600">Drinkware</span>
-                  <span className="font-semibold text-gray-900">Open · 1 linked</span>
+                  <span className="font-semibold text-gray-900">{catalogPermissions.drinkware}</span>
                 </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-gray-600">Kitchen essentials</span>
-                  <span className="font-semibold text-gray-900">Open · 1 linked</span>
+                  <span className="font-semibold text-gray-900">{catalogPermissions.kitchen}</span>
                 </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-gray-600">Storage</span>
-                  <span className="font-semibold text-gray-900">Open · 1 linked</span>
+                  <span className="font-semibold text-gray-900">{catalogPermissions.storage}</span>
                 </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-gray-600">Seasonal bundles</span>
-                  <span className="font-semibold text-rose-700">Restricted · Not shared</span>
+                  <span className="font-semibold text-rose-700">{catalogPermissions.seasonal}</span>
                 </div>
               </div>
               <button
-                onClick={() => alert("Editing catalog visibility")}
+                onClick={() => setCatalogAccessModal(true)}
                 className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
               >
                 Edit catalog access
@@ -588,7 +657,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
             </div>
 
             {/* Invite a reseller card */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
+            <div id="invite-section" className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
               <h3 className="text-xs font-bold text-gray-900">Invite a reseller</h3>
               <div>
                 <label className="block text-[11px] font-semibold text-gray-500 mb-1">
@@ -599,7 +668,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
                   placeholder="Enter a business email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg"
+                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
                 />
               </div>
               <p className="text-[11px] text-gray-400">
@@ -607,14 +676,17 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
               </p>
               {inviteSent && (
                 <div className="text-[11px] text-emerald-700 bg-emerald-50 p-2 rounded">
-                  Invitation sent to {inviteEmail}
+                  ✓ Invitation email dispatched to {inviteEmail}
                 </div>
               )}
               <button
                 onClick={() => {
                   if (inviteEmail) {
                     setInviteSent(true);
-                    setTimeout(() => setInviteSent(false), 3000);
+                    setTimeout(() => {
+                      setInviteSent(false);
+                      setInviteEmail("");
+                    }, 3000);
                   }
                 }}
                 disabled={!inviteEmail}
@@ -625,6 +697,46 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
             </div>
           </div>
         </div>
+
+        {/* Catalog Access Modal */}
+        {catalogAccessModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm">Edit Catalog Visibility</h3>
+                <button onClick={() => setCatalogAccessModal(false)} className="text-gray-400 hover:text-gray-600">
+                  ✕
+                </button>
+              </div>
+              <div className="space-y-3 text-xs">
+                {Object.entries(catalogPermissions).map(([key, val]) => (
+                  <div key={key} className="flex justify-between items-center">
+                    <span className="capitalize">{key}</span>
+                    <button
+                      onClick={() =>
+                        setCatalogPermissions((prev) => ({
+                          ...prev,
+                          [key]: prev[key as keyof typeof prev].includes("Open")
+                            ? "Restricted · Not shared"
+                            : "Open · 1 linked",
+                        }))
+                      }
+                      className="px-2.5 py-1 text-xs border rounded-lg hover:bg-gray-50"
+                    >
+                      {val.includes("Open") ? "Set Restricted" : "Set Open"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setCatalogAccessModal(false)}
+                className="w-full py-2 bg-[#0d5c3a] text-white text-xs font-semibold rounded-lg hover:bg-[#0b4b2f]"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -633,7 +745,7 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
   /* Screen 7: Network · Find suppliers                                         */
   /* -------------------------------------------------------------------------- */
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+    <div className="space-y-6 max-w-6xl mx-auto pb-16">
       {/* Header */}
       <div>
         <div className="text-xs text-gray-500 mb-1">Network / Find suppliers</div>
@@ -666,14 +778,14 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
       </div>
 
       {/* Directory Filter Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-white p-4 rounded-2xl border border-gray-200 shadow-xs">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-white p-4 rounded-2xl border border-gray-200 shadow-xs">
         <div>
           <label className="block text-[11px] font-semibold text-gray-500 mb-1">Search the directory</label>
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg"
+            className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
           />
         </div>
         <div>
@@ -820,18 +932,19 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
           <p className="text-gray-600 leading-relaxed">
             No suppliers match &ldquo;Electronics&rdquo; in this location. Remove a category or expand your location to search again.
           </p>
-          <div className="flex gap-2 pt-1">
+          <div className="flex flex-wrap gap-2 pt-1">
             <button
               onClick={() => {
                 setSearchQuery("Home & living");
                 setCategoryFilter("Home & living");
+                setLocationFilter("Lagos, Nigeria");
               }}
               className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
             >
               Clear filters
             </button>
             <button
-              onClick={() => alert("Showing all wholesale categories")}
+              onClick={() => alert("Showing all available wholesale categories")}
               className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
             >
               Browse all categories
@@ -870,4 +983,3 @@ export function NetworkView({ onMirrorProducts }: NetworkViewProps) {
     </div>
   );
 }
-

@@ -9,6 +9,7 @@ import {
   PaymentsIcon,
   MarketBoostIcon,
   SettingsIcon,
+  AnalyticsIcon,
   PlusIcon,
 } from "./icons";
 
@@ -20,6 +21,7 @@ export type NavView =
   | "customers"
   | "payments"
   | "market-boost"
+  | "analytics"
   | "settings"
   | "payment-links";
 
@@ -30,6 +32,8 @@ interface SidebarProps {
   onOpenNewOrder?: () => void;
   activeWorkspace?: "reseller" | "supplier";
   onToggleWorkspace?: () => void;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export function Sidebar({
@@ -39,6 +43,8 @@ export function Sidebar({
   onOpenNewOrder,
   activeWorkspace = "reseller",
   onToggleWorkspace,
+  mobileOpen = false,
+  onCloseMobile,
 }: SidebarProps) {
   const navItems: Array<{ id: NavView; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: "overview", label: "Overview", icon: <OverviewIcon className="w-5 h-5" /> },
@@ -48,21 +54,38 @@ export function Sidebar({
     { id: "customers", label: "Customers", icon: <CustomersIcon className="w-5 h-5" /> },
     { id: "payments", label: "Payments", icon: <PaymentsIcon className="w-5 h-5" /> },
     { id: "market-boost", label: "Market Boost", icon: <MarketBoostIcon className="w-5 h-5" /> },
+    { id: "analytics", label: "Analytics", icon: <AnalyticsIcon className="w-5 h-5" /> },
     { id: "settings", label: "Settings", icon: <SettingsIcon className="w-5 h-5" /> },
   ];
 
   const isReseller = activeWorkspace === "reseller";
 
-  return (
-    <aside className="w-64 bg-white border-r border-gray-100 flex flex-col justify-between shrink-0 min-h-screen select-none">
+  const handleItemClick = (id: NavView) => {
+    onSelectView(id);
+    if (onCloseMobile) onCloseMobile();
+  };
+
+  const sidebarContent = (
+    <div className="flex flex-col justify-between h-full">
       <div>
         {/* Brand Header */}
-        <div className="px-6 py-5 border-b border-gray-100 flex items-center gap-3">
-          <CaterlogIcon className="w-8 h-8 shrink-0" />
-          <div>
-            <div className="font-bold text-gray-900 tracking-tight text-lg leading-tight">Caterlog</div>
-            <div className="text-[10px] font-semibold tracking-wider uppercase text-gray-400">BUSINESS MANAGER</div>
+        <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <CaterlogIcon className="w-8 h-8 shrink-0" />
+            <div>
+              <div className="font-bold text-gray-900 tracking-tight text-lg leading-tight">Caterlog</div>
+              <div className="text-[10px] font-semibold tracking-wider uppercase text-gray-400">BUSINESS MANAGER</div>
+            </div>
           </div>
+          {/* Close button on mobile */}
+          {mobileOpen && (
+            <button
+              onClick={onCloseMobile}
+              className="lg:hidden text-gray-400 hover:text-gray-600 p-1"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         {/* Main Navigation List */}
@@ -72,10 +95,10 @@ export function Sidebar({
             return (
               <button
                 key={item.id}
-                onClick={() => onSelectView(item.id)}
+                onClick={() => handleItemClick(item.id)}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive
-                    ? "bg-[#eef2ff] text-[#1e1b4b] font-semibold shadow-xs"
+                    ? "bg-[#eef2ff] text-[#1e1b4b] font-semibold shadow-2xs"
                     : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                 }`}
               >
@@ -115,8 +138,11 @@ export function Sidebar({
 
         {/* Solid Green Primary Action Button */}
         <button
-          onClick={onOpenNewOrder}
-          className="w-full bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-medium text-xs py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs"
+          onClick={() => {
+            onOpenNewOrder?.();
+            if (onCloseMobile) onCloseMobile();
+          }}
+          className="w-full bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-medium text-xs py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-all shadow-2xs"
         >
           <PlusIcon className="w-3.5 h-3.5 stroke-[2.5]" />
           <span>New Order</span>
@@ -137,7 +163,31 @@ export function Sidebar({
           <span>Help Center</span>
         </a>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden lg:flex w-64 bg-white border-r border-gray-100 flex-col justify-between shrink-0 min-h-screen select-none sticky top-0 h-screen">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile Drawer (with backdrop) */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          {/* Backdrop */}
+          <div
+            onClick={onCloseMobile}
+            className="fixed inset-0 bg-black/40 backdrop-blur-2xs transition-opacity animate-in fade-in duration-200"
+          />
+
+          {/* Drawer Surface */}
+          <div className="relative w-72 bg-white flex flex-col justify-between h-full shadow-2xl z-10 animate-in slide-in-from-left duration-200 select-none">
+            {sidebarContent}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
-

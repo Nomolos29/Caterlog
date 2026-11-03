@@ -8,9 +8,19 @@ interface OverviewViewProps {
   orders: OrderItem[];
   onSelectOrder?: (order: OrderItem) => void;
   onViewAllOrders?: () => void;
+  onNavigateToPayments?: () => void;
+  onFilterOrdersByStatus?: (status: "PENDING" | "PAID" | "PROCESSING") => void;
 }
 
-export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewAllOrders }: OverviewViewProps) {
+export function OverviewView({
+  analytics,
+  vendor,
+  orders,
+  onSelectOrder,
+  onViewAllOrders,
+  onNavigateToPayments,
+  onFilterOrdersByStatus,
+}: OverviewViewProps) {
   const [period, setPeriod] = useState<"7D" | "30D" | "1Y">("30D");
 
   // Derive counts based on orders
@@ -22,25 +32,46 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
   const needsAttention = pendingOrders.slice(0, 5);
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-6 sm:space-y-8 max-w-7xl mx-auto">
       {/* Welcome Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-          Good morning, {vendor.businessName}
-        </h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Here&apos;s what&apos;s happening with your business today.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+            Good morning, {vendor.businessName}
+          </h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1">
+            Here&apos;s what&apos;s happening with your business today.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onViewAllOrders}
+            className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
+          >
+            Manage Orders
+          </button>
+          <button
+            onClick={onNavigateToPayments}
+            className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-[#0d5c3a] text-white hover:bg-[#0b4b2f] transition-colors shadow-2xs"
+          >
+            View Settlements
+          </button>
+        </div>
       </div>
 
-      {/* 4 Top KPI Metric Cards */}
+      {/* 4 Top KPI Metric Cards (Interactive) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* TOTAL REVENUE */}
-        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+        <div
+          onClick={onNavigateToPayments}
+          className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs flex flex-col justify-between cursor-pointer hover:border-emerald-300 hover:shadow-xs transition-all group"
+        >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Total Revenue</span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <span className="font-bold text-sm">₦</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400 group-hover:text-emerald-700 transition-colors">
+              Total Revenue
+            </span>
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm group-hover:scale-105 transition-transform">
+              ₦
             </div>
           </div>
           <div className="mt-4">
@@ -53,10 +84,18 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
         </div>
 
         {/* PENDING */}
-        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+        <div
+          onClick={() => {
+            if (onFilterOrdersByStatus) onFilterOrdersByStatus("PENDING");
+            else if (onViewAllOrders) onViewAllOrders();
+          }}
+          className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs flex flex-col justify-between cursor-pointer hover:border-amber-300 hover:shadow-xs transition-all group"
+        >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Pending</span>
-            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400 group-hover:text-amber-700 transition-colors">
+              Pending
+            </span>
+            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center group-hover:scale-105 transition-transform">
               <ClockIcon className="w-4 h-4" />
             </div>
           </div>
@@ -67,10 +106,18 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
         </div>
 
         {/* PAID */}
-        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+        <div
+          onClick={() => {
+            if (onFilterOrdersByStatus) onFilterOrdersByStatus("PAID");
+            else if (onViewAllOrders) onViewAllOrders();
+          }}
+          className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs flex flex-col justify-between cursor-pointer hover:border-emerald-300 hover:shadow-xs transition-all group"
+        >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Paid</span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400 group-hover:text-emerald-700 transition-colors">
+              Paid
+            </span>
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:scale-105 transition-transform">
               <CheckIcon className="w-4 h-4" />
             </div>
           </div>
@@ -81,10 +128,18 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
         </div>
 
         {/* PROCESSING */}
-        <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+        <div
+          onClick={() => {
+            if (onFilterOrdersByStatus) onFilterOrdersByStatus("PROCESSING");
+            else if (onViewAllOrders) onViewAllOrders();
+          }}
+          className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs flex flex-col justify-between cursor-pointer hover:border-blue-300 hover:shadow-xs transition-all group"
+        >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Processing</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400 group-hover:text-blue-700 transition-colors">
+              Processing
+            </span>
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center group-hover:scale-105 transition-transform">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="2" y="7" width="20" height="14" rx="2" />
                 <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
@@ -103,7 +158,7 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
       {/* Middle Row: Revenue Summary Chart & Recent Activity Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Revenue Summary Chart */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+        <div className="lg:col-span-2 bg-white p-5 sm:p-6 rounded-2xl border border-gray-100 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-bold text-gray-900">Revenue Summary</h2>
@@ -115,7 +170,7 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
                   key={p}
                   onClick={() => setPeriod(p)}
                   className={`px-3 py-1 rounded-lg transition-all ${
-                    period === p ? "bg-emerald-600 text-white shadow-xs" : "text-gray-500 hover:text-gray-900"
+                    period === p ? "bg-emerald-600 text-white shadow-2xs" : "text-gray-500 hover:text-gray-900"
                   }`}
                 >
                   {p}
@@ -125,7 +180,7 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
           </div>
 
           {/* Stylized SVG Trend Curve */}
-          <div className="my-8 relative">
+          <div className="my-6 relative">
             <div className="h-44 w-full flex items-end">
               <svg className="w-full h-full overflow-visible" viewBox="0 0 500 150" fill="none" preserveAspectRatio="none">
                 <defs>
@@ -159,20 +214,24 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
         </div>
 
         {/* Right 1 Col: Recent Activity */}
-        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs flex flex-col justify-between">
+        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-gray-100 shadow-2xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-bold text-gray-900">Recent Activity</h2>
-            <button className="text-gray-400 hover:text-gray-600 text-lg">•••</button>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Live</span>
           </div>
 
           <div className="space-y-4 flex-1">
             {orders.slice(0, 4).map((o, idx) => (
-              <div key={o.id || idx} className="flex items-start gap-3">
+              <div
+                key={o.id || idx}
+                onClick={() => onSelectOrder?.(o)}
+                className="flex items-start gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
+              >
                 <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
                   <WhatsAppBadgeIcon className="w-4 h-4" />
                 </div>
                 <div className="text-xs min-w-0 flex-1">
-                  <div className="text-gray-900">
+                  <div className="text-gray-900 truncate">
                     <span className="font-semibold">{o.customerName}</span> ordered <span className="font-medium">{o.productName}</span>
                   </div>
                   <div className="text-gray-400 text-[11px] mt-0.5">
@@ -182,7 +241,7 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
               </div>
             ))}
 
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-3 p-2">
               <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
                 ✓
               </div>
@@ -192,7 +251,7 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
               </div>
             </div>
 
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-3 p-2">
               <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
                 ★
               </div>
@@ -206,8 +265,8 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
       </div>
 
       {/* Bottom Section: Needs Attention Table */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-xs overflow-hidden">
-        <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <h2 className="text-base font-bold text-gray-900">Needs Attention</h2>
             {needsAttention.length > 0 && (
@@ -230,7 +289,7 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table className="w-full text-left text-sm min-w-[640px]">
               <thead className="bg-gray-50/50 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
                 <tr>
                   <th className="py-3 px-6">Customer</th>
@@ -269,7 +328,7 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
                     <td className="py-4 px-6 text-right">
                       <button
                         onClick={() => onSelectOrder?.(order)}
-                        className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
                       >
                         Inspect
                       </button>
@@ -284,4 +343,3 @@ export function OverviewView({ analytics, vendor, orders, onSelectOrder, onViewA
     </div>
   );
 }
-

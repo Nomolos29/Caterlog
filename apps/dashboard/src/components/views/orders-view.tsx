@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import type { OrderItem } from "@/lib/types";
-import { FilterIcon, ExportIcon, WhatsAppBadgeIcon, CheckIcon } from "../icons";
+import { FilterIcon, ExportIcon } from "../icons";
 
 interface OrdersViewProps {
   orders: OrderItem[];
@@ -10,7 +10,8 @@ interface OrdersViewProps {
   onSelectOrder: (order: OrderItem | null) => void;
   onSimulateTransfer?: (orderCode: string, amountNaira: number) => Promise<void>;
   onMarkDispatched?: (orderCode: string) => Promise<void>;
-  onNavigateToPayments?: () => void;
+  onNavigateToPayments?: (tab?: string, subId?: string) => void;
+  onNavigateToSettings?: (tab?: string, subId?: string) => void;
 }
 
 export function OrdersView({
@@ -20,10 +21,14 @@ export function OrdersView({
   onSimulateTransfer,
   onMarkDispatched,
   onNavigateToPayments,
+  onNavigateToSettings,
 }: OrdersViewProps) {
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [search, setSearch] = useState("");
+  const [supplierStatus, setSupplierStatus] = useState("Preparing · Not yet dispatched");
   const [supplierRequested, setSupplierRequested] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
 
   const filteredOrders = orders.filter((o) => {
     if (statusFilter !== "ALL" && o.status !== statusFilter) return false;
@@ -47,14 +52,37 @@ export function OrdersView({
     OUT_FOR_DELIVERY: orders.filter((o) => o.status === "OUT_FOR_DELIVERY").length,
   };
 
+  const handleExportOrders = () => {
+    const header = "Order ID,Customer,Phone,Product,Qty,Amount (NGN),Status,Created At\n";
+    const rows = filteredOrders
+      .map(
+        (o) =>
+          `"${o.shortCode}","${o.customerName}","${o.customerPhone}","${o.productName}",${o.quantity},${o.totalAmountNaira},"${o.status}","${o.createdAt}"`
+      )
+      .join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `caterlog-orders-${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleRequestSupplierUpdate = () => {
+    setSupplierRequested(true);
+    setTimeout(() => {
+      setSupplierStatus("Ready for pickup · Pickup tag generated");
+    }, 1200);
+  };
+
   /* -------------------------------------------------------------------------- */
   /* Screen 10: Orders · Reseller order fulfillment (Order Detail CT-1042)      */
   /* -------------------------------------------------------------------------- */
   if (selectedOrder) {
-    const isCT1042 = selectedOrder.shortCode === "CT-1042" || selectedOrder.shortCode.includes("1042");
-
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -74,12 +102,18 @@ export function OrdersView({
             <p className="text-xs text-gray-500 mt-0.5">
               3 Nov 2026, 10:14 WAT · Sold by Nia Stores
             </p>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                 Paid · server confirmed
               </span>
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                Preparing for pickup
+              <span
+                className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                  supplierStatus.includes("Ready")
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                    : "bg-amber-50 text-amber-800 border-amber-200"
+                }`}
+              >
+                {supplierStatus.includes("Ready") ? "Ready for pickup" : "Preparing for pickup"}
               </span>
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                 WhatsApp order
@@ -87,19 +121,20 @@ export function OrdersView({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 self-start sm:self-center">
             <button
-              onClick={() => window.print()}
-              className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg shadow-xs"
+              onClick={() => setShowPrintModal(true)}
+              className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg shadow-xs transition-colors"
             >
               Print slip
             </button>
             <button
               onClick={() => {
-                if (onNavigateToPayments) onNavigateToPayments();
-                else alert("Navigating to Refund review in Payments tab");
+                if (onNavigateToPayments) {
+                  onNavigateToPayments("detail", selectedOrder.shortCode);
+                }
               }}
-              className="px-3.5 py-1.5 border border-rose-200 hover:bg-rose-50 text-rose-700 text-xs font-semibold rounded-lg shadow-xs"
+              className="px-3.5 py-1.5 border border-rose-200 hover:bg-rose-50 text-rose-700 text-xs font-semibold rounded-lg shadow-xs transition-colors"
             >
               Review refund
             </button>
@@ -192,7 +227,13 @@ export function OrdersView({
                 </div>
                 <div className="py-2.5 flex justify-between">
                   <span className="text-gray-500">Fulfillment state</span>
-                  <span className="font-semibold text-amber-800">Preparing · Not yet dispatched</span>
+                  <span
+                    className={`font-semibold ${
+                      supplierStatus.includes("Ready") ? "text-emerald-700" : "text-amber-800"
+                    }`}
+                  >
+                    {supplierStatus}
+                  </span>
                 </div>
               </div>
 
@@ -206,23 +247,24 @@ export function OrdersView({
                 </p>
               </div>
 
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1">
                 <button
-                  onClick={() => {
-                    setSupplierRequested(true);
-                    setTimeout(() => setSupplierRequested(false), 2500);
-                  }}
-                  className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+                  onClick={handleRequestSupplierUpdate}
+                  disabled={supplierRequested}
+                  className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-75 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
                 >
-                  {supplierRequested ? "✓ Update Requested" : "Request supplier update"}
+                  {supplierRequested ? "✓ Update Dispatched to Aroko" : "Request supplier update"}
                 </button>
                 <a
-                  href={`https://wa.me/${selectedOrder.customerPhone.replace(/\+/g, "")}`}
+                  href={`https://wa.me/${selectedOrder.customerPhone.replace(/\+/g, "")}?text=${encodeURIComponent(
+                    `Hello ${selectedOrder.customerName}, regarding your Order ${selectedOrder.shortCode}: It is currently being prepared for pickup at our Ikeja center!`
+                  )}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5"
                 >
-                  Message customer
+                  <span>Message customer on WhatsApp</span>
+                  <span>↗</span>
                 </a>
               </div>
             </div>
@@ -243,8 +285,12 @@ export function OrdersView({
               </div>
 
               <button
-                onClick={() => alert("Navigating to Settings / Sales co-pilot / WA-0882")}
-                className="text-xs text-emerald-700 hover:text-emerald-800 font-medium block pt-1"
+                onClick={() => {
+                  if (onNavigateToSettings) {
+                    onNavigateToSettings("detail", "WA-0882");
+                  }
+                }}
+                className="text-xs text-emerald-700 hover:text-emerald-800 font-medium block pt-1 text-left"
               >
                 Settings → Sales co-pilot → Open conversation ↗
               </button>
@@ -276,18 +322,24 @@ export function OrdersView({
 
                 <div>
                   <div className="font-bold text-gray-900 flex items-center gap-1.5">
-                    <span className="text-amber-600">●</span>
+                    <span className="text-emerald-600">✓</span>
                     <span>Supplier preparing</span>
                   </div>
                   <div className="text-[11px] text-gray-400 mt-0.5">10:24 · Aroko update</div>
                 </div>
 
-                <div className="opacity-60">
-                  <div className="font-medium text-gray-700 flex items-center gap-1.5">
-                    <span>○</span>
+                <div>
+                  <div
+                    className={`font-semibold flex items-center gap-1.5 ${
+                      supplierStatus.includes("Ready") ? "text-emerald-700 font-bold" : "text-gray-700 opacity-60"
+                    }`}
+                  >
+                    <span>{supplierStatus.includes("Ready") ? "✓" : "○"}</span>
                     <span>Ready for pickup</span>
                   </div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">Awaiting supplier confirmation</div>
+                  <div className="text-[11px] text-gray-400 mt-0.5">
+                    {supplierStatus.includes("Ready") ? "Ready at Ikeja fulfillment station" : "Awaiting supplier confirmation"}
+                  </div>
                 </div>
 
                 <div className="opacity-40">
@@ -346,16 +398,58 @@ export function OrdersView({
 
               <button
                 onClick={() => {
-                  if (onNavigateToPayments) onNavigateToPayments();
-                  else alert("Viewing split transaction CT-1042 in Payments tab");
+                  if (onNavigateToPayments) {
+                    onNavigateToPayments("detail", "CT-1042");
+                  }
                 }}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
               >
                 View split transaction →
               </button>
             </div>
           </div>
         </div>
+
+        {/* Printable Slip Modal */}
+        {showPrintModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm">Fulfillment Pickup Slip</h3>
+                <button onClick={() => setShowPrintModal(false)} className="text-gray-400 hover:text-gray-600">
+                  ✕
+                </button>
+              </div>
+              <div className="font-mono text-xs space-y-2 text-gray-800 p-4 bg-gray-50 rounded-xl">
+                <div className="text-center font-bold text-sm">CATERLOG FULFILLMENT SLIP</div>
+                <div className="text-center text-[10px] text-gray-500">Nia Stores × Aroko Wholesale</div>
+                <div className="border-t border-dashed my-2" />
+                <div>ORDER: {selectedOrder.shortCode}</div>
+                <div>CUSTOMER: {selectedOrder.customerName} ({selectedOrder.customerPhone})</div>
+                <div>ITEM: {selectedOrder.productName} (AW-FL750)</div>
+                <div>QTY: {selectedOrder.quantity || 2} UNITS</div>
+                <div>TOTAL PAID: {selectedOrder.totalAmountFormatted}</div>
+                <div>NUBAN REF: {selectedOrder.accountNumber} ({selectedOrder.bankName})</div>
+                <div className="border-t border-dashed my-2" />
+                <div className="text-center text-[10px] text-emerald-800 font-bold">✓ PAYMENT SERVER VERIFIED · READY FOR PICKUP</div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="flex-1 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg"
+                >
+                  Print Slip
+                </button>
+                <button
+                  onClick={() => setShowPrintModal(false)}
+                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -364,19 +458,25 @@ export function OrdersView({
   /* Screen: Orders List Table                                                  */
   /* -------------------------------------------------------------------------- */
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
+    <div className="space-y-6 max-w-7xl mx-auto pb-16">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Orders</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage and track your business sales and fulfillment.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-xs">
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <button
+            onClick={() => setShowFilterModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-xs transition-colors"
+          >
             <FilterIcon className="w-3.5 h-3.5 text-gray-500" />
             <span>Filter</span>
           </button>
-          <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-xs">
+          <button
+            onClick={handleExportOrders}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-xs transition-colors"
+          >
             <ExportIcon className="w-3.5 h-3.5 text-gray-500" />
             <span>Export</span>
           </button>
@@ -384,7 +484,7 @@ export function OrdersView({
       </div>
 
       {/* Status Tabs */}
-      <div className="border-b border-gray-200 flex gap-6 text-sm font-semibold text-gray-500 overflow-x-auto">
+      <div className="border-b border-gray-200 flex gap-6 text-sm font-semibold text-gray-500 overflow-x-auto scrollbar-none">
         {[
           { id: "ALL", label: `All (${counts.ALL})` },
           { id: "PENDING_PAYMENT", label: `Pending (${counts.PENDING_PAYMENT})` },
@@ -415,12 +515,20 @@ export function OrdersView({
           onChange={(e) => setSearch(e.target.value)}
           className="w-full max-w-sm px-3.5 py-2 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600 bg-white"
         />
+        {search && (
+          <button
+            onClick={() => setSearch("")}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Orders Table */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left text-xs min-w-[680px]">
             <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
               <tr>
                 <th className="py-3.5 px-5">Order ID</th>
@@ -432,56 +540,112 @@ export function OrdersView({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-gray-700">
-              {filteredOrders.map((o) => (
-                <tr
-                  key={o.id}
-                  onClick={() => onSelectOrder(o)}
-                  className="hover:bg-gray-50 cursor-pointer transition-colors"
-                >
-                  <td className="py-3.5 px-5">
-                    <span className="font-mono font-bold text-gray-900">{o.shortCode}</span>
-                  </td>
-                  <td className="py-3.5 px-5">
-                    <div className="font-semibold text-gray-900">{o.customerName}</div>
-                    <div className="text-[11px] text-gray-400">{o.customerPhone}</div>
-                  </td>
-                  <td className="py-3.5 px-5">
-                    <div className="font-medium text-gray-900">{o.productName}</div>
-                    <div className="text-[11px] text-gray-400">{o.quantity} unit(s)</div>
-                  </td>
-                  <td className="py-3.5 px-5 font-bold text-gray-900">
-                    {o.totalAmountFormatted || `₦${o.totalAmountNaira.toLocaleString()}`}
-                  </td>
-                  <td className="py-3.5 px-5">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        o.status === "PAID"
-                          ? "bg-emerald-100 text-emerald-800"
-                          : o.status === "PENDING_PAYMENT"
-                          ? "bg-amber-100 text-amber-800"
-                          : "bg-blue-100 text-blue-800"
-                      }`}
-                    >
-                      {o.status}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-5 text-right">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectOrder(o);
-                      }}
-                      className="px-3 py-1 border border-gray-200 hover:bg-gray-100 text-gray-700 text-xs font-medium rounded-lg"
-                    >
-                      View detail →
-                    </button>
+              {filteredOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-gray-400">
+                    No orders match your filter criteria.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredOrders.map((o) => (
+                  <tr
+                    key={o.id}
+                    onClick={() => onSelectOrder(o)}
+                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                  >
+                    <td className="py-3.5 px-5">
+                      <span className="font-mono font-bold text-gray-900">{o.shortCode}</span>
+                    </td>
+                    <td className="py-3.5 px-5">
+                      <div className="font-semibold text-gray-900">{o.customerName}</div>
+                      <div className="text-[11px] text-gray-400">{o.customerPhone}</div>
+                    </td>
+                    <td className="py-3.5 px-5">
+                      <div className="font-medium text-gray-900">{o.productName}</div>
+                      <div className="text-[11px] text-gray-400">{o.quantity} unit(s)</div>
+                    </td>
+                    <td className="py-3.5 px-5 font-bold text-gray-900">
+                      {o.totalAmountFormatted || `₦${o.totalAmountNaira.toLocaleString()}`}
+                    </td>
+                    <td className="py-3.5 px-5">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          o.status === "PAID"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : o.status === "PENDING_PAYMENT"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-blue-100 text-blue-800"
+                        }`}
+                      >
+                        {o.status}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-5 text-right">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectOrder(o);
+                        }}
+                        className="px-3 py-1 border border-gray-200 hover:bg-gray-100 text-gray-700 text-xs font-medium rounded-lg"
+                      >
+                        View detail →
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Filter Modal */}
+      {showFilterModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-xl">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-gray-900 text-sm">Filter Orders</h3>
+              <button onClick={() => setShowFilterModal(false)} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-gray-500 font-semibold mb-1">Status</label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-full p-2 border rounded-lg bg-white"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="PAID">Paid</option>
+                  <option value="PENDING_PAYMENT">Pending</option>
+                  <option value="PROCESSING">Processing</option>
+                  <option value="OUT_FOR_DELIVERY">Fulfilled / Shipped</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setStatusFilter("ALL");
+                  setSearch("");
+                  setShowFilterModal(false);
+                }}
+                className="flex-1 py-2 border border-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-50"
+              >
+                Reset
+              </button>
+              <button
+                onClick={() => setShowFilterModal(false)}
+                className="flex-1 py-2 bg-[#0d5c3a] text-white text-xs font-semibold rounded-lg hover:bg-[#0b4b2f]"
+              >
+                Apply Filters
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

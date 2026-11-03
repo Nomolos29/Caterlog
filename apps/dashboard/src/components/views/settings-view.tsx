@@ -7,6 +7,7 @@ interface SettingsViewProps {
   vendor: VendorProfile;
   shippingZones: ShippingZoneItem[];
   discounts: DiscountItem[];
+  initialTab?: "setup" | "conversations" | "detail" | "general";
   onUpdateSettings: (settings: {
     copilotMode?: "COPILOT" | "FULL_AUTO" | "MANUAL";
     copilotIdleSeconds?: number;
@@ -16,23 +17,50 @@ interface SettingsViewProps {
   onDeleteShippingZone: (code: number) => Promise<boolean>;
   onAddDiscount: (code: string, type: "PERCENTAGE" | "FLAT_KOBO", value: number) => Promise<boolean>;
   onDeleteDiscount: (code: string) => Promise<boolean>;
+  onNavigateToOrder?: (orderCode: string) => void;
 }
+
+interface MessageItem {
+  id: string;
+  sender: string;
+  type: "buyer" | "copilot" | "system" | "handoff" | "merchant";
+  time: string;
+  text: string;
+}
+
+const INITIAL_MESSAGES: MessageItem[] = [
+  { id: "m1", sender: "Oluchi", type: "buyer", time: "10:14", text: "Hi, can I buy two 750ml stainless flasks for pickup?" },
+  { id: "m2", sender: "Sales co-pilot · Automated", type: "copilot", time: "10:14", text: "Hello! I'm Nia Stores' automated assistant. I'll check live stock and the current price for you." },
+  { id: "m3", sender: "Live inventory check", type: "system", time: "10:15", text: "Aroko Wholesale · AW-FL750 · 44 available before sale. Requested: 2 units. Price: ₦10,000 each. Stock checked successfully." },
+  { id: "m4", sender: "Sales co-pilot · Automated", type: "copilot", time: "10:15", text: "Two flasks are available for ₦20,000 total, with pickup selected. Pay securely: pay.caterlog.example/CT-1042. Stock will be rechecked before payment." },
+  { id: "m5", sender: "Oluchi", type: "buyer", time: "10:17", text: "I've made the transfer. I can send you a screenshot." },
+  { id: "m6", sender: "Sales co-pilot · Automated", type: "copilot", time: "10:17", text: "Thank you. A screenshot can't confirm payment. I'll wait for the payment provider's secure confirmation." },
+  { id: "m7", sender: "Payment verified · Server event", type: "system", time: "10:18", text: "GW-1042 · ₦20,000 NGN confirmed by signed gateway event. Order CT-1042 paid. 2 units deducted; 42 remain in shared stock." },
+  { id: "m8", sender: "Sales co-pilot · Automated", type: "copilot", time: "10:18", text: "Payment confirmed. Your order CT-1042 is with Aroko Wholesale for preparation. We'll update you when pickup is confirmed." },
+  { id: "m9", sender: "Supplier fulfillment update", type: "system", time: "10:24", text: "Aroko marked the order Preparing. Pickup is not confirmed yet. No dispatch or delivery time is set." },
+  { id: "m10", sender: "Oluchi · Unresolved request", type: "buyer", time: "10:26", text: "Actually, can you deliver it to Lekki before 4pm today?" },
+  { id: "m11", sender: "Sales co-pilot · Handoff", type: "handoff", time: "10:26", text: "I can't confirm that delivery time. I've asked Nia to help with your request. Your paid order is still being prepared." },
+];
 
 export function SettingsView({
   vendor,
   shippingZones,
   discounts,
+  initialTab = "setup",
   onUpdateSettings,
   onAddShippingZone,
   onDeleteShippingZone,
   onAddDiscount,
   onDeleteDiscount,
+  onNavigateToOrder,
 }: SettingsViewProps) {
   // Tabs: 'setup' | 'conversations' | 'detail' | 'general'
-  const [activeTab, setActiveTab] = useState<"setup" | "conversations" | "detail" | "general">("setup");
+  const [activeTab, setActiveTab] = useState<"setup" | "conversations" | "detail" | "general">(initialTab);
 
   // Setup form states
   const [copilotEnabled, setCopilotEnabled] = useState(true);
+  const [instagramConnected, setInstagramConnected] = useState(false);
+  const [showIgModal, setShowIgModal] = useState(false);
   const [startReplyingAfter, setStartReplyingAfter] = useState("15 minutes without merchant reply");
   const [timezone, setTimezone] = useState("Africa/Lagos · WAT");
   const [awayNow, setAwayNow] = useState(true);
@@ -53,8 +81,10 @@ export function SettingsView({
   const [channelFilter, setChannelFilter] = useState("All channels");
   const [stateFilter, setStateFilter] = useState("All states");
   const [outcomeFilter, setOutcomeFilter] = useState("All outcomes");
+  const [sessionModalContent, setSessionModalContent] = useState<{ title: string; body: string } | null>(null);
 
   // Conversation detail reply state
+  const [messages, setMessages] = useState<MessageItem[]>(INITIAL_MESSAGES);
   const [merchantReplyText, setMerchantReplyText] = useState("");
   const [threadTakenOver, setThreadTakenOver] = useState(false);
   const [replySuccess, setReplySuccess] = useState(false);
@@ -86,8 +116,17 @@ export function SettingsView({
   const handleSendReply = (e: React.FormEvent) => {
     e.preventDefault();
     if (!merchantReplyText.trim()) return;
-    setReplySuccess(true);
+    const newMsg: MessageItem = {
+      id: `m-${Date.now()}`,
+      sender: "Nia · Shop owner",
+      type: "merchant",
+      time: "Just now",
+      text: merchantReplyText.trim(),
+    };
+    setMessages((prev) => [...prev, newMsg]);
     setMerchantReplyText("");
+    setThreadTakenOver(true);
+    setReplySuccess(true);
     setTimeout(() => setReplySuccess(false), 3000);
   };
 
@@ -96,7 +135,7 @@ export function SettingsView({
   /* -------------------------------------------------------------------------- */
   if (activeTab === "detail") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -114,28 +153,34 @@ export function SettingsView({
             <p className="text-xs text-gray-500 mt-0.5">
               WhatsApp · WA-0882 · Linked order CT-1042
             </p>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                 Sale: Paid
               </span>
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
                 Request: Needs you
               </span>
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                Automation paused
+              <span
+                className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                  threadTakenOver
+                    ? "bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold"
+                    : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {threadTakenOver ? "You are active (Co-pilot paused)" : "Automation paused"}
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 self-start sm:self-center">
             <button
               onClick={() => setThreadTakenOver(!threadTakenOver)}
-              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all shadow-xs ${
                 threadTakenOver
-                  ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  ? "bg-emerald-50 border border-emerald-300 text-emerald-800"
                   : "bg-[#0d5c3a] text-white hover:bg-[#0b4b2f]"
               }`}
             >
-              {threadTakenOver ? "Automation paused (You're active)" : "Take over conversation"}
+              {threadTakenOver ? "✓ Thread Active (Human Replying)" : "Take over conversation"}
             </button>
           </div>
         </div>
@@ -157,104 +202,86 @@ export function SettingsView({
 
               {/* Message List */}
               <div className="space-y-3.5 text-xs">
-                {/* 10:14 Buyer */}
-                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 max-w-[85%]">
-                  <div className="flex justify-between items-center text-[11px] text-gray-400 mb-1">
-                    <span className="font-semibold text-gray-900">Oluchi</span>
-                    <span>10:14</span>
-                  </div>
-                  <p className="text-gray-800">Hi, can I buy two 750ml stainless flasks for pickup?</p>
-                </div>
+                {messages.map((m) => {
+                  if (m.type === "system") {
+                    const isPayment = m.sender.includes("Payment");
+                    return (
+                      <div
+                        key={m.id}
+                        className={`rounded-xl p-3 text-[11px] border ${
+                          isPayment
+                            ? "bg-[#ecfdf5] border-emerald-200 text-emerald-950"
+                            : "bg-[#f0f4ff] border-blue-100 text-blue-900"
+                        }`}
+                      >
+                        <div
+                          className={`flex justify-between items-center font-semibold mb-0.5 ${
+                            isPayment ? "text-emerald-800" : "text-blue-700"
+                          }`}
+                        >
+                          <span>{m.sender}</span>
+                          <span>{m.time}</span>
+                        </div>
+                        <p>{m.text}</p>
+                      </div>
+                    );
+                  }
 
-                {/* 10:14 Co-pilot */}
-                <div className="ml-auto bg-emerald-50 border border-emerald-100 rounded-xl p-3 max-w-[85%]">
-                  <div className="flex justify-between items-center text-[11px] text-emerald-700 mb-1">
-                    <span className="font-semibold">Sales co-pilot · Automated</span>
-                    <span>10:14</span>
-                  </div>
-                  <p className="text-gray-800">Hello! I&apos;m Nia Stores&apos; automated assistant. I&apos;ll check live stock and the current price for you.</p>
-                </div>
+                  if (m.type === "buyer") {
+                    const isUnresolved = m.sender.includes("Unresolved");
+                    return (
+                      <div
+                        key={m.id}
+                        className={`border rounded-xl p-3 max-w-[85%] ${
+                          isUnresolved
+                            ? "bg-amber-50/50 border-amber-200"
+                            : "bg-gray-50 border-gray-100"
+                        }`}
+                      >
+                        <div
+                          className={`flex justify-between items-center text-[11px] mb-1 ${
+                            isUnresolved ? "text-amber-800 font-semibold" : "text-gray-400"
+                          }`}
+                        >
+                          <span className="font-semibold text-gray-900">{m.sender}</span>
+                          <span>{m.time}</span>
+                        </div>
+                        <p className={isUnresolved ? "text-gray-900 font-medium" : "text-gray-800"}>
+                          {m.text}
+                        </p>
+                      </div>
+                    );
+                  }
 
-                {/* 10:15 System Event: Live inventory check */}
-                <div className="bg-[#f0f4ff] border border-blue-100 rounded-xl p-3 text-[11px]">
-                  <div className="flex justify-between items-center text-blue-700 font-semibold mb-0.5">
-                    <span>Live inventory check</span>
-                    <span>10:15</span>
-                  </div>
-                  <p className="text-blue-900">Aroko Wholesale · AW-FL750 · 44 available before sale. Requested: 2 units. Price: ₦10,000 each. Stock checked successfully.</p>
-                </div>
+                  if (m.type === "merchant") {
+                    return (
+                      <div
+                        key={m.id}
+                        className="ml-auto bg-[#0d5c3a] text-white border border-[#0d5c3a] rounded-xl p-3 max-w-[85%]"
+                      >
+                        <div className="flex justify-between items-center text-[11px] text-emerald-100 mb-1">
+                          <span className="font-semibold">{m.sender}</span>
+                          <span>{m.time}</span>
+                        </div>
+                        <p className="text-white">{m.text}</p>
+                      </div>
+                    );
+                  }
 
-                {/* 10:15 Co-pilot */}
-                <div className="ml-auto bg-emerald-50 border border-emerald-100 rounded-xl p-3 max-w-[85%]">
-                  <div className="flex justify-between items-center text-[11px] text-emerald-700 mb-1">
-                    <span className="font-semibold">Sales co-pilot · Automated</span>
-                    <span>10:15</span>
-                  </div>
-                  <p className="text-gray-800">Two flasks are available for ₦20,000 total, with pickup selected. Pay securely: <span className="text-emerald-700 font-mono underline">pay.caterlog.example/CT-1042</span>. Stock will be rechecked before payment.</p>
-                </div>
-
-                {/* 10:17 Buyer */}
-                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 max-w-[85%]">
-                  <div className="flex justify-between items-center text-[11px] text-gray-400 mb-1">
-                    <span className="font-semibold text-gray-900">Oluchi</span>
-                    <span>10:17</span>
-                  </div>
-                  <p className="text-gray-800">I&apos;ve made the transfer. I can send you a screenshot.</p>
-                </div>
-
-                {/* 10:17 Co-pilot */}
-                <div className="ml-auto bg-emerald-50 border border-emerald-100 rounded-xl p-3 max-w-[85%]">
-                  <div className="flex justify-between items-center text-[11px] text-emerald-700 mb-1">
-                    <span className="font-semibold">Sales co-pilot · Automated</span>
-                    <span>10:17</span>
-                  </div>
-                  <p className="text-gray-800">Thank you. A screenshot can&apos;t confirm payment. I&apos;ll wait for the payment provider&apos;s secure confirmation.</p>
-                </div>
-
-                {/* 10:18 System Event: Payment verified */}
-                <div className="bg-[#ecfdf5] border border-emerald-200 rounded-xl p-3 text-[11px]">
-                  <div className="flex justify-between items-center text-emerald-800 font-semibold mb-0.5">
-                    <span>Payment verified · Server event</span>
-                    <span>10:18</span>
-                  </div>
-                  <p className="text-emerald-950">GW-1042 · ₦20,000 NGN confirmed by signed gateway event. Order CT-1042 paid. 2 units deducted; 42 remain in shared stock.</p>
-                </div>
-
-                {/* 10:18 Co-pilot */}
-                <div className="ml-auto bg-emerald-50 border border-emerald-100 rounded-xl p-3 max-w-[85%]">
-                  <div className="flex justify-between items-center text-[11px] text-emerald-700 mb-1">
-                    <span className="font-semibold">Sales co-pilot · Automated</span>
-                    <span>10:18</span>
-                  </div>
-                  <p className="text-gray-800">Payment confirmed. Your order CT-1042 is with Aroko Wholesale for preparation. We&apos;ll update you when pickup is confirmed.</p>
-                </div>
-
-                {/* 10:24 Supplier update */}
-                <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-[11px]">
-                  <div className="flex justify-between items-center text-gray-700 font-semibold mb-0.5">
-                    <span>Supplier fulfillment update</span>
-                    <span>10:24</span>
-                  </div>
-                  <p className="text-gray-800">Aroko marked the order Preparing. Pickup is not confirmed yet. No dispatch or delivery time is set.</p>
-                </div>
-
-                {/* 10:26 Buyer unresolved request */}
-                <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-3 max-w-[85%]">
-                  <div className="flex justify-between items-center text-[11px] text-amber-800 mb-1">
-                    <span className="font-semibold">Oluchi · Unresolved request</span>
-                    <span>10:26</span>
-                  </div>
-                  <p className="text-gray-900 font-medium">Actually, can you deliver it to Lekki before 4pm today?</p>
-                </div>
-
-                {/* 10:26 Co-pilot handoff */}
-                <div className="ml-auto bg-emerald-50 border border-emerald-100 rounded-xl p-3 max-w-[85%]">
-                  <div className="flex justify-between items-center text-[11px] text-emerald-700 mb-1">
-                    <span className="font-semibold">Sales co-pilot · Handoff</span>
-                    <span>10:26</span>
-                  </div>
-                  <p className="text-gray-800">I can&apos;t confirm that delivery time. I&apos;ve asked Nia to help with your request. Your paid order is still being prepared.</p>
-                </div>
+                  // Copilot or handoff
+                  return (
+                    <div
+                      key={m.id}
+                      className="ml-auto bg-emerald-50 border border-emerald-100 rounded-xl p-3 max-w-[85%]"
+                    >
+                      <div className="flex justify-between items-center text-[11px] text-emerald-700 mb-1">
+                        <span className="font-semibold">{m.sender}</span>
+                        <span>{m.time}</span>
+                      </div>
+                      <p className="text-gray-800">{m.text}</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -265,22 +292,43 @@ export function SettingsView({
             <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-xs space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold text-gray-900">Merchant handoff</h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Open</span>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                    threadTakenOver ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {threadTakenOver ? "Active Handled" : "Open"}
+                </span>
               </div>
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1">
-                <div className="font-semibold text-amber-900 flex items-center gap-1.5">
-                  <span>⚠</span>
-                  <span>Delivery promise requires you</span>
+
+              {!threadTakenOver ? (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1">
+                  <div className="font-semibold text-amber-900 flex items-center gap-1.5">
+                    <span>⚠</span>
+                    <span>Delivery promise requires you</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    Customer changed from pickup to delivery and asked for a guaranteed time. Co-pilot cannot agree to this request.
+                  </p>
                 </div>
-                <p className="text-[11px] text-amber-800 leading-relaxed">
-                  Customer changed from pickup to delivery and asked for a guaranteed time. Co-pilot cannot agree to this request.
-                </p>
-              </div>
+              ) : (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-1">
+                  <div className="font-semibold text-emerald-900 flex items-center gap-1.5">
+                    <span>✓</span>
+                    <span>You are handling this customer thread</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed">
+                    Automation is paused. You can respond directly in the box below.
+                  </p>
+                </div>
+              )}
 
               <div className="text-xs divide-y divide-gray-100 pt-1">
                 <div className="py-2 flex justify-between text-gray-600">
                   <span>Automation</span>
-                  <span className="font-semibold text-gray-900">Paused for this thread</span>
+                  <span className="font-semibold text-gray-900">
+                    {threadTakenOver ? "Paused by Nia" : "Paused for this thread"}
+                  </span>
                 </div>
                 <div className="py-2 flex justify-between text-gray-600">
                   <span>Assigned to</span>
@@ -294,13 +342,12 @@ export function SettingsView({
 
               <button
                 onClick={() => setThreadTakenOver(true)}
-                className="w-full py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg transition-colors"
+                className={`w-full py-2 text-white text-xs font-semibold rounded-lg transition-colors ${
+                  threadTakenOver ? "bg-emerald-700 hover:bg-emerald-800" : "bg-[#0d5c3a] hover:bg-[#0b4b2f]"
+                }`}
               >
-                Take over conversation
+                {threadTakenOver ? "Thread Taken Over" : "Take over conversation"}
               </button>
-              <p className="text-[10px] text-gray-400 text-center">
-                Taking over keeps automation paused. Resolve the delivery request with the supplier before replying.
-              </p>
             </div>
 
             {/* Order Context card */}
@@ -330,8 +377,10 @@ export function SettingsView({
               </div>
 
               <button
-                onClick={() => alert("Viewing Order CT-1042 in Orders tab")}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
+                onClick={() => {
+                  if (onNavigateToOrder) onNavigateToOrder("CT-1042");
+                }}
+                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
               >
                 Open order →
               </button>
@@ -350,20 +399,17 @@ export function SettingsView({
                 />
                 {replySuccess && (
                   <div className="text-[11px] text-emerald-700 bg-emerald-50 p-2 rounded">
-                    Reply sent to Oluchi on WhatsApp.
+                    ✓ Reply sent to Oluchi on WhatsApp thread.
                   </div>
                 )}
                 <button
                   type="submit"
                   disabled={!merchantReplyText.trim()}
-                  className="w-full py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 text-xs font-semibold rounded-lg transition-colors"
+                  className="w-full py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:bg-gray-100 disabled:text-gray-400 text-white text-xs font-semibold rounded-lg transition-colors"
                 >
                   Send reply
                 </button>
               </form>
-              <p className="text-[10px] text-gray-400">
-                No reply has been sent. Confirm delivery feasibility and any additional charge first.
-              </p>
             </div>
           </div>
         </div>
@@ -376,7 +422,7 @@ export function SettingsView({
   /* -------------------------------------------------------------------------- */
   if (activeTab === "conversations") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -387,7 +433,7 @@ export function SettingsView({
           </div>
           <button
             onClick={() => setActiveTab("setup")}
-            className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium"
+            className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium transition-colors self-start sm:self-center"
           >
             Edit setup
           </button>
@@ -408,7 +454,10 @@ export function SettingsView({
             Conversations
           </button>
           <button
-            onClick={() => setActiveTab("conversations")}
+            onClick={() => {
+              setStateFilter("Needs you");
+              setActiveTab("conversations");
+            }}
             className="pb-2.5 text-gray-500 hover:text-gray-900"
           >
             Escalations (1)
@@ -441,14 +490,22 @@ export function SettingsView({
         </div>
 
         {/* Alert Banner */}
-        <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex items-start gap-3">
-          <span className="text-amber-700 font-bold text-sm">⚠</span>
-          <div className="text-amber-900">
-            <span className="font-bold">Handoff needed · Oluchi Adeyemi</span>
-            <p className="text-[11px] text-amber-800 mt-0.5">
-              Order CT-1042 is paid. A new request for same-day delivery is outside your guardrails. Automation is paused for that request; open the conversation to respond.
-            </p>
+        <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="text-amber-700 font-bold text-sm">⚠</span>
+            <div className="text-amber-900">
+              <span className="font-bold">Handoff needed · Oluchi Adeyemi</span>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                Order CT-1042 is paid. A new request for same-day delivery is outside your guardrails. Automation is paused for that request; open the conversation to respond.
+              </p>
+            </div>
           </div>
+          <button
+            onClick={() => setActiveTab("detail")}
+            className="px-3.5 py-1.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shrink-0"
+          >
+            Open WA-0882 →
+          </button>
         </div>
 
         {/* Session Inbox Table Card */}
@@ -458,7 +515,7 @@ export function SettingsView({
             <p className="text-xs text-gray-400 mt-0.5">Session outcomes and automation states are tracked independently</p>
 
             {/* Filter Bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mt-4">
               <input
                 type="text"
                 placeholder="Search customer, order or thread"
@@ -500,7 +557,7 @@ export function SettingsView({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[650px]">
               <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 <tr>
                   <th className="px-5 py-3">Customer / Thread</th>
@@ -558,7 +615,12 @@ export function SettingsView({
                   <td className="px-4 py-3.5 text-gray-500">10:21 WAT</td>
                   <td className="px-5 py-3.5 text-right">
                     <button
-                      onClick={() => alert("Reviewing session for Tunde Bello")}
+                      onClick={() =>
+                        setSessionModalContent({
+                          title: "Tunde Bello (WA-0884)",
+                          body: "Session Log: Customer inquired about Stainless flask 750ml. Co-pilot generated dynamic NUBAN checkout link. Payment pending.",
+                        })
+                      }
                       className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg"
                     >
                       Review
@@ -585,7 +647,12 @@ export function SettingsView({
                   <td className="px-4 py-3.5 text-gray-500">09:58 WAT</td>
                   <td className="px-5 py-3.5 text-right">
                     <button
-                      onClick={() => alert("Reviewing session for Ada Okafor")}
+                      onClick={() =>
+                        setSessionModalContent({
+                          title: "Ada Okafor (IG-0241)",
+                          body: "Session Log: Inquired via Instagram DM. Co-pilot sent product catalog. Instagram channel connection expired at 09:58 WAT.",
+                        })
+                      }
                       className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg"
                     >
                       Review
@@ -612,7 +679,12 @@ export function SettingsView({
                   <td className="px-4 py-3.5 text-gray-500">09:42 WAT</td>
                   <td className="px-5 py-3.5 text-right">
                     <button
-                      onClick={() => alert("Reviewing session for Zainab Musa")}
+                      onClick={() =>
+                        setSessionModalContent({
+                          title: "Zainab Musa (WA-0879)",
+                          body: "Session Log: Customer asked about bulk wholesale discounts. Nia replied manually: 'We offer wholesale discounts for orders above 20 units!'",
+                        })
+                      }
                       className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg"
                     >
                       Review
@@ -636,7 +708,7 @@ export function SettingsView({
               Taking over a thread pauses all automated replies in that conversation. Unresolved requests remain visible until you resolve them; the sale outcome stays paid if an order was already confirmed.
             </p>
             <button
-              onClick={() => setActiveTab("conversations")}
+              onClick={() => setStateFilter("Needs you")}
               className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
             >
               View escalation queue →
@@ -652,7 +724,9 @@ export function SettingsView({
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Instagram</span>
-                <span className="text-amber-700 font-semibold">Reconnect required</span>
+                <span className={`font-semibold ${instagramConnected ? "text-emerald-700" : "text-amber-700"}`}>
+                  {instagramConnected ? "Connected · Enabled" : "Reconnect required"}
+                </span>
               </div>
             </div>
             <button
@@ -663,6 +737,29 @@ export function SettingsView({
             </button>
           </div>
         </div>
+
+        {/* Session Review Modal */}
+        {sessionModalContent && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm">{sessionModalContent.title}</h3>
+                <button onClick={() => setSessionModalContent(null)} className="text-gray-400 hover:text-gray-600">
+                  ✕
+                </button>
+              </div>
+              <p className="text-xs text-gray-700 leading-relaxed bg-gray-50 p-4 rounded-xl">
+                {sessionModalContent.body}
+              </p>
+              <button
+                onClick={() => setSessionModalContent(null)}
+                className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -672,7 +769,7 @@ export function SettingsView({
   /* -------------------------------------------------------------------------- */
   if (activeTab === "setup") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-20">
+      <div className="space-y-6 max-w-6xl mx-auto pb-24">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -683,7 +780,7 @@ export function SettingsView({
           </div>
           <button
             onClick={() => setActiveTab("detail")}
-            className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium"
+            className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-medium self-start sm:self-center"
           >
             Preview conversation
           </button>
@@ -704,7 +801,10 @@ export function SettingsView({
             Conversations
           </button>
           <button
-            onClick={() => setActiveTab("conversations")}
+            onClick={() => {
+              setStateFilter("Needs you");
+              setActiveTab("conversations");
+            }}
             className="pb-2.5 text-gray-500 hover:text-gray-900"
           >
             Escalations (1)
@@ -761,16 +861,20 @@ export function SettingsView({
               <div>
                 <div className="text-xs font-bold text-gray-900">Instagram · Nia Stores</div>
                 <div className="mt-1">
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800">
-                    Connection expired
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      instagramConnected ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                    }`}
+                  >
+                    {instagramConnected ? "Connected · Enabled" : "Connection expired"}
                   </span>
                 </div>
               </div>
               <button
-                onClick={() => alert("Reconnecting Instagram...")}
-                className="px-3 py-1 bg-white border border-gray-200 hover:bg-gray-50 text-xs font-medium rounded-lg text-gray-700"
+                onClick={() => setShowIgModal(true)}
+                className="px-3 py-1 bg-white border border-gray-200 hover:bg-gray-50 text-xs font-medium rounded-lg text-gray-700 shadow-xs"
               >
-                Reconnect
+                {instagramConnected ? "Reconnected" : "Reconnect"}
               </button>
             </div>
           </div>
@@ -1033,25 +1137,53 @@ export function SettingsView({
           </div>
         </div>
 
+        {/* Instagram Reconnect Modal */}
+        {showIgModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm">Instagram Graph Reconnect</h3>
+                <button onClick={() => setShowIgModal(false)} className="text-gray-400 hover:text-gray-600">
+                  ✕
+                </button>
+              </div>
+              <p className="text-xs text-gray-600">
+                Authorize Caterlog to read messages and send live inventory responses on behalf of @niastores.
+              </p>
+              <button
+                onClick={() => {
+                  setInstagramConnected(true);
+                  setShowIgModal(false);
+                }}
+                className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold text-xs rounded-xl shadow-xs"
+              >
+                Authenticate with Instagram
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Sticky Bottom Bar */}
-        <div className="fixed bottom-0 left-64 right-0 bg-white border-t border-gray-200 py-3 px-8 flex items-center justify-end gap-3 z-10 shadow-lg">
+        <div className="fixed bottom-0 left-0 lg:left-64 right-0 bg-white border-t border-gray-200 py-3 px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-end gap-3 z-30 shadow-lg">
           {savedNotice && (
             <span className="text-xs font-semibold text-emerald-700 mr-auto">
               ✓ Co-pilot settings saved successfully
             </span>
           )}
-          <button
-            onClick={() => setActiveTab("conversations")}
-            className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            Discard changes
-          </button>
-          <button
-            onClick={handleSaveSetup}
-            className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs"
-          >
-            Save co-pilot settings
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab("conversations")}
+              className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Discard changes
+            </button>
+            <button
+              onClick={handleSaveSetup}
+              className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs"
+            >
+              Save co-pilot settings
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1061,9 +1193,9 @@ export function SettingsView({
   /* General Shop & Webhook Settings                                            */
   /* -------------------------------------------------------------------------- */
   return (
-    <div className="space-y-8 max-w-5xl mx-auto pb-12">
+    <div className="space-y-8 max-w-5xl mx-auto pb-16">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Shop Settings</h1>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -1072,7 +1204,7 @@ export function SettingsView({
         </div>
         <button
           onClick={() => setActiveTab("setup")}
-          className="px-4 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
+          className="px-4 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors self-start sm:self-center"
         >
           Open Sales co-pilot →
         </button>
@@ -1100,7 +1232,7 @@ export function SettingsView({
         </button>
       </div>
 
-      {/* Legacy General Settings form */}
+      {/* General Settings form */}
       <div className="bg-white rounded-2xl border border-gray-100 p-6 sm:p-8 shadow-xs space-y-6">
         <div className="text-sm font-bold text-gray-900">
           WhatsApp Coexistence Mode
@@ -1161,7 +1293,7 @@ export function SettingsView({
         <button
           onClick={handleSaveGeneral}
           disabled={savingSettings}
-          className="px-5 py-2.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+          className="px-5 py-2.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
         >
           {savingSettings ? "Saving..." : "Save Settings"}
         </button>
