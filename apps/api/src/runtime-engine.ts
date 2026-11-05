@@ -145,7 +145,7 @@ export class CaterlogStage1Engine {
     id: "v-amaka-001",
     slug: "amaka-shoes",
     businessName: "Amaka Luxury Shoes",
-    whatsappPhone: "+2348031234567",
+    whatsappPhone: process.env.VENDOR_WHATSAPP_PHONE ?? "+2348031234567",
     whatsappPhoneId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "105992837465001",
     verificationStatus: "VERIFIED" as const,
     copilotMode: "COPILOT" as DomainCopilotMode,

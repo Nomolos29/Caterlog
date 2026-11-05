@@ -44,23 +44,36 @@ Copy the generated HTTPS URL (e.g., `https://random-words.trycloudflare.com`).
 3. In the left sidebar, open **WhatsApp → API Setup**. Meta provides a free Test WhatsApp number along with:
    - **Temporary access token** → Copy into `.env` as `WHATSAPP_ACCESS_TOKEN="..."`
    - **Phone number ID** → Copy into `.env` as `WHATSAPP_PHONE_NUMBER_ID="..."`
-4. Still on **API Setup**, under **"To" (Step 1)**, click **Manage phone number list** and add **your personal WhatsApp number (`+234...`)**. Enter the 6-digit confirmation code Meta sends to your WhatsApp.
-5. In the left sidebar, open **App Settings → Basic** and copy your **App Secret** → Paste into `.env` as `WHATSAPP_APP_SECRET="..."`.
+4. Still on **API Setup**, under **"To" (Step 1)**, click **Manage phone number list** and add **your personal WhatsApp number (`+234...`)**. Enter the 6-digit confirmation code Meta sends to your WhatsApp. *(Note: Meta test numbers can only exchange messages with verified recipient numbers).*
+5. In the left sidebar, open **App Settings → Basic** and click "Show" next to **App Secret** → Copy and paste into `.env` as `WHATSAPP_APP_SECRET="..."` *(used to verify `x-hub-signature-256` HMAC on incoming webhooks)*.
+6. Set **`VENDOR_WHATSAPP_PHONE`** in `.env` to your verified personal WhatsApp number (e.g. `+23480XXXXXXXX`). This allows Caterlog to recognize when you are issuing dual-access vendor management commands vs when a customer is inquiring.
 
-### Step 3: Register Your Webhook URL in Meta
+### Step 3: Register Your Webhook URL in Meta & Configure `.env`
 1. In the left sidebar, open **WhatsApp → Configuration**.
 2. Under **Webhook**, click **Edit**:
    - **Callback URL:** `https://<your-tunnel-url>/webhooks/whatsapp`
-   - **Verify token:** `caterlog-whatsapp-verify-token` (must match `WHATSAPP_VERIFY_TOKEN` in `.env`)
+   - **Verify token:** Must match `WHATSAPP_VERIFY_TOKEN` in `.env` (e.g. `caterlog-whatsapp-verify-token`)
 3. Click **Verify and save**.
 4. Under **Webhook fields**, click **Manage** and subscribe to:
-   - `messages` (inbound buyer/vendor messages and Status replies)
-   - `message_echoes` (detects when the vendor replies from their mobile phone so Smart Co-Pilot cancels its 60s idle timer)
-5. In your `.env` file, set:
-   ```env
-   WHATSAPP_SANDBOX_MOCK="false"
-   ```
-   and restart `apps/api`.
+   - `messages` (inbound buyer inquiries and vendor command messages)
+   - `message_echoes` (detects when the vendor replies directly from their mobile phone so Smart Co-Pilot cancels its 60s idle timer)
+
+#### Your `.env` Configuration for WhatsApp Testing:
+```env
+# Switch off mock mode to hit Meta's Graph API and verify incoming webhooks
+WHATSAPP_SANDBOX_MOCK="false"
+
+# Meta WhatsApp Cloud API Credentials
+WHATSAPP_ACCESS_TOKEN="<Your Meta Access Token>"
+WHATSAPP_PHONE_NUMBER_ID="<Your Meta Phone Number ID>"
+WHATSAPP_APP_SECRET="<Your Meta App Secret>"
+WHATSAPP_VERIFY_TOKEN="caterlog-whatsapp-verify-token"
+
+# Your personal WhatsApp phone number (with country code, e.g. +234...)
+VENDOR_WHATSAPP_PHONE="+23480XXXXXXXX"
+```
+
+Restart `apps/api` (`npm run dev` or `npm run dev:api`) to apply changes.
 
 ### Step 4: Test Live from Your Phone's WhatsApp
 Open WhatsApp on your phone and send messages to the **Meta Test Number**:
