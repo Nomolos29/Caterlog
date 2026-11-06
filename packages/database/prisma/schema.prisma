@@ -244,6 +244,8 @@ model Order {
   discountAmountKobo  BigInt             @default(0)
   totalAmountKobo     BigInt             // subtotal + shippingFee - discountAmount
   amountPaidKobo      BigInt             @default(0)
+  overpaidAmountKobo  BigInt             @default(0)
+  reservationReleased Boolean            @default(false)
 
   // Delivery Metadata
   deliveryAddress     String?

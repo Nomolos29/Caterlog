@@ -15,12 +15,13 @@
     "start": "node --experimental-strip-types apps/api/src/server.ts",
     "start:dashboard": "npm --workspace=@caterlog/dashboard run start",
     "build": "npm run build --workspaces --if-present",
-    "test": "node --experimental-strip-types --test packages/commerce-core/src/commerce-core.test.ts packages/integrations/src/integrations.test.ts apps/api/src/api.test.ts",
+    "test": "node --experimental-strip-types --test packages/commerce-core/src/commerce-core.test.ts packages/integrations/src/integrations.test.ts apps/api/src/api.test.ts apps/api/src/persistence.test.ts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:generate": "npm --workspace=@caterlog/database run db:generate",
-    "db:push": "npm --workspace=@caterlog/database run db:push",
-    "db:migrate": "npm --workspace=@caterlog/database run db:migrate",
-    "db:seed": "npm --workspace=@caterlog/database run db:seed"
+    "db:push": "node scripts/with-env.mjs npm --workspace=@caterlog/database run db:push",
+    "db:migrate": "node scripts/with-env.mjs npm --workspace=@caterlog/database run db:migrate",
+    "db:deploy": "node scripts/with-env.mjs npm --workspace=@caterlog/database run db:deploy",
+    "db:seed": "node scripts/with-env.mjs npm --workspace=@caterlog/database run db:seed"
   },
   "engines": {
     "node": ">=20.9.0"

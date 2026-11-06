@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CaterlogStage1Engine } from "./runtime-engine.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
+import { InlineJobScheduler } from "./jobs/inline.ts";
+import { createJobHandler } from "./jobs/handler.ts";
 
 describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () => {
   it("synchronizes WhatsApp Vendor Keywords with Dashboard State (Shipping, Discounts, Stock, Settings)", async () => {
@@ -342,6 +344,62 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.equal(expired.createdOrder.discountCode, undefined);
   });
 
+  it("polls Monnify for a pending payment and applies it without a webhook", async () => {
+    const engine = new CaterlogStage1Engine();
+    const order = engine.orders.find((o) => o.shortCode === "ORD-882")!;
+
+    const pending = await engine.verifyOrderPayment("ord-882");
+    assert.ok(pending);
+    assert.equal(pending.status, "PENDING");
+    assert.equal(pending.applied, false);
+    assert.equal(order.status, "PENDING_PAYMENT");
+
+    engine.monnify.seedMockVerifiedTransfer({
+      providerTransactionRef: "MNFY_POLL_001",
+      paymentReference: order.invoiceReference,
+      invoiceReference: order.invoiceReference,
+      paymentStatus: "PAID",
+      amountPaidKobo: order.totalAmountKobo,
+      payerName: "Chidinma Okafor",
+      paymentMethod: "ACCOUNT_TRANSFER",
+      serverVerifiedAt: new Date(),
+      rawResponse: {},
+    });
+
+    const paid = await engine.verifyOrderPayment("ORD-882");
+    assert.ok(paid);
+    assert.equal(paid.status, "PAID");
+    assert.equal(paid.applied, true);
+    assert.equal(order.status, "PAID");
+
+    // Polling twice must not double-apply the same provider transaction.
+    const duplicate = await engine.verifyOrderPayment("ORD-882");
+    assert.ok(duplicate);
+    assert.equal(duplicate.applied, false);
+    assert.equal(duplicate.status, "PAID");
+
+    assert.equal(await engine.verifyOrderPayment("ORD-UNKNOWN"), undefined);
+  });
+
+  it("publishes the inventory to the WhatsApp catalog and records sync state", async () => {
+    const engine = new CaterlogStage1Engine();
+    const result = await engine.syncWhatsAppCatalog();
+
+    assert.equal(result.mode, "mock");
+    assert.equal(result.attempted, engine.products.length);
+    assert.equal(result.upserted, engine.products.length);
+    assert.equal(result.failed.length, 0);
+
+    const status = engine.catalog.getIntegrationStatus();
+    assert.equal(status.publishedItems, engine.products.length);
+    assert.ok(status.lastSyncedAt);
+
+    const state = engine.serializeState();
+    assert.equal(state.catalogSync.publishedItems, engine.products.length);
+    assert.equal(state.integrations.catalog.mode, "mock");
+    assert.equal(state.integrations.monnify.mode, "mock");
+  });
+
   it("renders Dynamic OpenGraph Product Card SVG with price, live stock, and verified badge", () => {
     const svg = renderDynamicProductOgSvg({
       vendorName: "Amaka Luxury Shoes",
@@ -354,6 +412,68 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.ok(svg.includes("✓ Verified Caterlog Seller"));
     assert.ok(svg.includes("₦25,000"));
     assert.ok(svg.includes("4 Left in Stock"));
+  });
+
+  it("creates and verifies vendor magic link login tokens and rejects invalid or expired tokens", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Vendor types `dashboard`
+    const res = await engine.handleVendorWhatsAppKeyword("dashboard");
+    assert.ok(res.replyText.includes("token="));
+
+    const tokenMatch = /token=([a-f0-9]+)/.exec(res.replyText);
+    assert.ok(tokenMatch && tokenMatch[1]);
+    const token = tokenMatch[1];
+
+    // 2. Verify token
+    const verified = engine.verifyMagicLinkToken(token);
+    assert.ok(verified);
+    assert.equal(verified.token, token);
+    assert.equal(verified.vendorSlug, engine.vendor.slug);
+
+    // 3. Second verification fails (single-use)
+    const secondTry = engine.verifyMagicLinkToken(token);
+    assert.equal(secondTry, null);
+
+    // 4. Invalid token fails
+    const invalid = engine.verifyMagicLinkToken("fake-token-1234");
+    assert.equal(invalid, null);
+  });
+
+  it("schedules order-expiry and payment-reminder jobs and executes them via job handler", async () => {
+    const engine = new CaterlogStage1Engine();
+    const scheduler = new InlineJobScheduler();
+    const handler = createJobHandler(engine);
+    await scheduler.start(handler);
+    engine.attachJobScheduler(scheduler);
+
+    // 1. Create order
+    const inquiry = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: "+2348011223344",
+      buyerName: "Tolu Adeleke",
+      text: "I want SHOE-01 delivered to Lekki",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.ok(inquiry.createdOrder);
+    const orderCode = inquiry.createdOrder.shortCode;
+
+    // Verify jobs are scheduled
+    const status = scheduler.getStatus();
+    assert.equal(status.mode, "inline");
+    assert.ok((status.pending ?? 0) >= 1);
+
+    // 2. Test payment reminder directly via handler
+    await handler({ name: "payment-reminder", payload: { orderShortCode: orderCode } });
+    const lastMsg = engine.chatMessages[engine.chatMessages.length - 2];
+    assert.ok(lastMsg.text.includes("Payment Reminder"));
+
+    // 3. Test order expiry via handler
+    await handler({ name: "order-expiry", payload: { orderShortCode: orderCode } });
+    const expiredOrder = engine.orders.find((o) => o.shortCode === orderCode);
+    assert.equal(expiredOrder?.status, "EXPIRED");
+    assert.equal(expiredOrder?.reservationReleased, true);
+
+    await scheduler.stop();
   });
 });
 

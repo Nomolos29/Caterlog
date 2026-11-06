@@ -183,6 +183,7 @@ describe("Layer 1 Integrations — Monnify & WhatsApp Cloud Adapters", () => {
       existingSkus: [],
     });
     assert.equal(second.upserted, 0);
+    assert.equal(second.deleted, 1);
     assert.equal(catalog.getMockCatalog().length, 0);
   });
 

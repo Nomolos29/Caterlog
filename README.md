@@ -202,6 +202,26 @@ npm run typecheck
 npm run build
 ```
 
+### Choose In-Memory Demo or PostgreSQL Persistence
+The API runs in `DATA_MODE=memory` by default, using seeded demo data with no database needed. To persist vendors, products, stock, orders and payments in PostgreSQL:
+
+```bash
+# 1. Point DATABASE_URL at Neon, Supabase or a local Postgres instance
+#    (see .env.example), then apply the schema and seed the demo vendor.
+npm run db:generate
+npm run db:migrate     # local development (prisma migrate dev)
+npm run db:seed
+
+# 2. Start the API against PostgreSQL
+DATA_MODE=database npm run dev:api
+```
+
+For a hosted/staging database use `npm run db:deploy` instead of `db:migrate`; it applies the committed migrations without the interactive dev prompts.
+
+`PERSISTENCE_VENDOR_SLUG` selects which seeded vendor to hydrate (default `amaka-shoes`). On startup the engine loads that vendor plus its products, zones, discounts and recent orders, then mirrors every subsequent mutation through Prisma. `GET /health` reports the active `dataMode`, and `/api/v1/integrations/status` stays unchanged.
+
+> **Persistence slice scope:** the write-through store covers vendor settings, catalog, stock, discounts, shipping zones, order creation, payment reconciliation (idempotent by `providerTransactionRef`), reservation expiry and dispatch. Auth/multi-tenancy, durable background workers and webhook replay protection are the next backend slice.
+
 ### Start the API, Webhook Server & Vendor Command Dashboard
 ```bash
 npm run dev
@@ -239,7 +259,7 @@ This table tracks the live engineering progress of the repository and is updated
 | **Stage 2 — Verification & Trust Layer** | ⏳ Next Up | BVN/NIN/NUBAN verification adapter, encrypted identity hash, appeals flow, and tamper-evident Verified Seller badges. |
 | **Stage 3+ — Auto-Generated Storefront (`apps/storefront`)** | 📋 Deferred | Multi-tenant vendor websites & `@caterlog/storefront-ui` design system (deferred until Stage 1–2 are verified). |
 
-> **Stage 1 runtime note:** the running API currently uses `CaterlogStage1Engine`, an in-memory, single-vendor runtime with seeded demo data. Prisma services and the 14-table schema are implemented and unit-tested in the domain/persistence packages, but the HTTP server does **not** persist to PostgreSQL yet. Durable persistence, multi-tenant auth/magic-link sessions, Redis/BullMQ timers, and the live WhatsApp media-download/pHash pipeline are the next implementation slice.
+> **Stage 1 runtime note:** the API defaults to `DATA_MODE=memory`, an in-memory single-vendor runtime with seeded demo data. Set `DATA_MODE=database` to hydrate the same engine from PostgreSQL and write every mutation through Prisma (`apps/api/src/persistence/`). The schema/migration and seed are ready. Durable background workers, multi-tenant auth/magic-link sessions and the live WhatsApp media-download/pHash pipeline are the next implementation slice.
 
 ---
 

@@ -48,6 +48,7 @@ export interface CatalogSyncResult {
   syncedAt: string;
   attempted: number;
   upserted: number;
+  deleted: number;
   failed: CatalogSyncFailure[];
   items: CatalogSyncItemResult[];
 }
@@ -210,6 +211,7 @@ export class WhatsAppCatalogAdapter {
       syncedAt: new Date().toISOString(),
       attempted: products.length,
       upserted: 0,
+      deleted: 0,
       failed: [],
       items: [],
     };
@@ -230,7 +232,10 @@ export class WhatsAppCatalogAdapter {
       if (options.deleteMissing) {
         const keep = new Set((options.existingSkus ?? products.map((p) => p.skuCode)).map((s) => s.toUpperCase()));
         for (const retailerId of Array.from(this.mockCatalog.keys())) {
-          if (!keep.has(retailerId)) this.mockCatalog.delete(retailerId);
+          if (!keep.has(retailerId)) {
+            this.mockCatalog.delete(retailerId);
+            result.deleted += 1;
+          }
         }
       }
       this.lastSyncedAt = result.syncedAt;
@@ -270,6 +275,7 @@ export class WhatsAppCatalogAdapter {
         try {
           await this.request(`/${itemId}`, { method: "DELETE" });
           this.productItemIds.delete(retailerId);
+          result.deleted += 1;
         } catch (err) {
           result.failed.push({
             skuCode: retailerId,

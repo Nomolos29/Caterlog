@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { URL } from "node:url";
 import { nairaToKobo } from "@caterlog/commerce-core";
 import { CaterlogStage1Engine } from "./runtime-engine.ts";
+import { createEngineFromEnv } from "./bootstrap.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
 
 // Load a local `.env` when present so `npm run dev` / `npm start` pick up
@@ -75,6 +76,14 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, {
           status: "ok",
           stage: "Stage 1 — Chat Commerce Core",
+          dataMode: engine.getDataMode(),
+          jobs: engine.getJobScheduler()?.getStatus() ?? {
+            mode: "off",
+            running: false,
+            queue: null,
+            pending: null,
+          },
+          persistenceErrors: engine.getPersistenceErrors(),
           integrations: {
             monnify: engine.monnify.getMode(),
             whatsapp: engine.whatsapp.getMode(),
@@ -92,6 +101,67 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
             lastSyncedAt: engine.catalog.getIntegrationStatus().lastSyncedAt,
             publishedItems: engine.catalog.getIntegrationStatus().publishedItems,
           },
+        });
+      }
+
+      // 1c. Vendor WhatsApp Magic Link / OTP Login Request (`POST /api/v1/auth/whatsapp-otp`)
+      if (req.method === "POST" && path === "/api/v1/auth/whatsapp-otp") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+          phone?: string;
+          vendorSlug?: string;
+        };
+        const inputPhone = body.phone ? body.phone.replace(/\D/g, "") : null;
+        const vendorPhone = engine.vendor.whatsappPhone.replace(/\D/g, "");
+        const inputSlug = body.vendorSlug?.trim().toLowerCase();
+
+        if (inputPhone && inputPhone !== vendorPhone && inputSlug !== engine.vendor.slug.toLowerCase()) {
+          throw new HttpError(404, "Vendor not found for provided phone or slug.");
+        }
+
+        const token = engine.createMagicLinkToken();
+        const dashboardUrl = process.env.DASHBOARD_URL ?? "http://localhost:3000";
+        const loginUrl = `${dashboardUrl}?token=${token}&magic_vendor=${engine.vendor.slug}`;
+
+        await engine.whatsapp.sendTextMessage({
+          toPhone: engine.vendor.whatsappPhone,
+          text: `🔐 *Your 1-Tap Dashboard Login Link:*\n${loginUrl}\n\n⏳ _Valid for 15 minutes._`,
+          vendorPhoneId: engine.vendor.whatsappPhoneId,
+        });
+
+        const masked = engine.vendor.whatsappPhone.replace(
+          /(\+\d{3})\d+(\d{4})/,
+          "$1****$2"
+        );
+        return sendJson(res, 200, {
+          status: "sent",
+          destinationPhone: masked,
+          expiresInSeconds: 900,
+        });
+      }
+
+      // 1d. Vendor Magic Link Verification (`POST /api/v1/auth/verify`)
+      if (req.method === "POST" && path === "/api/v1/auth/verify") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as { token?: string };
+        if (!body.token) {
+          throw new HttpError(400, "Missing login token.");
+        }
+
+        const verified = engine.verifyMagicLinkToken(body.token);
+        if (!verified) {
+          throw new HttpError(401, "Invalid, expired, or already used login token.");
+        }
+
+        return sendJson(res, 200, {
+          authenticated: true,
+          vendor: {
+            id: engine.vendor.id,
+            slug: engine.vendor.slug,
+            businessName: engine.vendor.businessName,
+            whatsappPhone: engine.vendor.whatsappPhone,
+          },
+          state: engine.serializeState(),
         });
       }
 
@@ -589,29 +659,67 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown) {
 // Start server if invoked directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.API_PORT ?? 4000);
-  const { server, engine } = createCaterlogApiServer();
 
-  // In-memory Stage 1 safety net: release stock for unpaid orders whose hold elapsed.
-  const expiryTimer = setInterval(() => {
-    void engine.expireOverdueOrders().catch((err) => {
-      console.error("Reservation expiry sweep failed:", err);
-    });
-  }, 30_000);
-  expiryTimer.unref();
+  const start = async () => {
+    const { engine, dataMode, vendorSlug, scheduler, jobsConfig, shutdown } =
+      await createEngineFromEnv();
 
-  server.listen(port, () => {
-    const status = engine.getIntegrationStatus();
-    console.log(`🚀 Caterlog Stage 1 API & Webhook Server listening on http://localhost:${port}`);
-    console.log(`   • Vendor Dashboard:  ${process.env.DASHBOARD_URL ?? "http://localhost:3000"}`);
-    console.log(
-      `   • Modes:             Monnify=${status.monnify.mode}  WhatsApp=${status.whatsapp.mode}  Catalog=${status.catalog.mode}`
-    );
-    for (const issue of status.issues) {
-      console.warn(`   ⚠️  [${issue.severity}] ${issue.variable}: ${issue.message}`);
+    const { server } = createCaterlogApiServer(engine);
+
+    // Schedule repeatable sweep via background scheduler, or fallback to interval if disabled
+    let expiryTimer: NodeJS.Timeout | null = null;
+    if (scheduler) {
+      await scheduler.scheduleRepeat(
+        "order-expiry-sweep",
+        { name: "order-expiry-sweep", payload: {} },
+        jobsConfig.sweepIntervalMs
+      );
+    } else {
+      expiryTimer = setInterval(() => {
+        void engine.expireOverdueOrders().catch((err) => {
+          console.error("Reservation expiry sweep failed:", err);
+        });
+      }, jobsConfig.sweepIntervalMs);
+      expiryTimer.unref();
     }
-    console.log(`   • WhatsApp Webhook:  http://localhost:${port}/webhooks/whatsapp`);
-    console.log(`   • Monnify Webhook:   http://localhost:${port}/webhooks/monnify`);
-    console.log(`   • Dynamic OG Card:   http://localhost:${port}/og/product/SHOE-01`);
-    console.log(`   • Vendor State API:  http://localhost:${port}/api/v1/vendor/state`);
+
+    const shutDown = async (signal: string) => {
+      console.log(`\n[caterlog] ${signal} received — shutting down...`);
+      if (expiryTimer) clearInterval(expiryTimer);
+      server.close();
+      try {
+        await shutdown();
+      } catch (err) {
+        console.error("[caterlog] Persistence shutdown failed:", err);
+      }
+      process.exit(0);
+    };
+    process.once("SIGINT", () => void shutDown("SIGINT"));
+    process.once("SIGTERM", () => void shutDown("SIGTERM"));
+
+    server.listen(port, () => {
+      const status = engine.getIntegrationStatus();
+      console.log(`🚀 Caterlog Stage 1 API & Webhook Server listening on http://localhost:${port}`);
+      console.log(`   • Vendor Dashboard:  ${process.env.DASHBOARD_URL ?? "http://localhost:3000"}`);
+      console.log(`   • Data mode:         ${dataMode}${dataMode === "database" ? ` (vendor: ${vendorSlug})` : ""}`);
+      console.log(
+        `   • Jobs:              mode=${jobsConfig.mode}${scheduler ? ` (sweep every ${Math.round(jobsConfig.sweepIntervalMs / 1000)}s)` : ""}`
+      );
+      console.log(
+        `   • Modes:             Monnify=${status.monnify.mode}  WhatsApp=${status.whatsapp.mode}  Catalog=${status.catalog.mode}`
+      );
+      for (const issue of status.issues) {
+        console.warn(`   ⚠️  [${issue.severity}] ${issue.variable}: ${issue.message}`);
+      }
+      console.log(`   • WhatsApp Webhook:  http://localhost:${port}/webhooks/whatsapp`);
+      console.log(`   • Monnify Webhook:   http://localhost:${port}/webhooks/monnify`);
+      console.log(`   • Dynamic OG Card:   http://localhost:${port}/og/product/SHOE-01`);
+      console.log(`   • Vendor State API:  http://localhost:${port}/api/v1/vendor/state`);
+    });
+  };
+
+  start().catch((err) => {
+    console.error("Failed to start the Caterlog API:", err);
+    process.exit(1);
   });
 }

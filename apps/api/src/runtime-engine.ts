@@ -27,95 +27,35 @@ import {
   type EnvLike,
   type IntegrationConfig,
 } from "@caterlog/integrations";
+import type {
+  BuyerConversationSession,
+  ChatThreadMessage,
+  PaymentReconciliationResult,
+  QuickReplyOption,
+  RuntimeDiscount,
+  RuntimeOrder,
+  RuntimeProduct,
+  RuntimeShippingZone,
+  RuntimeSnapshot,
+  RuntimeVendor,
+} from "./runtime-types.ts";
+import { createMemoryPersistence } from "./persistence/memory.ts";
+import type { PersistenceStore } from "./persistence/types.ts";
+import type { BackgroundJobScheduler } from "./jobs/types.ts";
 
-export interface RuntimeProduct {
-  id: string;
-  skuCode: string;
-  name: string;
-  description: string;
-  category: string;
-  basePriceKobo: bigint;
-  primaryImageUrl: string;
-  imagePhash: string;
-  stockTotal: number;
-  stockReserved: number;
-}
+export type {
+  BuyerConversationSession,
+  ChatThreadMessage,
+  PaymentReconciliationResult,
+  QuickReplyOption,
+  RuntimeDiscount,
+  RuntimeOrder,
+  RuntimeProduct,
+  RuntimeShippingZone,
+  RuntimeSnapshot,
+  RuntimeVendor,
+} from "./runtime-types.ts";
 
-export interface RuntimeShippingZone {
-  id: string;
-  code: number;
-  name: string;
-  feeKobo: bigint;
-  isActive: boolean;
-}
-
-export interface RuntimeDiscount {
-  id: string;
-  code: string;
-  type: "PERCENTAGE" | "FLAT_KOBO";
-  value: bigint;
-  minOrderKobo: bigint;
-  usedCount: number;
-  maxUses: number | null;
-  expiresAt?: Date;
-  isActive: boolean;
-}
-
-export interface RuntimeOrder {
-  id: string;
-  shortCode: string;
-  customerPhone: string;
-  customerName: string;
-  productId: string;
-  productSku: string;
-  productName: string;
-  quantity: number;
-  shippingZoneName: string;
-  subtotalKobo: bigint;
-  shippingFeeKobo: bigint;
-  discountCode?: string;
-  discountAmountKobo: bigint;
-  totalAmountKobo: bigint;
-  amountPaidKobo: bigint;
-  overpaidAmountKobo?: bigint;
-  status: DomainOrderStatus;
-  invoiceReference: string;
-  accountNumber: string;
-  bankName: string;
-  accountName: string;
-  riderPhone?: string;
-  reservationReleased?: boolean;
-  paymentExpiresAt: Date;
-  createdAt: Date;
-  paidAt?: Date;
-  dispatchedAt?: Date;
-}
-
-export interface QuickReplyOption {
-  label: string;
-  replyText: string;
-}
-
-export interface ChatThreadMessage {
-  id: string;
-  channel: "VENDOR_ADMIN_WA" | "BUYER_SHOP_WA";
-  sender: "VENDOR" | "BUYER" | "CATERLOG_BOT";
-  fromPhone: string;
-  text: string;
-  imageUrl?: string;
-  quickReplies?: QuickReplyOption[];
-  timestamp: Date;
-}
-
-export interface BuyerConversationSession {
-  buyerPhone: string;
-  buyerName: string;
-  activeProductId: string;
-  quantity: number;
-  discountCode?: string;
-  state: "AWAITING_SHIPPING_ZONE";
-  updatedAt: Date;
-}
 
 /**
  * Deterministically computes a 64-bit hex perceptual fingerprint (`imagePhash`)
@@ -125,15 +65,6 @@ export function computeDeterministicImagePhash(imageSource: string): string {
   return crypto.createHash("sha256").update(imageSource.trim()).digest("hex").slice(0, 16);
 }
 
-export interface PaymentReconciliationResult {
-  order: RuntimeOrder;
-  status: "PAID" | "PARTIALLY_PAID" | "PENDING";
-  remainingBalanceKobo: bigint;
-  overpaidAmountKobo: bigint;
-  /** False when the payment was a duplicate or has not settled yet. */
-  applied: boolean;
-}
-
 export class CaterlogStage1Engine {
   public readonly eventBus = new InMemoryDomainEventBus();
   public readonly monnify: MonnifyPaymentAdapter;
@@ -141,13 +72,13 @@ export class CaterlogStage1Engine {
   public readonly catalog: WhatsAppCatalogAdapter;
   public readonly integrationConfig: IntegrationConfig;
 
-  public vendor = {
+  public vendor: RuntimeVendor = {
     id: "v-amaka-001",
     slug: "amaka-shoes",
     businessName: "Amaka Luxury Shoes",
     whatsappPhone: process.env.VENDOR_WHATSAPP_PHONE ?? "+2348031234567",
     whatsappPhoneId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "105992837465001",
-    verificationStatus: "VERIFIED" as const,
+    verificationStatus: "VERIFIED",
     copilotMode: "COPILOT" as DomainCopilotMode,
     copilotIdleSeconds: 60,
     reservationTtlMinutes: 15,
@@ -311,6 +242,42 @@ export class CaterlogStage1Engine {
   private readonly processedTxRefs = new Set<string>();
   private readonly activeCopilotTimers = new Map<string, NodeJS.Timeout>();
   private lastVendorReplyInBuyerThreadAt: Date | null = null;
+  private persistence: PersistenceStore = createMemoryPersistence();
+  private persistenceQueue: Promise<void> = Promise.resolve();
+  private readonly persistenceErrors: string[] = [];
+  private jobScheduler: BackgroundJobScheduler | null = null;
+  private readonly magicTokens = new Map<
+    string,
+    { token: string; vendorSlug: string; expiresAt: Date; used: boolean }
+  >();
+
+  public attachJobScheduler(scheduler: BackgroundJobScheduler | null): void {
+    this.jobScheduler = scheduler;
+  }
+
+  public getJobScheduler(): BackgroundJobScheduler | null {
+    return this.jobScheduler;
+  }
+
+  public createMagicLinkToken(): string {
+    const token = crypto.randomBytes(24).toString("hex");
+    this.magicTokens.set(token, {
+      token,
+      vendorSlug: this.vendor.slug,
+      expiresAt: new Date(Date.now() + 15 * 60_000),
+      used: false,
+    });
+    return token;
+  }
+
+  public verifyMagicLinkToken(token: string): { token: string; vendorSlug: string } | null {
+    const record = this.magicTokens.get(token);
+    if (!record || record.used || record.expiresAt < new Date()) {
+      return null;
+    }
+    record.used = true;
+    return { token: record.token, vendorSlug: record.vendorSlug };
+  }
 
   constructor(env: EnvLike = process.env) {
     this.integrationConfig = resolveIntegrationConfig(env);
@@ -323,6 +290,97 @@ export class CaterlogStage1Engine {
       brand: this.vendor.businessName,
       productUrlBase: env.CATALOG_PRODUCT_URL_BASE,
     });
+  }
+
+  /**
+   * Switches the engine to a durable store and hydrates its working set.
+   *
+   * `DATA_MODE=memory` keeps the built-in demo data. When a database store is
+   * attached, the demo seed is replaced by the persisted vendor snapshot and
+   * every later mutation is mirrored back through `persistence`.
+   */
+  public async attachPersistence(
+    store: PersistenceStore,
+    vendorSlug: string = this.vendor.slug
+  ): Promise<void> {
+    this.persistence = store;
+    const snapshot = await store.loadSnapshot(vendorSlug);
+    if (snapshot) {
+      this.applySnapshot(snapshot);
+      return;
+    }
+    if (store.mode === "database") {
+      throw new Error(
+        `Vendor "${vendorSlug}" was not found in the database. Run "npm run db:seed" or set PERSISTENCE_VENDOR_SLUG to an existing vendor.`
+      );
+    }
+  }
+
+  public getDataMode(): "memory" | "database" {
+    return this.persistence.mode;
+  }
+
+  /** Persistence failures observed since boot (for health/debug endpoints). */
+  public getPersistenceErrors(): readonly string[] {
+    return this.persistenceErrors;
+  }
+
+  /** Waits for all queued write-through operations to finish. */
+  public async flushPersistence(): Promise<void> {
+    await this.persistenceQueue;
+  }
+
+  /** Flushes pending write-through operations and disconnects the store. */
+  public async closePersistence(): Promise<void> {
+    await this.persistenceQueue;
+    await this.persistence.close();
+  }
+
+  private applySnapshot(snapshot: RuntimeSnapshot): void {
+    this.vendor = { ...snapshot.vendor };
+    this.products = snapshot.products.map((product) => ({ ...product }));
+    this.shippingZones = snapshot.shippingZones.map((zone) => ({ ...zone }));
+    this.discounts = snapshot.discounts.map((discount) => ({ ...discount }));
+    this.orders = snapshot.orders.map((order) => ({ ...order }));
+    this.processedTxRefs.clear();
+    for (const ref of snapshot.processedTransactionRefs) {
+      this.processedTxRefs.add(ref);
+    }
+  }
+
+  /**
+   * Queues a write-through operation without blocking the caller. Used by the
+   * synchronous dashboard/WhatsApp mutations so their return values stay sync.
+   */
+  private persistInBackground(label: string, work: () => Promise<void>): void {
+    if (this.persistence.mode === "memory") return;
+    const run = this.persistenceQueue.then(work);
+    this.persistenceQueue = run.catch((err) => {
+      this.recordPersistenceError(label, err);
+    });
+  }
+
+  /**
+   * Awaited variant for async flows (orders, payments, expiry, dispatch) where
+   * the caller must know the durable write happened before replying.
+   */
+  private async persistNow(label: string, work: () => Promise<void>): Promise<void> {
+    if (this.persistence.mode === "memory") return;
+    const run = this.persistenceQueue.then(work);
+    // Keep the queue usable even if this operation rejects.
+    this.persistenceQueue = run.catch(() => undefined);
+    try {
+      await run;
+    } catch (err) {
+      this.recordPersistenceError(label, err);
+      throw err;
+    }
+  }
+
+  private recordPersistenceError(label: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.persistenceErrors.push(`${label}: ${message}`);
+    console.error(`[caterlog:persistence] ${label} failed: ${message}`);
   }
 
   /**
@@ -370,8 +428,9 @@ export class CaterlogStage1Engine {
 
     switch (cmd.type) {
       case "OPEN_DASHBOARD": {
+        const token = this.createMagicLinkToken();
         const dashboardUrl = process.env.DASHBOARD_URL ?? "http://localhost:3000";
-        replyText = `🔐 *Your 1-Tap Dashboard Login Link:*\n${dashboardUrl}?magic_vendor=${this.vendor.slug}\n\n⏳ _Valid for 15 minutes._`;
+        replyText = `🔐 *Your 1-Tap Dashboard Login Link:*\n${dashboardUrl}?token=${token}&magic_vendor=${this.vendor.slug}\n\n⏳ _Valid for 15 minutes._`;
         break;
       }
 
@@ -982,7 +1041,7 @@ export class CaterlogStage1Engine {
     // Atomically Reserve Stock
     params.product.stockReserved += params.quantity;
 
-    const shortCode = `ORD-${880 + this.orders.length + 1}`;
+    const shortCode = this.nextOrderShortCode();
     const expiresAt = new Date(Date.now() + this.vendor.reservationTtlMinutes * 60 * 1000);
 
     const virtualAccount = await this.monnify.createDynamicVirtualAccount({
@@ -1021,6 +1080,14 @@ export class CaterlogStage1Engine {
     };
 
     this.orders.unshift(newOrder);
+
+    // Mirror the reservation, invoice and order atomically before the buyer is told.
+    await this.persistNow("createOrder", async () => {
+      if (activeDiscount && discountAmountKobo > 0n) {
+        await this.persistence.saveDiscount(activeDiscount);
+      }
+      await this.persistence.createOrder(newOrder, params.product);
+    });
 
     await this.whatsapp.sendVirtualAccountInvoice({
       toBuyerPhone: params.buyerPhone,
@@ -1066,8 +1133,45 @@ export class CaterlogStage1Engine {
       text: newOrder.accountNumber,
     });
 
+    if (this.jobScheduler) {
+      const delayMs = Math.max(0, newOrder.paymentExpiresAt.getTime() - Date.now());
+      void this.jobScheduler
+        .schedule(
+          { name: "order-expiry", payload: { orderShortCode: newOrder.shortCode } },
+          { jobId: `expiry-${newOrder.shortCode}`, delayMs }
+        )
+        .catch((err) =>
+          console.error(`[caterlog:jobs] Failed to schedule expiry for ${newOrder.shortCode}:`, err)
+        );
+
+      if (this.vendor.reservationTtlMinutes >= 10) {
+        const reminderDelayMs = Math.max(0, delayMs - 5 * 60_000);
+        void this.jobScheduler
+          .schedule(
+            { name: "payment-reminder", payload: { orderShortCode: newOrder.shortCode } },
+            { jobId: `reminder-${newOrder.shortCode}`, delayMs: reminderDelayMs }
+          )
+          .catch((err) =>
+            console.error(
+              `[caterlog:jobs] Failed to schedule payment reminder for ${newOrder.shortCode}:`,
+              err
+            )
+          );
+      }
+    }
+
     await this.broadcastStateChange();
     return newOrder;
+  }
+
+  /** Allocates the next order code from the highest existing code, not the array length. */
+  private nextOrderShortCode(): string {
+    let max = 880;
+    for (const order of this.orders) {
+      const match = /^ORD-(\d+)$/i.exec(order.shortCode);
+      if (match) max = Math.max(max, Number(match[1]));
+    }
+    return `ORD-${max + 1}`;
   }
 
   private isDiscountUsable(discount: RuntimeDiscount, now = new Date()): boolean {
@@ -1291,6 +1395,11 @@ export class CaterlogStage1Engine {
         fromPhone: "CATERLOG",
         text: vendorAlert,
       });
+
+      if (this.jobScheduler) {
+        void this.jobScheduler.cancel(`expiry-${order.shortCode}`).catch(console.error);
+        void this.jobScheduler.cancel(`reminder-${order.shortCode}`).catch(console.error);
+      }
     } else {
       order.paymentExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
       const partialMsg = `⚠️ *Partial Transfer Received (${formatNaira(verified.amountPaidKobo)})*\n🧾 Order: *${order.shortCode}*\n💰 Total with ${order.shippingZoneName} delivery: *${formatNaira(order.totalAmountKobo)}*\n❗ *Remaining Balance Due: ${formatNaira(decision.remainingBalanceKobo)}*\n\nYour stock lock has been extended by 30 mins. Please transfer the remaining *${formatNaira(decision.remainingBalanceKobo)}* to *${order.accountNumber}* (${order.bankName}).`;
@@ -1308,6 +1417,11 @@ export class CaterlogStage1Engine {
         text: `⚠️ *Partial Payment on ${order.shortCode}:* Buyer transferred ${formatNaira(verified.amountPaidKobo)} of ${formatNaira(order.totalAmountKobo)}. Caterlog automatically prompted them for the remaining ${formatNaira(decision.remainingBalanceKobo)} balance.`,
       });
     }
+
+    await this.persistNow("applyPayment", async () => {
+      await this.persistence.recordPayment(order, verified);
+      await this.persistence.saveOrder(order);
+    });
 
     await this.broadcastStateChange();
     return {
@@ -1388,6 +1502,13 @@ export class CaterlogStage1Engine {
       text: `⌛ *Reservation Expired (${ord.shortCode}):* The ${this.vendor.reservationTtlMinutes}-minute payment hold for *${ord.productName}* has expired and the reserved stock has been released.`,
     });
 
+    if (this.jobScheduler) {
+      void this.jobScheduler.cancel(`expiry-${ord.shortCode}`).catch(console.error);
+      void this.jobScheduler.cancel(`reminder-${ord.shortCode}`).catch(console.error);
+    }
+
+    await this.persistNow("expireOrder", () => this.persistence.saveOrder(ord));
+
     await this.broadcastStateChange();
     return ord;
   }
@@ -1411,6 +1532,54 @@ export class CaterlogStage1Engine {
     return expired;
   }
 
+  /**
+   * Sends an automated payment reminder to the buyer for an active pending or partially-paid order.
+   */
+  public async sendPaymentReminder(shortCode: string): Promise<RuntimeOrder | undefined> {
+    const ord = this.orders.find(
+      (o) => o.shortCode.toUpperCase() === shortCode.trim().toUpperCase()
+    );
+    if (!ord || (ord.status !== "PENDING_PAYMENT" && ord.status !== "PARTIALLY_PAID")) {
+      return undefined;
+    }
+
+    const remainingKobo =
+      ord.totalAmountKobo > ord.amountPaidKobo ? ord.totalAmountKobo - ord.amountPaidKobo : 0n;
+    if (remainingKobo <= 0n) return undefined;
+
+    const reminderText = [
+      `⏰ *Payment Reminder — Order ${ord.shortCode}*`,
+      `Your reserved items are currently being held, but your reservation is expiring soon.`,
+      `💰 *Amount Remaining:* *${formatNaira(remainingKobo)}*`,
+      `🏦 *Bank:* ${ord.bankName}`,
+      `🔢 *Account No:* *${ord.accountNumber}*`,
+      `_Transfer directly to this dedicated account to complete your order._`,
+    ].join("\n");
+
+    await this.whatsapp.sendTextMessage({
+      toPhone: ord.customerPhone,
+      text: reminderText,
+      vendorPhoneId: this.vendor.whatsappPhoneId,
+    });
+
+    this.appendChat({
+      channel: "BUYER_SHOP_WA",
+      sender: "CATERLOG_BOT",
+      fromPhone: "CATERLOG",
+      text: reminderText,
+    });
+
+    this.appendChat({
+      channel: "BUYER_SHOP_WA",
+      sender: "CATERLOG_BOT",
+      fromPhone: "CATERLOG",
+      text: ord.accountNumber,
+    });
+
+    await this.broadcastStateChange();
+    return ord;
+  }
+
   // ---------------------------------------------------------
   // Shared Mutation Methods (Invoked by both WhatsApp & Web Dashboard)
   // ---------------------------------------------------------
@@ -1432,6 +1601,7 @@ export class CaterlogStage1Engine {
     if (input.reservationTtlMinutes !== undefined) {
       this.vendor.reservationTtlMinutes = clamp(input.reservationTtlMinutes, 5, 180);
     }
+    this.persistInBackground("saveVendor", () => this.persistence.saveVendor(this.vendor));
     void this.broadcastStateChange();
     return this.vendor;
   }
@@ -1448,6 +1618,7 @@ export class CaterlogStage1Engine {
       );
     }
     prod.stockTotal = stockTotal;
+    this.persistInBackground("saveProductStock", () => this.persistence.saveProduct(prod));
     void this.broadcastStateChange();
     return prod;
   }
@@ -1506,6 +1677,7 @@ export class CaterlogStage1Engine {
         existing.primaryImageUrl = resolvedImageUrl;
         existing.imagePhash = resolvedPhash;
       }
+      this.persistInBackground("addProduct", () => this.persistence.saveProduct(existing));
       void this.broadcastStateChange();
       return existing;
     }
@@ -1523,6 +1695,7 @@ export class CaterlogStage1Engine {
       stockReserved: 0,
     };
     this.products.unshift(created);
+    this.persistInBackground("addProduct", () => this.persistence.saveProduct(created));
     void this.broadcastStateChange();
     return created;
   }
@@ -1542,6 +1715,9 @@ export class CaterlogStage1Engine {
     if (existing) {
       existing.feeKobo = feeKobo;
       existing.isActive = true;
+      this.persistInBackground("saveShippingZone", () =>
+        this.persistence.saveShippingZone(existing)
+      );
       void this.broadcastStateChange();
       return existing;
     }
@@ -1555,6 +1731,9 @@ export class CaterlogStage1Engine {
       isActive: true,
     };
     this.shippingZones.push(created);
+    this.persistInBackground("saveShippingZone", () =>
+      this.persistence.saveShippingZone(created)
+    );
     void this.broadcastStateChange();
     return created;
   }
@@ -1563,6 +1742,9 @@ export class CaterlogStage1Engine {
     const target = this.shippingZones.find((z) => z.code === code && z.isActive);
     if (!target) return undefined;
     target.isActive = false;
+    this.persistInBackground("deleteShippingZone", () =>
+      this.persistence.saveShippingZone(target)
+    );
     void this.broadcastStateChange();
     return target;
   }
@@ -1591,6 +1773,7 @@ export class CaterlogStage1Engine {
       existing.type = input.type;
       existing.value = input.value;
       existing.isActive = true;
+      this.persistInBackground("saveDiscount", () => this.persistence.saveDiscount(existing));
       void this.broadcastStateChange();
       return existing;
     }
@@ -1605,6 +1788,7 @@ export class CaterlogStage1Engine {
       isActive: true,
     };
     this.discounts.unshift(created);
+    this.persistInBackground("saveDiscount", () => this.persistence.saveDiscount(created));
     void this.broadcastStateChange();
     return created;
   }
@@ -1615,6 +1799,9 @@ export class CaterlogStage1Engine {
     );
     if (!target) return undefined;
     target.isActive = false;
+    this.persistInBackground("deactivateDiscount", () =>
+      this.persistence.saveDiscount(target)
+    );
     void this.broadcastStateChange();
     return target;
   }
@@ -1644,6 +1831,8 @@ export class CaterlogStage1Engine {
         riderPhone ? `\n📞 Dispatch Rider: *${riderPhone}*` : ""
       }`,
     });
+
+    await this.persistNow("dispatchOrder", () => this.persistence.saveOrder(ord));
 
     await this.broadcastStateChange();
     return ord;

@@ -12,11 +12,11 @@
   },
   "dependencies": {
     "@caterlog/commerce-core": "*",
+    "@caterlog/database": "*",
     "@caterlog/integrations": "*",
-    "@caterlog/database": "*"
+    "bullmq": "^6.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.9.0"
   }
 }
-
