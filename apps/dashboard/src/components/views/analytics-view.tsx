@@ -20,26 +20,35 @@ export function AnalyticsView({
   const [selectedMetric, setSelectedMetric] = useState<"gmv" | "profit" | "volume">("gmv");
 
   // Computed financial totals
-  const totalGMV = analytics.paidGrossNaira || 845000;
+  const totalGMV = analytics.paidGrossNaira || 0;
   const wholesaleCost = Math.round(totalGMV * 0.72); // ~72% wholesale cost on mirrored items
   const netGrossProfit = totalGMV - wholesaleCost;
-  const marginPercent = Math.round((netGrossProfit / (totalGMV || 1)) * 100);
-  const avgOrderValue = Math.round(totalGMV / (analytics.paidOrdersCount || 1));
+  const marginPercent = totalGMV > 0 ? Math.round((netGrossProfit / totalGMV) * 100) : 0;
+  const avgOrderValue = analytics.paidOrdersCount > 0 ? Math.round(totalGMV / analytics.paidOrdersCount) : 0;
 
-  // Top products calculation
+  // Top products calculated from live paid orders
   const topProducts = useMemo(() => {
-    return products.slice(0, 5).map((p, idx) => {
-      const units = [14, 11, 8, 5, 3][idx] || 2;
-      const rev = units * p.basePriceNaira;
-      const margin = Math.round(rev * 0.28);
-      return {
-        ...p,
-        unitsSold: units,
-        revenueFormatted: `₦${rev.toLocaleString()}`,
-        marginFormatted: `₦${margin.toLocaleString()}`,
-      };
-    });
-  }, [products]);
+    const paidOrders = orders.filter((o) => o.status === "PAID");
+    const countsBySku = new Map<string, number>();
+    for (const o of paidOrders) {
+      countsBySku.set(o.productSku, (countsBySku.get(o.productSku) || 0) + o.quantity);
+    }
+    return products
+      .filter((p) => (countsBySku.get(p.skuCode) || 0) > 0)
+      .map((p) => {
+        const units = countsBySku.get(p.skuCode) || 0;
+        const rev = units * p.basePriceNaira;
+        const margin = Math.round(rev * 0.28);
+        return {
+          ...p,
+          unitsSold: units,
+          revenueFormatted: `₦${rev.toLocaleString()}`,
+          marginFormatted: `₦${margin.toLocaleString()}`,
+        };
+      })
+      .sort((a, b) => b.unitsSold - a.unitsSold)
+      .slice(0, 5);
+  }, [orders, products]);
 
   // Export Analytics CSV
   const handleExportReport = () => {
@@ -115,7 +124,7 @@ export function AnalyticsView({
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">72% of GMV</span>
           </div>
           <div className="text-2xl font-extrabold text-gray-900 mt-3">₦{wholesaleCost.toLocaleString()}</div>
-          <div className="text-xs text-gray-500 mt-1">Settled to Aroko Wholesale</div>
+          <div className="text-xs text-gray-500 mt-1">Settled to wholesale suppliers</div>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs">
@@ -299,33 +308,49 @@ export function AnalyticsView({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {topProducts.map((p) => (
-                <tr key={p.id} className="hover:bg-gray-50/60 transition-colors">
-                  <td className="py-4 px-6">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center font-bold text-xs shrink-0">
-                        📦
+              {topProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-12 text-center text-gray-400">
+                    <div className="flex flex-col items-center justify-center">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+                        📊
                       </div>
-                      <div>
-                        <div className="font-semibold text-gray-900 text-xs">{p.name}</div>
-                        <div className="text-[11px] text-gray-400 font-mono">{p.skuCode}</div>
-                      </div>
+                      <p className="text-sm font-bold text-gray-900">No sales recorded yet</p>
+                      <p className="text-xs text-gray-400 mt-1 max-w-sm">
+                        As customer orders are confirmed and paid, top selling products and gross profit margins will rank here in real time.
+                      </p>
                     </div>
                   </td>
-                  <td className="py-4 px-6 font-semibold text-gray-900 text-xs">
-                    {p.unitsSold} units
-                  </td>
-                  <td className="py-4 px-6 font-mono text-xs text-gray-500">
-                    ₦{Math.round(p.basePriceNaira * 0.72).toLocaleString()}
-                  </td>
-                  <td className="py-4 px-6 font-bold text-gray-900 text-xs">
-                    {p.revenueFormatted}
-                  </td>
-                  <td className="py-4 px-6 text-right font-extrabold text-emerald-700 text-xs">
-                    {p.marginFormatted}
-                  </td>
                 </tr>
-              ))}
+              ) : (
+                topProducts.map((p) => (
+                  <tr key={p.id} className="hover:bg-gray-50/60 transition-colors">
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center font-bold text-xs shrink-0">
+                          📦
+                        </div>
+                        <div>
+                          <div className="font-semibold text-gray-900 text-xs">{p.name}</div>
+                          <div className="text-[11px] text-gray-400 font-mono">{p.skuCode}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4 px-6 font-semibold text-gray-900 text-xs">
+                      {p.unitsSold} units
+                    </td>
+                    <td className="py-4 px-6 font-mono text-xs text-gray-500">
+                      ₦{Math.round(p.basePriceNaira * 0.72).toLocaleString()}
+                    </td>
+                    <td className="py-4 px-6 font-bold text-gray-900 text-xs">
+                      {p.revenueFormatted}
+                    </td>
+                    <td className="py-4 px-6 text-right font-extrabold text-emerald-700 text-xs">
+                      {p.marginFormatted}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

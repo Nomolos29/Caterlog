@@ -422,6 +422,7 @@ export function Dashboard() {
 
           {currentView === "payments" && (
             <PaymentsView
+              orders={state.orders}
               onNavigateToOrder={(code) => {
                 const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
                 if (target) {
@@ -433,7 +434,7 @@ export function Dashboard() {
           )}
 
           {currentView === "market-boost" && (
-            <MarketBoostView />
+            <MarketBoostView vendorName={state.vendor.businessName} />
           )}
 
           {currentView === "analytics" && (
@@ -455,7 +456,7 @@ export function Dashboard() {
           )}
 
           {currentView === "team" && (
-            <TeamView />
+            <TeamView vendorName={state.vendor.businessName} />
           )}
 
           {currentView === "verification" && (
@@ -486,6 +487,8 @@ export function Dashboard() {
               vendor={state.vendor}
               shippingZones={state.shippingZones}
               discounts={state.discounts}
+              chatMessages={state.chatMessages}
+              orders={state.orders}
               onUpdateSettings={handleUpdateSettings}
               onAddShippingZone={handleAddShippingZone}
               onDeleteShippingZone={handleDeleteShippingZone}

@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import type { VendorProfile, ShippingZoneItem, DiscountItem } from "@/lib/types";
+import type { VendorProfile, ShippingZoneItem, DiscountItem, ChatMessageItem, OrderItem } from "@/lib/types";
 
 interface SettingsViewProps {
   vendor: VendorProfile;
   shippingZones: ShippingZoneItem[];
   discounts: DiscountItem[];
+  chatMessages?: ChatMessageItem[];
+  orders?: OrderItem[];
   initialTab?: "setup" | "conversations" | "detail" | "shipping" | "general";
   onUpdateSettings: (settings: {
     copilotMode?: "COPILOT" | "FULL_AUTO" | "MANUAL";
@@ -28,24 +30,14 @@ interface MessageItem {
   text: string;
 }
 
-const INITIAL_MESSAGES: MessageItem[] = [
-  { id: "m1", sender: "Oluchi", type: "buyer", time: "10:14", text: "Hi, can I buy two 750ml stainless flasks for pickup?" },
-  { id: "m2", sender: "Sales co-pilot · Automated", type: "copilot", time: "10:14", text: "Hello! I'm Nia Stores' automated assistant. I'll check live stock and the current price for you." },
-  { id: "m3", sender: "Live inventory check", type: "system", time: "10:15", text: "Aroko Wholesale · AW-FL750 · 44 available before sale. Requested: 2 units. Price: ₦10,000 each. Stock checked successfully." },
-  { id: "m4", sender: "Sales co-pilot · Automated", type: "copilot", time: "10:15", text: "Two flasks are available for ₦20,000 total, with pickup selected. Pay securely: pay.caterlog.example/CT-1042. Stock will be rechecked before payment." },
-  { id: "m5", sender: "Oluchi", type: "buyer", time: "10:17", text: "I've made the transfer. I can send you a screenshot." },
-  { id: "m6", sender: "Sales co-pilot · Automated", type: "copilot", time: "10:17", text: "Thank you. A screenshot can't confirm payment. I'll wait for the payment provider's secure confirmation." },
-  { id: "m7", sender: "Payment verified · Server event", type: "system", time: "10:18", text: "GW-1042 · ₦20,000 NGN confirmed by signed gateway event. Order CT-1042 paid. 2 units deducted; 42 remain in shared stock." },
-  { id: "m8", sender: "Sales co-pilot · Automated", type: "copilot", time: "10:18", text: "Payment confirmed. Your order CT-1042 is with Aroko Wholesale for preparation. We'll update you when pickup is confirmed." },
-  { id: "m9", sender: "Supplier fulfillment update", type: "system", time: "10:24", text: "Aroko marked the order Preparing. Pickup is not confirmed yet. No dispatch or delivery time is set." },
-  { id: "m10", sender: "Oluchi · Unresolved request", type: "buyer", time: "10:26", text: "Actually, can you deliver it to Lekki before 4pm today?" },
-  { id: "m11", sender: "Sales co-pilot · Handoff", type: "handoff", time: "10:26", text: "I can't confirm that delivery time. I've asked Nia to help with your request. Your paid order is still being prepared." },
-];
+const INITIAL_MESSAGES: MessageItem[] = [];
 
 export function SettingsView({
   vendor,
   shippingZones,
   discounts,
+  chatMessages = [],
+  orders = [],
   initialTab = "setup",
   onUpdateSettings,
   onAddShippingZone,
@@ -62,6 +54,73 @@ export function SettingsView({
       setActiveTab(initialTab);
     }
   }, [initialTab]);
+
+  // Derived live messages
+  const liveMessages: MessageItem[] = React.useMemo(() => {
+    if (!chatMessages || chatMessages.length === 0) return [];
+    return chatMessages.map((m) => {
+      const type: MessageItem["type"] =
+        m.sender === "BUYER"
+          ? "buyer"
+          : m.sender === "CATERLOG_BOT"
+          ? "copilot"
+          : "merchant";
+      const sender =
+        m.sender === "BUYER"
+          ? "Buyer"
+          : m.sender === "CATERLOG_BOT"
+          ? "Sales co-pilot · Automated"
+          : vendor.businessName || "Store Owner";
+      return {
+        id: m.id,
+        sender,
+        type,
+        time: new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        text: m.text,
+      };
+    });
+  }, [chatMessages, vendor.businessName]);
+
+  // Derived live sessions from chat messages and orders
+  interface SessionItem {
+    id: string;
+    customerName: string;
+    threadCode: string;
+    channel: string;
+    state: "Needs you" | "Automated" | "Handed over";
+    outcome: string;
+    amount?: string;
+    time: string;
+    log: string;
+  }
+
+  const sessions: SessionItem[] = React.useMemo(() => {
+    if (!chatMessages || chatMessages.length === 0) return [];
+    const byPhone = new Map<string, ChatMessageItem[]>();
+    for (const msg of chatMessages) {
+      const phone = msg.fromPhone || "buyer";
+      const list = byPhone.get(phone) || [];
+      list.push(msg);
+      byPhone.set(phone, list);
+    }
+    return Array.from(byPhone.entries()).map(([phone, msgs], idx) => {
+      const lastMsg = msgs[msgs.length - 1];
+      const matchedOrder = orders.find((o) => o.customerPhone === phone);
+      return {
+        id: `sess-${idx}`,
+        customerName: matchedOrder ? matchedOrder.customerName : `WhatsApp Customer (${phone})`,
+        threadCode: `WA-${phone.slice(-4)}`,
+        channel: "WhatsApp",
+        state: "Automated" as const,
+        outcome: matchedOrder ? `${matchedOrder.status} · ${matchedOrder.shortCode}` : "Inquiry Active",
+        amount: matchedOrder?.totalAmountFormatted,
+        time: new Date(lastMsg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        log: lastMsg.text,
+      };
+    });
+  }, [chatMessages, orders]);
+
+  const escalatedSessions = sessions.filter((s) => s.state === "Needs you");
 
   // Shipping form states
   const [addZoneModalOpen, setAddZoneModalOpen] = useState(false);
@@ -123,8 +182,23 @@ export function SettingsView({
   const [outcomeFilter, setOutcomeFilter] = useState("All outcomes");
   const [sessionModalContent, setSessionModalContent] = useState<{ title: string; body: string } | null>(null);
 
+  const filteredSessions = sessions.filter((s) => {
+    const matchesSearch =
+      s.customerName.toLowerCase().includes(searchConv.toLowerCase()) ||
+      s.threadCode.toLowerCase().includes(searchConv.toLowerCase());
+    const matchesChannel = channelFilter === "All channels" || s.channel === channelFilter;
+    const matchesState = stateFilter === "All states" || s.state === stateFilter;
+    const matchesOutcome =
+      outcomeFilter === "All outcomes" || s.outcome.toLowerCase().includes(outcomeFilter.toLowerCase());
+    return matchesSearch && matchesChannel && matchesState && matchesOutcome;
+  });
+
   // Conversation detail reply state
-  const [messages, setMessages] = useState<MessageItem[]>(INITIAL_MESSAGES);
+  const [messages, setMessages] = useState<MessageItem[]>(liveMessages);
+
+  useEffect(() => {
+    setMessages(liveMessages);
+  }, [liveMessages]);
   const [merchantReplyText, setMerchantReplyText] = useState("");
   const [threadTakenOver, setThreadTakenOver] = useState(false);
   const [replySuccess, setReplySuccess] = useState(false);
@@ -523,6 +597,27 @@ export function SettingsView({
   /* Screen 3: Settings · Sales co-pilot conversation detail                     */
   /* -------------------------------------------------------------------------- */
   if (activeTab === "detail") {
+    if (messages.length === 0) {
+      return (
+        <div className="space-y-6 max-w-6xl mx-auto pb-16">
+          <button
+            onClick={() => setActiveTab("conversations")}
+            className="text-xs text-gray-500 hover:text-emerald-700 underline flex items-center gap-1 cursor-pointer"
+          >
+            ← Back to conversations
+          </button>
+          <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center shadow-xs space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl mx-auto">
+              💬
+            </div>
+            <h3 className="text-base font-bold text-gray-900">No Active Messages</h3>
+            <p className="text-xs text-gray-400 max-w-sm mx-auto">
+              No live conversation selected or recorded yet. Inbound customer WhatsApp inquiries will appear here.
+            </p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Header */}
@@ -849,7 +944,7 @@ export function SettingsView({
             }}
             className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
-            Escalations (1)
+            Escalations ({escalatedSessions.length})
           </button>
           <button
             onClick={() => setActiveTab("shipping")}
@@ -869,39 +964,45 @@ export function SettingsView({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-[#0d5c3a] text-white rounded-2xl p-5 shadow-xs">
             <div className="text-xs text-emerald-100 font-medium">Co-pilot sessions</div>
-            <div className="text-3xl font-extrabold mt-1">4</div>
-            <div className="text-[11px] text-emerald-200 mt-2">Today · 3 WhatsApp, 1 Instagram</div>
+            <div className="text-3xl font-extrabold mt-1">{sessions.length}</div>
+            <div className="text-[11px] text-emerald-200 mt-2">Active WhatsApp selling threads</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
             <div className="text-xs text-gray-500 font-medium">Confirmed sales</div>
-            <div className="text-3xl font-extrabold text-gray-900 mt-1">₦20,000</div>
-            <div className="text-[11px] text-gray-400 mt-2">1 paid order · Gateway verified</div>
+            <div className="text-3xl font-extrabold text-gray-900 mt-1">
+              {orders.filter((o) => o.status === "PAID").length}
+            </div>
+            <div className="text-[11px] text-gray-400 mt-2">Verified paid orders via Monnify</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
             <div className="text-xs text-gray-500 font-medium">Needs your attention</div>
-            <div className="text-3xl font-extrabold text-gray-900 mt-1">1</div>
-            <div className="text-[11px] text-amber-700 mt-2">Delivery request · Take over</div>
+            <div className="text-3xl font-extrabold text-gray-900 mt-1">{escalatedSessions.length}</div>
+            <div className="text-[11px] text-amber-700 mt-2">
+              {escalatedSessions.length === 0 ? "All sessions automated" : "Escalated buyer threads"}
+            </div>
           </div>
         </div>
 
         {/* Alert Banner */}
-        <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <span className="text-amber-700 font-bold text-sm">⚠</span>
-            <div className="text-amber-900">
-              <span className="font-bold">Handoff needed · Oluchi Adeyemi</span>
-              <p className="text-[11px] text-amber-800 mt-0.5">
-                Order CT-1042 is paid. A new request for same-day delivery is outside your guardrails. Automation is paused for that request; open the conversation to respond.
-              </p>
+        {escalatedSessions.length > 0 && (
+          <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="text-amber-700 font-bold text-sm">⚠</span>
+              <div className="text-amber-900">
+                <span className="font-bold">Handoff needed · {escalatedSessions[0].customerName}</span>
+                <p className="text-[11px] text-amber-800 mt-0.5">
+                  A customer inquiry requires merchant intervention. Co-pilot is paused for this thread; open the conversation to reply.
+                </p>
+              </div>
             </div>
+            <button
+              onClick={() => setActiveTab("detail")}
+              className="px-3.5 py-1.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shrink-0"
+            >
+              Open {escalatedSessions[0].threadCode} →
+            </button>
           </div>
-          <button
-            onClick={() => setActiveTab("detail")}
-            className="px-3.5 py-1.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shrink-0"
-          >
-            Open WA-0882 →
-          </button>
-        </div>
+        )}
 
         {/* Session Inbox Table Card */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
@@ -964,134 +1065,68 @@ export function SettingsView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-700">
-                {/* Row 1: Oluchi Adeyemi */}
-                <tr className="hover:bg-amber-50/30 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-gray-900">Oluchi Adeyemi</div>
-                    <div className="text-[11px] text-gray-400">WA-0882</div>
-                  </td>
-                  <td className="px-4 py-3.5">WhatsApp</td>
-                  <td className="px-4 py-3.5">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                      Needs you
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-medium text-gray-900">Paid · CT-1042</div>
-                    <div className="text-[11px] text-gray-500">₦20,000</div>
-                  </td>
-                  <td className="px-4 py-3.5 text-gray-500">10:26 WAT</td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => setActiveTab("detail")}
-                      className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-800 text-xs font-semibold rounded-lg transition-colors"
-                    >
-                      Open thread →
-                    </button>
-                  </td>
-                </tr>
-
-                {/* Row 2: Tunde Bello */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-gray-900">Tunde Bello</div>
-                    <div className="text-[11px] text-gray-400">WA-0884</div>
-                  </td>
-                  <td className="px-4 py-3.5">WhatsApp</td>
-                  <td className="px-4 py-3.5">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                      Automated
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-medium text-gray-900">Payment link sent</div>
-                    <div className="text-[11px] text-gray-500">Not paid</div>
-                  </td>
-                  <td className="px-4 py-3.5 text-gray-500">10:21 WAT</td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() =>
-                        setSessionModalContent({
-                          title: "Tunde Bello (WA-0884)",
-                          body: "Session Log: Customer inquired about Stainless flask 750ml. Co-pilot generated dynamic NUBAN checkout link. Payment pending.",
-                        })
-                      }
-                      className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg"
-                    >
-                      Review
-                    </button>
-                  </td>
-                </tr>
-
-                {/* Row 3: Ada Okafor */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-gray-900">Ada Okafor</div>
-                    <div className="text-[11px] text-gray-400">IG-0241</div>
-                  </td>
-                  <td className="px-4 py-3.5">Instagram</td>
-                  <td className="px-4 py-3.5">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-600">
-                      Handed over
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-medium text-gray-900">No sale</div>
-                    <div className="text-[11px] text-gray-500">Connection lost</div>
-                  </td>
-                  <td className="px-4 py-3.5 text-gray-500">09:58 WAT</td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() =>
-                        setSessionModalContent({
-                          title: "Ada Okafor (IG-0241)",
-                          body: "Session Log: Inquired via Instagram DM. Co-pilot sent product catalog. Instagram channel connection expired at 09:58 WAT.",
-                        })
-                      }
-                      className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg"
-                    >
-                      Review
-                    </button>
-                  </td>
-                </tr>
-
-                {/* Row 4: Zainab Musa */}
-                <tr className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-gray-900">Zainab Musa</div>
-                    <div className="text-[11px] text-gray-400">WA-0879</div>
-                  </td>
-                  <td className="px-4 py-3.5">WhatsApp</td>
-                  <td className="px-4 py-3.5">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-600">
-                      Handed over
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <div className="font-medium text-gray-900">Enquiry only</div>
-                    <div className="text-[11px] text-gray-500">Merchant replied</div>
-                  </td>
-                  <td className="px-4 py-3.5 text-gray-500">09:42 WAT</td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() =>
-                        setSessionModalContent({
-                          title: "Zainab Musa (WA-0879)",
-                          body: "Session Log: Customer asked about bulk wholesale discounts. Nia replied manually: 'We offer wholesale discounts for orders above 20 units!'",
-                        })
-                      }
-                      className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg"
-                    >
-                      Review
-                    </button>
-                  </td>
-                </tr>
+                {filteredSessions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-gray-400">
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+                          💬
+                        </div>
+                        <p className="text-sm font-bold text-gray-900">No customer sessions</p>
+                        <p className="text-xs text-gray-400 mt-1 max-w-sm">
+                          WhatsApp inquiries handled by Sales Co-Pilot or awaiting merchant replies will appear here in real time.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSessions.map((sess) => (
+                    <tr key={sess.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-5 py-3.5">
+                        <div className="font-semibold text-gray-900">{sess.customerName}</div>
+                        <div className="text-[11px] text-gray-400">{sess.threadCode}</div>
+                      </td>
+                      <td className="px-4 py-3.5">{sess.channel}</td>
+                      <td className="px-4 py-3.5">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            sess.state === "Needs you"
+                              ? "bg-amber-100 text-amber-800"
+                              : sess.state === "Automated"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {sess.state}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="font-medium text-gray-900">{sess.outcome}</div>
+                        {sess.amount && <div className="text-[11px] text-gray-500">{sess.amount}</div>}
+                      </td>
+                      <td className="px-4 py-3.5 text-gray-500">{sess.time}</td>
+                      <td className="px-5 py-3.5 text-right">
+                        <button
+                          onClick={() =>
+                            setSessionModalContent({
+                              title: `${sess.customerName} (${sess.threadCode})`,
+                              body: sess.log,
+                            })
+                          }
+                          className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg cursor-pointer"
+                        >
+                          Review
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
 
           <div className="p-4 border-t border-gray-100 text-[11px] text-gray-400">
-            Showing 4 of 4 sessions · Customer messages remain in their native channel threads.
+            Showing {filteredSessions.length} of {sessions.length} sessions · Customer messages remain in their native channel threads.
           </div>
         </div>
 

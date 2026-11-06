@@ -193,26 +193,25 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
 ];
 
 export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: NetworkViewProps) {
-  // Connected suppliers list
-  const [connectedSuppliers, setConnectedSuppliers] = useState<SupplierProfile[]>(SUPPLIERS_DATA);
-  const [selectedSupplier, setSelectedSupplier] = useState<SupplierProfile>(SUPPLIERS_DATA[0]);
+  // Connected suppliers list (starts empty; populated as suppliers are connected)
+  const [connectedSuppliers, setConnectedSuppliers] = useState<SupplierProfile[]>([]);
+  const [directorySuppliers, setDirectorySuppliers] = useState<SupplierProfile[]>([]);
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierProfile | null>(null);
 
-  // Default to my-suppliers first, unless user has 0 connected suppliers
+  // Default to my-suppliers
   const [activeTab, setActiveTab] = useState<"my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers">(
-    connectedSuppliers.length > 0 ? "my-suppliers" : "find-suppliers"
+    initialTab
   );
 
   // Supplier Catalog selection
-  const [selectedProductSkus, setSelectedProductSkus] = useState<string[]>(["AW-FL750", "AW-LB1200", "AW-SJ1000"]);
+  const [selectedProductSkus, setSelectedProductSkus] = useState<string[]>([]);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogCategory, setCatalogCategory] = useState("ALL");
   const [mirrorToast, setMirrorToast] = useState<string | null>(null);
 
   // Supplier Messaging Modal
   const [supplierMsgModal, setSupplierMsgModal] = useState(false);
-  const [supplierMsgText, setSupplierMsgText] = useState(
-    `Hello ${selectedSupplier.name}, we have mirrored your catalog products and would like to confirm fulfillment dispatch turnaround for Lagos deliveries.`
-  );
+  const [supplierMsgText, setSupplierMsgText] = useState("");
 
   // Resellers permission states
   const [inviteEmail, setInviteEmail] = useState("");
@@ -246,19 +245,26 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
 
   const handleViewSupplierCatalog = (sup: SupplierProfile) => {
     setSelectedSupplier(sup);
+    setSupplierMsgText(
+      `Hello ${sup.name}, we have mirrored your catalog products and would like to confirm fulfillment dispatch turnaround for Lagos deliveries.`
+    );
     setActiveTab("supplier-catalog");
   };
 
   // Filter products in catalog view
-  const catalogProducts = selectedSupplier.products.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-      p.sku.toLowerCase().includes(catalogSearch.toLowerCase());
-    const matchesCat = catalogCategory === "ALL" || p.category === catalogCategory;
-    return matchesSearch && matchesCat;
-  });
+  const catalogProducts = selectedSupplier
+    ? selectedSupplier.products.filter((p) => {
+        const matchesSearch =
+          p.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+          p.sku.toLowerCase().includes(catalogSearch.toLowerCase());
+        const matchesCat = catalogCategory === "ALL" || p.category === catalogCategory;
+        return matchesSearch && matchesCat;
+      })
+    : [];
 
-  const uniqueCategories = Array.from(new Set(selectedSupplier.products.map((p) => p.category)));
+  const uniqueCategories = selectedSupplier
+    ? Array.from(new Set(selectedSupplier.products.map((p) => p.category)))
+    : [];
 
   return (
     <div className="space-y-6 sm:space-y-8 max-w-7xl mx-auto pb-16">
@@ -314,7 +320,7 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
           Find Suppliers (Directory)
         </button>
 
-        {activeTab === "supplier-catalog" && (
+        {activeTab === "supplier-catalog" && selectedSupplier && (
           <button
             onClick={() => setActiveTab("supplier-catalog")}
             className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-bold whitespace-nowrap cursor-pointer active:scale-95"
@@ -515,6 +521,23 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
       {/* TAB 2: SUPPLIER CATALOG (View All Products from a Supplier)             */}
       {/* ---------------------------------------------------------------------- */}
       {activeTab === "supplier-catalog" && (
+        !selectedSupplier ? (
+          <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl mx-auto">
+              📦
+            </div>
+            <h3 className="text-base font-bold text-gray-900">No Supplier Selected</h3>
+            <p className="text-xs text-gray-500 max-w-sm mx-auto">
+              Select a connected wholesale partner or browse the verified supplier directory to inspect and mirror product catalogs.
+            </p>
+            <button
+              onClick={() => setActiveTab("find-suppliers")}
+              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
+            >
+              Find Suppliers →
+            </button>
+          </div>
+        ) : (
         <div className="space-y-6">
           {/* Back button & Supplier Context Banner */}
           <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -678,6 +701,7 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
             </div>
           </div>
         </div>
+        )
       )}
 
       {/* ---------------------------------------------------------------------- */}
@@ -693,66 +717,78 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
             </p>
           </div>
 
-          {/* Directory Supplier Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {SUPPLIERS_DATA.map((sup) => (
-              <div
-                key={sup.id}
-                className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs space-y-5 hover:border-emerald-300 transition-all flex flex-col justify-between"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-base text-gray-900">{sup.name}</h3>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800">
-                          CAC Verified
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-400 mt-0.5 font-mono">{sup.cacNumber} · {sup.category}</div>
-                    </div>
-                    <span className="text-xs font-bold text-emerald-700">★ {sup.rating}</span>
-                  </div>
-
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    Warehouse: {sup.warehouseAddress}. Fulfillment cutoff: {sup.cutoffTime}.
-                  </p>
-
-                  <div className="bg-gray-50 rounded-2xl p-3.5 space-y-1.5 text-xs text-gray-600">
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Dropship MOQ:</span>
-                      <span className="font-semibold text-gray-900">{sup.wholesaleTerms.moqDropship} unit</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Escrow Settlement:</span>
-                      <span className="font-semibold text-emerald-700">Instant via Monnify</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Catalog Size:</span>
-                      <span className="font-semibold text-gray-900">{sup.products.length} Products Available</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 pt-2">
-                  <button
-                    onClick={() => handleViewSupplierCatalog(sup)}
-                    className="flex-1 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold py-2.5 px-4 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all text-center"
-                  >
-                    View Products &amp; Terms
-                  </button>
-                  <a
-                    href={`https://wa.me/${sup.whatsapp}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3.5 py-2.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl cursor-pointer transition-all"
-                  >
-                    WhatsApp
-                  </a>
-                </div>
+          {/* Directory Supplier Cards or Empty State */}
+          {directorySuppliers.length === 0 ? (
+            <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl mx-auto">
+                🏢
               </div>
-            ))}
-          </div>
+              <h3 className="text-base font-bold text-gray-900">No Verified Suppliers Listed Yet</h3>
+              <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
+                The verified wholesale supplier directory will list verified Nigerian importers and manufacturers as they onboard.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {directorySuppliers.map((sup) => (
+                <div
+                  key={sup.id}
+                  className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs space-y-5 hover:border-emerald-300 transition-all flex flex-col justify-between"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-base text-gray-900">{sup.name}</h3>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800">
+                            CAC Verified
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-400 mt-0.5 font-mono">{sup.cacNumber} · {sup.category}</div>
+                      </div>
+                      <span className="text-xs font-bold text-emerald-700">★ {sup.rating}</span>
+                    </div>
+
+                    <p className="text-xs text-gray-600 leading-relaxed">
+                      Warehouse: {sup.warehouseAddress}. Fulfillment cutoff: {sup.cutoffTime}.
+                    </p>
+
+                    <div className="bg-gray-50 rounded-2xl p-3.5 space-y-1.5 text-xs text-gray-600">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Dropship MOQ:</span>
+                        <span className="font-semibold text-gray-900">{sup.wholesaleTerms.moqDropship} unit</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Escrow Settlement:</span>
+                        <span className="font-semibold text-emerald-700">Instant via Monnify</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Catalog Size:</span>
+                        <span className="font-semibold text-gray-900">{sup.products.length} Products Available</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      onClick={() => handleViewSupplierCatalog(sup)}
+                      className="flex-1 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold py-2.5 px-4 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all text-center"
+                    >
+                      View Products &amp; Terms
+                    </button>
+                    <a
+                      href={`https://wa.me/${sup.whatsapp}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3.5 py-2.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl cursor-pointer transition-all"
+                    >
+                      WhatsApp
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -800,11 +836,22 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
               <span>✕ Cannot edit master catalog inventory</span>
             </div>
           </div>
+
+          {/* Active Resellers Empty State */}
+          <div className="bg-white rounded-3xl border border-gray-100 p-10 text-center shadow-2xs space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl mx-auto">
+              👥
+            </div>
+            <h3 className="text-sm font-bold text-gray-900">No Resellers Connected Yet</h3>
+            <p className="text-xs text-gray-500 max-w-sm mx-auto">
+              Send an invite to downstream distributors, retail partners, or affiliate vendors to allow them to mirror your inventory.
+            </p>
+          </div>
         </div>
       )}
 
       {/* Message Supplier Modal */}
-      {supplierMsgModal && (
+      {supplierMsgModal && selectedSupplier && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4 animate-in fade-in">
             <div className="flex justify-between items-center border-b pb-3">
@@ -845,5 +892,5 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
         </div>
       )}
     </div>
-  );
+  )
 }

@@ -4,19 +4,20 @@ import React, { useState } from "react";
 
 interface MarketBoostViewProps {
   initialTab?: "visibility" | "setup" | "subscription";
+  vendorName?: string;
 }
 
-export function MarketBoostView({ initialTab = "visibility" }: MarketBoostViewProps) {
+export function MarketBoostView({ initialTab = "visibility", vendorName }: MarketBoostViewProps) {
   // Tabs: 'visibility' | 'setup' | 'subscription'
   const [activeTab, setActiveTab] = useState<"visibility" | "setup" | "subscription">(initialTab);
 
-  // Listing status
-  const [listingPublished, setListingPublished] = useState(true);
+  // Listing status (starts unpublished until merchant sets up and activates)
+  const [listingPublished, setListingPublished] = useState(false);
   const [showDirPreviewModal, setShowDirPreviewModal] = useState(false);
   const [showResellerModal, setShowResellerModal] = useState(false);
 
   // Listing setup form states
-  const [businessName, setBusinessName] = useState("Aroko Wholesale");
+  const [businessName, setBusinessName] = useState(vendorName || "My Store");
   const [category, setCategory] = useState("Home & living");
   const [location, setLocation] = useState("Lagos, Nigeria");
   const [description, setDescription] = useState(
@@ -693,7 +694,7 @@ export function MarketBoostView({ initialTab = "visibility" }: MarketBoostViewPr
           <div className="text-xs text-gray-500 mb-1">Market Boost / Visibility &amp; performance</div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Visibility &amp; performance</h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            See how resellers discover and connect with Aroko Wholesale.
+            See how resellers discover and connect with {businessName}.
           </p>
         </div>
         <button
@@ -726,19 +727,45 @@ export function MarketBoostView({ initialTab = "visibility" }: MarketBoostViewPr
         </button>
       </div>
 
-      {/* Directory listing banner card */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-base font-bold text-gray-900">Aroko Wholesale · Directory listing</h3>
-            <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                listingPublished ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {listingPublished ? "Active · Published" : "Unpublished · Draft"}
-            </span>
+      {!listingPublished ? (
+        <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl mx-auto">
+            🚀
           </div>
+          <h3 className="text-base font-bold text-gray-900">No Active Market Boost Campaign</h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
+            Market Boost amplifies your wholesale inventory in the verified Caterlog B2B directory, helping verified retailers and social sellers discover and mirror your products.
+          </p>
+          <div className="pt-2 flex justify-center gap-3">
+            <button
+              onClick={() => setActiveTab("setup")}
+              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
+            >
+              Create Directory Listing →
+            </button>
+            <button
+              onClick={() => setActiveTab("subscription")}
+              className="border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold px-4 py-2.5 rounded-xl transition-all cursor-pointer"
+            >
+              View Boost Plans
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Directory listing banner card */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-gray-900">{businessName} · Directory listing</h3>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                    listingPublished ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  {listingPublished ? "Active · Published" : "Unpublished · Draft"}
+                </span>
+              </div>
           <p className="text-xs text-gray-500 mt-1">
             Home &amp; living · Lagos, Nigeria · 3 catalogs · 24 products
           </p>
@@ -975,6 +1002,8 @@ export function MarketBoostView({ initialTab = "visibility" }: MarketBoostViewPr
           Renew for ₦15,000/month
         </button>
       </div>
+      </>
+      )}
 
       {/* Modals for Reseller & Preview */}
       {showResellerModal && (

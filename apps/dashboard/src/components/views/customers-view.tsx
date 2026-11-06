@@ -37,65 +37,14 @@ export function CustomersView({
   });
   const [newNoteInput, setNewNoteInput] = useState("");
 
-  // Aggregate customers from orders + sample Nigerian shoppers
+  // Aggregate customers solely from real orders
   const customers: CustomerProfile[] = useMemo(() => {
     const customerMap = new Map<string, CustomerProfile>();
 
-    // Seed realistic Nigerian customers
-    const defaultData = [
-      {
-        id: "cust-1",
-        name: "Ada Okafor",
-        phone: "+2348031234567",
-        email: "ada.okafor@gmail.com",
-        location: "Lekki Phase 1, Lagos",
-        tag: "VIP" as const,
-        firstOrderDate: "12 Aug 2026",
-        notes: "Prefers morning deliveries before 11 AM. Gate code #402.",
-      },
-      {
-        id: "cust-2",
-        name: "Tunde Bello",
-        phone: "+2348029876543",
-        email: "tunde.bello@outlook.com",
-        location: "Ikeja GRA, Lagos",
-        tag: "Repeat" as const,
-        firstOrderDate: "04 Sep 2026",
-      },
-      {
-        id: "cust-3",
-        name: "Zainab Musa",
-        phone: "+2348145556789",
-        email: "zainab.musa@yahoo.com",
-        location: "Wuse 2, Abuja",
-        tag: "New" as const,
-        firstOrderDate: "28 Oct 2026",
-      },
-      {
-        id: "cust-4",
-        name: "Chukwuma Eze",
-        phone: "+2348051122334",
-        email: "c.eze@technigeria.ng",
-        location: "Yaba, Lagos",
-        tag: "Repeat" as const,
-        firstOrderDate: "15 Sep 2026",
-      },
-    ];
-
-    for (const d of defaultData) {
-      customerMap.set(d.phone, {
-        ...d,
-        lastOrderDate: "02 Nov 2026",
-        orderCount: 0,
-        totalSpentNaira: 0,
-        totalSpentFormatted: "₦0",
-        orders: [],
-      });
-    }
-
     // Process actual orders
     for (const o of orders) {
-      const phone = o.customerPhone || "+2348031234567";
+      const phone = o.customerPhone?.trim();
+      if (!phone) continue;
       const existing = customerMap.get(phone);
       if (existing) {
         existing.orderCount += 1;
@@ -112,10 +61,12 @@ export function CustomersView({
       } else {
         customerMap.set(phone, {
           id: `cust-${customerMap.size + 1}`,
-          name: o.customerName,
+          name: o.customerName || "WhatsApp Customer",
           phone: o.customerPhone,
-          email: `${o.customerName.toLowerCase().replace(/\s+/g, ".")}@example.com`,
-          location: o.shippingZoneName || "Lagos, Nigeria",
+          email: o.customerName
+            ? `${o.customerName.toLowerCase().replace(/\s+/g, ".")}@example.com`
+            : "customer@whatsapp.buyer",
+          location: o.shippingZoneName || "Nigeria",
           tag: "New",
           firstOrderDate: new Date(o.createdAt).toLocaleDateString("en-GB", {
             day: "2-digit",
@@ -132,15 +83,6 @@ export function CustomersView({
           totalSpentFormatted: o.totalAmountFormatted,
           orders: [o],
         });
-      }
-    }
-
-    // Default values if no orders attached yet
-    for (const c of customerMap.values()) {
-      if (c.orderCount === 0) {
-        c.orderCount = 2;
-        c.totalSpentNaira = 75000;
-        c.totalSpentFormatted = "₦75,000";
       }
     }
 
@@ -242,120 +184,135 @@ export function CustomersView({
         </div>
       </div>
 
-      {/* Search & Tag Filter Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-md">
-          <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-gray-400 text-xs">🔍</span>
-          <input
-            type="text"
-            placeholder="Search by name, phone, or location..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all"
-          />
+      {/* Customers Content */}
+      {customers.length === 0 ? (
+        <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl font-bold">
+            👥
+          </div>
+          <h3 className="text-base font-bold text-gray-900">No Customers Recorded Yet</h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
+            When buyers contact your store via WhatsApp or complete orders through generated payment invoices, their contact details, order frequency, and delivery addresses will automatically appear here.
+          </p>
         </div>
+      ) : (
+        <>
+          {/* Search & Tag Filter Bar */}
+          <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-md">
+              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-gray-400 text-xs">🔍</span>
+              <input
+                type="text"
+                placeholder="Search by name, phone, or location..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all"
+              />
+            </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          {(["ALL", "VIP", "Repeat", "New"] as const).map((tag) => (
-            <button
-              key={tag}
-              onClick={() => setSelectedTag(tag)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
-                selectedTag === tag
-                  ? "bg-emerald-600 text-white shadow-2xs"
-                  : "bg-gray-50 text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              {tag === "ALL" ? "All" : tag}
-            </button>
-          ))}
-        </div>
-      </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+              {(["ALL", "VIP", "Repeat", "New"] as const).map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => setSelectedTag(tag)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                    selectedTag === tag
+                      ? "bg-emerald-600 text-white shadow-2xs"
+                      : "bg-gray-50 text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {tag === "ALL" ? "All" : tag}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {/* Customers Table */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm min-w-[700px]">
-            <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
-              <tr>
-                <th className="py-3 px-6">Customer</th>
-                <th className="py-3 px-6">Contact / Location</th>
-                <th className="py-3 px-6">Orders</th>
-                <th className="py-3 px-6">Lifetime Value</th>
-                <th className="py-3 px-6">Segment</th>
-                <th className="py-3 px-6 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredCustomers.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-gray-400 text-sm">
-                    No customers found matching &quot;{searchQuery}&quot;
-                  </td>
-                </tr>
-              ) : (
-                filteredCustomers.map((c) => (
-                  <tr key={c.id} className="hover:bg-gray-50/60 transition-colors">
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
-                          {c.name.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-gray-900 text-xs">{c.name}</div>
-                          <div className="text-[11px] text-gray-400">{c.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-6 text-xs text-gray-600">
-                      <div className="font-mono text-gray-700">{c.phone}</div>
-                      <div className="text-[11px] text-gray-400">{c.location}</div>
-                    </td>
-                    <td className="py-4 px-6 font-semibold text-gray-900 text-xs">
-                      {c.orderCount} {c.orderCount === 1 ? "order" : "orders"}
-                    </td>
-                    <td className="py-4 px-6 font-bold text-gray-900 text-xs">
-                      {c.totalSpentFormatted}
-                    </td>
-                    <td className="py-4 px-6">
-                      <span
-                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                          c.tag === "VIP"
-                            ? "bg-purple-50 text-purple-700 border border-purple-200"
-                            : c.tag === "Repeat"
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                            : "bg-blue-50 text-blue-700 border border-blue-200"
-                        }`}
-                      >
-                        {c.tag}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <a
-                          href={`https://wa.me/${c.phone.replace(/\+/g, "")}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors flex items-center gap-1"
-                          title="Chat on WhatsApp"
-                        >
-                          <span>WA</span>
-                        </a>
-                        <button
-                          onClick={() => setSelectedCustomer(c)}
-                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
-                        >
-                          Profile
-                        </button>
-                      </div>
-                    </td>
+          {/* Customers Table */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm min-w-[700px]">
+                <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+                  <tr>
+                    <th className="py-3 px-6">Customer</th>
+                    <th className="py-3 px-6">Contact / Location</th>
+                    <th className="py-3 px-6">Orders</th>
+                    <th className="py-3 px-6">Lifetime Value</th>
+                    <th className="py-3 px-6">Segment</th>
+                    <th className="py-3 px-6 text-right">Actions</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredCustomers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-gray-400 text-sm">
+                        No customers found matching &quot;{searchQuery}&quot;
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCustomers.map((c) => (
+                      <tr key={c.id} className="hover:bg-gray-50/60 transition-colors">
+                        <td className="py-4 px-6">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
+                              {c.name.charAt(0)}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-gray-900 text-xs">{c.name}</div>
+                              <div className="text-[11px] text-gray-400">{c.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-xs text-gray-600">
+                          <div className="font-mono text-gray-700">{c.phone}</div>
+                          <div className="text-[11px] text-gray-400">{c.location}</div>
+                        </td>
+                        <td className="py-4 px-6 font-semibold text-gray-900 text-xs">
+                          {c.orderCount} {c.orderCount === 1 ? "order" : "orders"}
+                        </td>
+                        <td className="py-4 px-6 font-bold text-gray-900 text-xs">
+                          {c.totalSpentFormatted}
+                        </td>
+                        <td className="py-4 px-6">
+                          <span
+                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                              c.tag === "VIP"
+                                ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                : c.tag === "Repeat"
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : "bg-blue-50 text-blue-700 border border-blue-200"
+                            }`}
+                          >
+                            {c.tag}
+                          </span>
+                        </td>
+                        <td className="py-4 px-6 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <a
+                              href={`https://wa.me/${c.phone.replace(/\+/g, "")}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors flex items-center gap-1"
+                              title="Chat on WhatsApp"
+                            >
+                              <span>WA</span>
+                            </a>
+                            <button
+                              onClick={() => setSelectedCustomer(c)}
+                              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                            >
+                              Profile
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Customer Profile Modal (Matching Customer Profile & History.png) */}
       {selectedCustomer && (

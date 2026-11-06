@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import type { OrderItem } from "@/lib/types";
 
 interface PaymentsViewProps {
   initialTab?: "splits" | "accounts" | "detail" | "rules";
+  orders?: OrderItem[];
   onNavigateToOrder?: (orderCode: string) => void;
 }
 
@@ -23,73 +25,52 @@ interface TransactionItem {
   repSettlement: "Rep failed" | "Both settled" | "Not created" | "Settled";
 }
 
-const INITIAL_TRANSACTIONS: TransactionItem[] = [
-  {
-    id: "tx-1",
-    orderCode: "CT-1042",
-    amount: 20000,
-    gatewayRef: "GW-1042",
-    date: "3 Nov 2026",
-    time: "10:18 WAT",
-    supplierGross: 16000,
-    repGross: 4000,
-    repNet: 3700,
-    fee: 300,
-    customerStatus: "Paid",
-    supplierSettlement: "Supplier pending",
-    repSettlement: "Rep failed",
-  },
-  {
-    id: "tx-2",
-    orderCode: "CT-1041",
-    amount: 10000,
-    gatewayRef: "GW-1041",
-    date: "2 Nov 2026",
-    time: "14:20 WAT",
-    supplierGross: 8000,
-    repGross: 2000,
-    repNet: 1850,
-    fee: 150,
-    customerStatus: "Paid",
-    supplierSettlement: "Both settled",
-    repSettlement: "Both settled",
-  },
-  {
-    id: "tx-3",
-    orderCode: "CT-1040",
-    amount: 20000,
-    gatewayRef: "GW-1040",
-    date: "1 Nov 2026",
-    time: "11:05 WAT",
-    supplierGross: 16000,
-    repGross: 4000,
-    repNet: 3700,
-    fee: 300,
-    customerStatus: "Paid",
-    supplierSettlement: "Both settled",
-    repSettlement: "Both settled",
-  },
-  {
-    id: "tx-4",
-    orderCode: "CT-1039",
-    amount: 10000,
-    gatewayRef: "No capture",
-    date: "31 Oct 2026",
-    time: "16:45 WAT",
-    supplierGross: 0,
-    repGross: 0,
-    repNet: 0,
-    fee: 0,
-    customerStatus: "Payment failed",
-    supplierSettlement: "Not created",
-    repSettlement: "Not created",
-  },
-];
+const buildTransactions = (orders: OrderItem[] = []): TransactionItem[] => {
+  if (!orders || orders.length === 0) return [];
 
-export function PaymentsView({ initialTab = "splits", onNavigateToOrder }: PaymentsViewProps) {
+  return orders
+    .filter((o) => o.amountPaidNaira > 0 || o.status === "PAID" || o.status === "PARTIALLY_PAID")
+    .map((o, idx) => {
+      const gross = o.amountPaidNaira || o.totalAmountNaira;
+      const fee = Math.round(gross * 0.015); // Monnify ~1.5% fee
+      const net = Math.max(0, gross - fee);
+      const orderDate = new Date(o.paidAt || o.createdAt);
+      return {
+        id: `tx-${o.id || idx}`,
+        orderCode: o.shortCode,
+        amount: gross,
+        gatewayRef: o.invoiceReference || `MNFY-${o.shortCode}`,
+        date: orderDate.toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        }),
+        time:
+          orderDate.toLocaleTimeString("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }) + " WAT",
+        supplierGross: net,
+        repGross: 0,
+        repNet: net,
+        fee,
+        customerStatus: "Paid" as const,
+        supplierSettlement: "Both settled" as const,
+        repSettlement: "Both settled" as const,
+      };
+    });
+};
+
+export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToOrder }: PaymentsViewProps) {
   // Tabs: 'splits' | 'accounts' | 'detail' | 'rules'
   const [activeTab, setActiveTab] = useState<"splits" | "accounts" | "detail" | "rules">(initialTab);
-  const [transactions, setTransactions] = useState<TransactionItem[]>(INITIAL_TRANSACTIONS);
+
+  // Derive transactions dynamically from orders and allow in-memory updates for detail flows
+  const [transactions, setTransactions] = useState<TransactionItem[]>(() => buildTransactions(orders));
+
+  useEffect(() => {
+    setTransactions(buildTransactions(orders));
+  }, [orders]);
 
   // Filter states for split transactions ledger
   const [searchTx, setSearchTx] = useState("");
@@ -991,40 +972,62 @@ export function PaymentsView({ initialTab = "splits", onNavigateToOrder }: Payme
       </div>
 
       {/* 3 Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-[#0d5c3a] text-white rounded-2xl p-5 shadow-xs">
-          <div className="text-xs text-emerald-100 font-medium">Paid customer volume</div>
-          <div className="text-3xl font-extrabold mt-1">₦50,000</div>
-          <div className="text-[11px] text-emerald-200 mt-2">3 confirmed orders · Filtered period</div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
-          <div className="text-xs text-gray-500 font-medium">Supplier allocations</div>
-          <div className="text-3xl font-extrabold text-gray-900 mt-1">₦40,000</div>
-          <div className="text-[11px] text-gray-400 mt-2">Aroko Wholesale · Before settlement</div>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
-          <div className="text-xs text-gray-500 font-medium">Net rep earnings</div>
-          <div className="text-3xl font-extrabold text-gray-900 mt-1">₦9,250</div>
-          <div className="text-[11px] text-gray-400 mt-2">₦10,000 gross less ₦750 fees</div>
-        </div>
-      </div>
+      {(() => {
+        const totalVolume = transactions.reduce(
+          (acc, t) => acc + (t.customerStatus === "Paid" ? t.amount : 0),
+          0
+        );
+        const totalSettled = transactions.reduce((acc, t) => acc + t.supplierGross, 0);
+        const totalFees = transactions.reduce((acc, t) => acc + t.fee, 0);
+        const failedPayout = transactions.find((t) => t.repSettlement === "Rep failed");
 
-      {/* Alert Banner: One recipient payout failed */}
-      <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex items-start gap-3">
-        <span className="text-amber-700 font-bold text-sm">⚠</span>
-        <div className="text-amber-900 flex-1">
-          <span className="font-bold">One recipient payout failed</span>
-          <p className="text-[11px] text-amber-800 mt-0.5">
-            CT-1042 is paid. The ₦16,000 supplier payout is pending and Nia&apos;s ₦3,700 payout failed. Do not ask the customer to pay again.
-          </p>
-        </div>
-        <button
-          onClick={() => setActiveTab("detail")}
-          className="text-xs font-semibold text-emerald-800 hover:text-emerald-900 underline shrink-0"
-        >
-          Review CT-1042 →
-        </button>
-      </div>
+        return (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-[#0d5c3a] text-white rounded-2xl p-5 shadow-xs">
+                <div className="text-xs text-emerald-100 font-medium">Paid customer volume</div>
+                <div className="text-3xl font-extrabold mt-1">₦{totalVolume.toLocaleString()}</div>
+                <div className="text-[11px] text-emerald-200 mt-2">
+                  {transactions.length} confirmed orders · Filtered period
+                </div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
+                <div className="text-xs text-gray-500 font-medium">Store settlements</div>
+                <div className="text-3xl font-extrabold text-gray-900 mt-1">
+                  ₦{totalSettled.toLocaleString()}
+                </div>
+                <div className="text-[11px] text-gray-400 mt-2">Verified bank settlements</div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
+                <div className="text-xs text-gray-500 font-medium">Processing fees</div>
+                <div className="text-3xl font-extrabold text-gray-900 mt-1">
+                  ₦{totalFees.toLocaleString()}
+                </div>
+                <div className="text-[11px] text-gray-400 mt-2">Monnify gateway charges (~1.5%)</div>
+              </div>
+            </div>
+
+            {/* Alert Banner: Only if a recipient payout failed */}
+            {failedPayout && (
+              <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex items-start gap-3">
+                <span className="text-amber-700 font-bold text-sm">⚠</span>
+                <div className="text-amber-900 flex-1">
+                  <span className="font-bold">One recipient payout failed</span>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    {failedPayout.orderCode} is paid. The payout failed. Do not ask the customer to pay again.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setActiveTab("detail")}
+                  className="text-xs font-semibold text-emerald-800 hover:text-emerald-900 underline shrink-0"
+                >
+                  Review {failedPayout.orderCode} →
+                </button>
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* Transaction Ledger Card */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
@@ -1086,7 +1089,20 @@ export function PaymentsView({ initialTab = "splits", onNavigateToOrder }: Payme
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-gray-700">
-              {filteredTransactions.map((tx) => (
+              {filteredTransactions.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-xl mb-3">
+                      💳
+                    </div>
+                    <div className="text-xs font-bold text-gray-900">No payment transactions yet</div>
+                    <div className="text-[11px] text-gray-400 max-w-sm mx-auto mt-1">
+                      When customers transfer funds to dynamic virtual accounts generated via Monnify, verified settlements and split records will appear here in real time.
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredTransactions.map((tx) => (
                 <tr
                   key={tx.id}
                   onClick={() => setActiveTab("detail")}
@@ -1159,7 +1175,7 @@ export function PaymentsView({ initialTab = "splits", onNavigateToOrder }: Payme
                     )}
                   </td>
                 </tr>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>

@@ -28,70 +28,7 @@ export function NotificationsView({
 }: NotificationsViewProps) {
   const [filter, setFilter] = useState<"ALL" | "UNREAD" | "ORDERS" | "PAYOUTS" | "INVENTORY">("ALL");
 
-  const [notifications, setNotifications] = useState<NotificationRecord[]>([
-    {
-      id: "n-1",
-      title: "Split Settlement Complete",
-      message: "Customer paid ₦20,000 for CT-1042. Aroko Wholesale split (₦16,000) routed instantly via Monnify; ₦3,700 net commission credited to your account.",
-      category: "PAYOUTS",
-      timestamp: "12m ago",
-      read: false,
-      linkText: "View split transaction",
-      targetView: "payments",
-      targetRef: "CT-1042",
-    },
-    {
-      id: "n-2",
-      title: "New WhatsApp Inquiry via Co-Pilot",
-      message: "Tunde Bello (+2348029876543) inquired about 5.5L Digital Air Fryer. AI Co-Pilot provided live price and stock quote.",
-      category: "COPILOT",
-      timestamp: "45m ago",
-      read: false,
-      linkText: "View conversation",
-      targetView: "settings",
-    },
-    {
-      id: "n-3",
-      title: "Supplier Stock Update · Aroko Wholesale",
-      message: "Aroko Wholesale updated shared stock for Stainless Flask 750ml (AW-FL750) to 42 available units.",
-      category: "INVENTORY",
-      timestamp: "2h ago",
-      read: false,
-      linkText: "Inspect product stock",
-      targetView: "products",
-    },
-    {
-      id: "n-4",
-      title: "Order Ready for Pickup",
-      message: "Order CT-1041 has been packaged by Aroko Wholesale and pickup tag has been generated at the Ikeja hub.",
-      category: "ORDERS",
-      timestamp: "4h ago",
-      read: true,
-      linkText: "View order fulfillment",
-      targetView: "orders",
-      targetRef: "CT-1041",
-    },
-    {
-      id: "n-5",
-      title: "Monnify NUBAN Channel Verified",
-      message: "Wema Bank settlement account 7821948301 has been fully verified with NIBSS. Automatic daily sweeps are active.",
-      category: "PAYOUTS",
-      timestamp: "1d ago",
-      read: true,
-      linkText: "Review payout accounts",
-      targetView: "payments",
-    },
-    {
-      id: "n-6",
-      title: "Instagram Graph API Token Validated",
-      message: "Meta Commerce catalog connection refreshed. 6 products successfully synced to @niastores.ng storefront.",
-      category: "SYSTEM",
-      timestamp: "2d ago",
-      read: true,
-      linkText: "Check integrations",
-      targetView: "settings",
-    },
-  ]);
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
 
   // Notification Preferences State
   const [waNotifications, setWaNotifications] = useState(true);
@@ -186,8 +123,14 @@ export function NotificationsView({
           {/* Notifications Card List */}
           <div className="bg-white rounded-3xl border border-gray-100 shadow-2xs overflow-hidden divide-y divide-gray-100">
             {filteredNotifications.length === 0 ? (
-              <div className="p-12 text-center text-sm text-gray-400">
-                No notifications found in this category.
+              <div className="py-16 px-4 text-center text-gray-400 flex flex-col items-center justify-center">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+                  🔔
+                </div>
+                <p className="text-sm font-bold text-gray-900">No notifications yet</p>
+                <p className="text-xs text-gray-400 mt-1 max-w-sm">
+                  Instant escrow payout confirmations, buyer WhatsApp inquiry alerts, and low stock notices will stream here in real time.
+                </p>
               </div>
             ) : (
               filteredNotifications.map((n) => (

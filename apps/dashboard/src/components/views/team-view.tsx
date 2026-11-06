@@ -30,7 +30,11 @@ interface AuditEvent {
   details?: string;
 }
 
-export function TeamView() {
+interface TeamViewProps {
+  vendorName?: string;
+}
+
+export function TeamView({ vendorName }: TeamViewProps) {
   const [activeTab, setActiveTab] = useState<"roles" | "audit">("roles");
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [editMember, setEditMember] = useState<TeamMember | null>(null);
@@ -53,12 +57,12 @@ export function TeamView() {
   const [actorFilter, setActorFilter] = useState<string>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
 
-  // Sample Team Data
+  // Team Data (defaults to authenticated store owner)
   const [members, setMembers] = useState<TeamMember[]>([
     {
-      id: "mem-1",
-      name: "Nia Adewale",
-      email: "nia@niastores.ng",
+      id: "mem-owner",
+      name: vendorName || "Store Owner",
+      email: "owner@caterlog.store",
       role: "Owner",
       status: "Active",
       lastActive: "Now",
@@ -70,106 +74,10 @@ export function TeamView() {
         canOverrideCopilot: true,
       },
     },
-    {
-      id: "mem-2",
-      name: "Tola Williams",
-      email: "tola.w@niastores.ng",
-      role: "Store Manager",
-      status: "Active",
-      lastActive: "15m ago",
-      permissions: {
-        canManageOrders: true,
-        canManageInventory: true,
-        canViewPayouts: false,
-        canProcessRefunds: true,
-        canOverrideCopilot: true,
-      },
-    },
-    {
-      id: "mem-3",
-      name: "Bayo Olanrewaju",
-      email: "bayo.dispatch@gmail.com",
-      role: "Dispatch Coordinator",
-      status: "Active",
-      lastActive: "1h ago",
-      permissions: {
-        canManageOrders: true,
-        canManageInventory: false,
-        canViewPayouts: false,
-        canProcessRefunds: false,
-        canOverrideCopilot: false,
-      },
-    },
-    {
-      id: "mem-4",
-      name: "Chidinma Kalu",
-      email: "chidinma@finconsult.ng",
-      role: "Accountant",
-      status: "Invited",
-      lastActive: "Pending",
-      permissions: {
-        canManageOrders: false,
-        canManageInventory: false,
-        canViewPayouts: true,
-        canProcessRefunds: false,
-        canOverrideCopilot: false,
-      },
-    },
   ]);
 
-  // Sample Audit Trail
-  const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([
-    {
-      id: "aud-1",
-      actor: "Bayo Olanrewaju",
-      actorType: "STAFF",
-      action: "Dispatched Order for Pickup",
-      target: "CT-1042",
-      category: "ORDERS",
-      timestamp: "12m ago",
-      details: "Fulfillment tag handed to customer courier at Ikeja hub",
-    },
-    {
-      id: "aud-2",
-      actor: "Sales Co-Pilot",
-      actorType: "AI_COPILOT",
-      action: "Generated Monnify 10-Digit NUBAN",
-      target: "CT-1042 (₦20,000)",
-      category: "ORDERS",
-      timestamp: "32m ago",
-      details: "Virtual Wema account 7821948301 assigned with 15m hold",
-    },
-    {
-      id: "aud-3",
-      actor: "Monnify Webhook",
-      actorType: "MONNIFY",
-      action: "Split Settlement Cleared",
-      target: "GW-1042",
-      category: "PAYOUTS",
-      timestamp: "34m ago",
-      details: "Routed ₦16,000 to Aroko Wholesale (SUB-AW-001) & ₦3,700 net to Nia",
-    },
-    {
-      id: "aud-4",
-      actor: "Tola Williams",
-      actorType: "STAFF",
-      action: "Updated Selling Margin",
-      target: "AW-FL750",
-      category: "INVENTORY",
-      timestamp: "2h ago",
-      details: "Adjusted price from ₦9,500 to ₦10,000 (+25% markup)",
-    },
-    {
-      id: "aud-5",
-      actor: "Nia Adewale",
-      actorType: "OWNER",
-      action: "Reconnected Instagram Graph Token",
-      target: "@niastores.ng",
-      category: "SETTINGS",
-      timestamp: "5h ago",
-      details: "Granted catalog sync permissions for 60-day auto-renewal",
-    },
-  ]);
+  // Audit Trail (starts clean; filled as live operations occur)
+  const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
 
   // Handle Team Member Invitation
   const handleSendInvite = () => {
@@ -467,8 +375,14 @@ export function TeamView() {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
             <div className="divide-y divide-gray-100">
               {filteredAudit.length === 0 ? (
-                <div className="p-12 text-center text-sm text-gray-400">
-                  No activity found matching your filters.
+                <div className="p-12 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gray-50 text-gray-400 flex items-center justify-center mx-auto text-xl">
+                    📜
+                  </div>
+                  <div className="text-xs font-bold text-gray-900">No team audit logs yet</div>
+                  <div className="text-xs text-gray-400 max-w-sm mx-auto">
+                    Actions performed by store staff, riders, or automated webhook workers will be recorded here in an immutable audit ledger.
+                  </div>
                 </div>
               ) : (
                 filteredAudit.map((log) => (

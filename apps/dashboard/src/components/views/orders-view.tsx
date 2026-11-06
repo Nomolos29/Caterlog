@@ -240,10 +240,10 @@ export function OrdersView({
               <div className="p-4 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1">
                 <div className="font-bold text-blue-900 flex items-center gap-1.5">
                   <span>ℹ</span>
-                  <span>Awaiting supplier pickup confirmation</span>
+                  <span>Order Status Update</span>
                 </div>
                 <p className="text-[11px] text-blue-800 leading-relaxed">
-                  Aroko is preparing this order. Nia manages customer communication. No delivery time has been promised.
+                  Fulfillment is active for {selectedOrder.shortCode}. Customer communication is connected via WhatsApp.
                 </p>
               </div>
 
@@ -253,11 +253,11 @@ export function OrdersView({
                   disabled={supplierRequested}
                   className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-75 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
                 >
-                  {supplierRequested ? "✓ Update Dispatched to Aroko" : "Request supplier update"}
+                  {supplierRequested ? "✓ Fulfillment Notification Sent" : "Notify fulfillment team"}
                 </button>
                 <a
                   href={`https://wa.me/${selectedOrder.customerPhone.replace(/\+/g, "")}?text=${encodeURIComponent(
-                    `Hello ${selectedOrder.customerName}, regarding your Order ${selectedOrder.shortCode}: It is currently being prepared for pickup at our Ikeja center!`
+                    `Hello ${selectedOrder.customerName}, regarding your Order ${selectedOrder.shortCode}: It is currently being prepared for pickup at our fulfillment center!`
                   )}`}
                   target="_blank"
                   rel="noreferrer"
@@ -273,21 +273,21 @@ export function OrdersView({
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Conversation context</h3>
-                <p className="text-[11px] text-gray-400">WhatsApp · Thread WA-0882 · Sales co-pilot</p>
+                <p className="text-[11px] text-gray-400">WhatsApp · {selectedOrder.customerPhone} · Sales co-pilot</p>
               </div>
 
               <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-1">
-                <div className="font-semibold text-gray-900 text-xs">Oluchi Adeyemi · 10:14</div>
+                <div className="font-semibold text-gray-900 text-xs">{selectedOrder.customerName}</div>
                 <p className="text-gray-700 leading-relaxed">
-                  &ldquo;I&apos;d like two of the 750ml flasks for pickup. Please send the payment link.&rdquo;
+                  Purchased {selectedOrder.quantity}x {selectedOrder.productName} ({selectedOrder.shortCode}).
                 </p>
-                <div className="text-[10px] text-emerald-700 font-medium pt-1">Converted from chat</div>
+                <div className="text-[10px] text-emerald-700 font-medium pt-1">Verified Order Context</div>
               </div>
 
               <button
                 onClick={() => {
                   if (onNavigateToSettings) {
-                    onNavigateToSettings("detail", "WA-0882");
+                    onNavigateToSettings("conversations");
                   }
                 }}
                 className="text-xs text-emerald-700 hover:text-emerald-800 font-medium block pt-1 text-left"
@@ -542,8 +542,18 @@ export function OrdersView({
             <tbody className="divide-y divide-gray-100 text-gray-700">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-gray-400">
-                    No orders match your filter criteria.
+                  <td colSpan={6} className="py-12 text-center text-gray-400">
+                    <div className="flex flex-col items-center justify-center">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+                        🛒
+                      </div>
+                      <p className="text-sm font-bold text-gray-900">No orders found</p>
+                      <p className="text-xs text-gray-400 mt-1 max-w-sm">
+                        {orders.length === 0
+                          ? "New customer orders placed via WhatsApp or checkout links will appear here in real time."
+                          : "No orders match your selected filter criteria."}
+                      </p>
+                    </div>
                   </td>
                 </tr>
               ) : (

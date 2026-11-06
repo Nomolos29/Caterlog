@@ -220,46 +220,44 @@ export function OverviewView({
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Live</span>
           </div>
 
-          <div className="space-y-4 flex-1">
-            {orders.slice(0, 4).map((o, idx) => (
-              <div
-                key={o.id || idx}
-                onClick={() => onSelectOrder?.(o)}
-                className="flex items-start gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
-              >
-                <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
-                  <WhatsAppBadgeIcon className="w-4 h-4" />
+          <div className="space-y-3 flex-1 flex flex-col justify-center">
+            {orders.length === 0 ? (
+              <div className="py-8 text-center text-xs text-gray-400 flex flex-col items-center justify-center">
+                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-2 font-mono text-sm">
+                  ⚡
                 </div>
-                <div className="text-xs min-w-0 flex-1">
-                  <div className="text-gray-900 truncate">
-                    <span className="font-semibold">{o.customerName}</span> ordered <span className="font-medium">{o.productName}</span>
+                <p className="font-semibold text-gray-700">No activity yet</p>
+                <p className="text-[11px] text-gray-400 mt-1 max-w-[220px]">
+                  Incoming orders, buyer WhatsApp conversations, and Monnify escrow payments will appear here in real time.
+                </p>
+              </div>
+            ) : (
+              orders.slice(0, 5).map((o, idx) => (
+                <div
+                  key={o.id || idx}
+                  onClick={() => onSelectOrder?.(o)}
+                  className="flex items-start gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer"
+                >
+                  <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
+                    <WhatsAppBadgeIcon className="w-4 h-4" />
                   </div>
-                  <div className="text-gray-400 text-[11px] mt-0.5">
-                    {o.shortCode} • {o.totalAmountFormatted}
+                  <div className="text-xs min-w-0 flex-1">
+                    <div className="text-gray-900 truncate">
+                      <span className="font-semibold">{o.customerName}</span> ordered <span className="font-medium">{o.productName}</span>
+                    </div>
+                    <div className="text-gray-400 text-[11px] mt-0.5 flex items-center gap-1.5">
+                      <span>{o.shortCode}</span>
+                      <span>•</span>
+                      <span className="font-medium text-gray-700">{o.totalAmountFormatted}</span>
+                      <span>•</span>
+                      <span className={o.status === "PAID" ? "text-emerald-600 font-semibold" : "text-amber-600 font-medium"}>
+                        {o.status}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-
-            <div className="flex items-start gap-3 p-2">
-              <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
-                ✓
-              </div>
-              <div className="text-xs">
-                <div className="text-gray-900 font-semibold">Payment confirmed via Monnify</div>
-                <div className="text-gray-400 text-[11px] mt-0.5">Server verified escrow settlement</div>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3 p-2">
-              <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 shrink-0 flex items-center justify-center text-xs font-bold mt-0.5">
-                ★
-              </div>
-              <div className="text-xs">
-                <div className="text-gray-900 font-semibold">5-star verified review</div>
-                <div className="text-gray-400 text-[11px] mt-0.5">&quot;Fast delivery and super fresh!&quot;</div>
-              </div>
-            </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -284,8 +282,14 @@ export function OverviewView({
         </div>
 
         {needsAttention.length === 0 ? (
-          <div className="p-8 text-center text-sm text-gray-400">
-            No pending orders requiring attention. Great job!
+          <div className="py-12 px-4 text-center flex flex-col items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+              ✓
+            </div>
+            <p className="text-sm font-bold text-gray-900">All caught up!</p>
+            <p className="text-xs text-gray-400 mt-1 max-w-sm">
+              No pending orders or expiring checkout holds requiring attention right now.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
