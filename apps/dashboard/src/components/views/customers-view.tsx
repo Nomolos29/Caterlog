@@ -32,9 +32,7 @@ export function CustomersView({
   const [selectedTag, setSelectedTag] = useState<"ALL" | "VIP" | "Repeat" | "New">("ALL");
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerProfile | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "orders" | "notes">("overview");
-  const [customerNotes, setCustomerNotes] = useState<Record<string, string>>({
-    "08031234567": "Prefers morning deliveries before 11 AM. Gate code #402.",
-  });
+  const [customerNotes, setCustomerNotes] = useState<Record<string, string>>({});
   const [newNoteInput, setNewNoteInput] = useState("");
 
   // Aggregate customers solely from real orders
@@ -158,42 +156,51 @@ export function CustomersView({
         <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs">
           <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Total Customers</div>
           <div className="text-2xl font-extrabold text-gray-900 mt-2">{customers.length}</div>
-          <div className="text-xs text-emerald-600 font-semibold mt-1">Active verified Nigerian buyers</div>
+          <div className="text-xs text-gray-400 mt-1">
+            {customers.length === 0 ? "Awaiting first customer" : "Active verified buyers"}
+          </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs">
           <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Repeat Buyers</div>
           <div className="text-2xl font-extrabold text-emerald-700 mt-2">
             {customers.filter((c) => c.tag === "Repeat" || c.tag === "VIP").length}
           </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {Math.round(
-              (customers.filter((c) => c.tag === "Repeat" || c.tag === "VIP").length / (customers.length || 1)) * 100
-            )}
-            % retention rate
+          <div className="text-xs text-gray-400 mt-1">
+            {customers.length === 0
+              ? "0% repeat rate"
+              : `${Math.round(
+                  (customers.filter((c) => c.tag === "Repeat" || c.tag === "VIP").length / customers.length) * 100
+                )}% retention rate`}
           </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs">
           <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Average Lifetime Value</div>
           <div className="text-2xl font-extrabold text-gray-900 mt-2">
             ₦
-            {Math.round(
-              customers.reduce((acc, c) => acc + c.totalSpentNaira, 0) / (customers.length || 1)
-            ).toLocaleString()}
+            {customers.length === 0
+              ? "0"
+              : Math.round(
+                  customers.reduce((acc, c) => acc + c.totalSpentNaira, 0) / customers.length
+                ).toLocaleString()}
           </div>
-          <div className="text-xs text-gray-500 mt-1">Across all order channels</div>
+          <div className="text-xs text-gray-400 mt-1">
+            {customers.length === 0 ? "Awaiting first sale" : "Across all order channels"}
+          </div>
         </div>
       </div>
 
       {/* Customers Content */}
       {customers.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl font-bold">
+        <div className="bg-white rounded-3xl border border-gray-100 p-10 sm:p-14 text-center shadow-2xs space-y-4">
+          <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-3xl font-bold shadow-2xs">
             👥
           </div>
-          <h3 className="text-base font-bold text-gray-900">No Customers Recorded Yet</h3>
-          <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
-            When buyers contact your store via WhatsApp or complete orders through generated payment invoices, their contact details, order frequency, and delivery addresses will automatically appear here.
-          </p>
+          <div className="max-w-md mx-auto space-y-1.5">
+            <h3 className="text-lg font-bold text-gray-900">Your WhatsApp Customer Directory is Empty</h3>
+            <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
+              When customers message your connected WhatsApp Business account or purchase through your store link, their profile, phone number, order history, and delivery addresses will automatically populate here.
+            </p>
+          </div>
         </div>
       ) : (
         <>

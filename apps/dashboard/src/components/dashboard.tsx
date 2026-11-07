@@ -242,10 +242,17 @@ export function Dashboard() {
     if (res.state) setState(res.state);
   };
 
-  const handleSendBuyerInquiry = async (text: string, phash?: string) => {
+  const handleSendBuyerInquiry = async (
+    text: string,
+    phash?: string,
+    buyerPhone?: string,
+    buyerName?: string
+  ) => {
     const res = await api.simulateWhatsApp({
       role: "BUYER_INQUIRY",
       text,
+      buyerPhone: buyerPhone || undefined,
+      buyerName: buyerName || undefined,
       quotedStatusImagePhash: phash,
       simulateFastForwardIdleTimer: true,
     });
@@ -511,9 +518,13 @@ export function Dashboard() {
         isOpen={simulatorOpen}
         onClose={() => setSimulatorOpen(false)}
         chatMessages={state.chatMessages}
+        orders={state.orders}
+        products={state.products}
+        vendor={state.vendor}
         onSendVendorKeyword={handleSendVendorKeyword}
         onSendBuyerInquiry={handleSendBuyerInquiry}
         onSendVendorManualEcho={handleSendVendorManualEcho}
+        onSimulateTransfer={handleSimulateTransfer}
       />
     </div>
   );

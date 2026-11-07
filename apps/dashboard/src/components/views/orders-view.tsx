@@ -525,89 +525,125 @@ export function OrdersView({
         )}
       </div>
 
-      {/* Orders Table */}
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[680px]">
-            <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              <tr>
-                <th className="py-3.5 px-5">Order ID</th>
-                <th className="py-3.5 px-5">Customer</th>
-                <th className="py-3.5 px-5">Product</th>
-                <th className="py-3.5 px-5">Amount</th>
-                <th className="py-3.5 px-5">Status</th>
-                <th className="py-3.5 px-5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 text-gray-700">
-              {filteredOrders.length === 0 ? (
+      {/* Orders Content: Dedicated Clean Account Guide vs Table */}
+      {orders.length === 0 ? (
+        <div className="bg-white rounded-3xl border border-gray-100 p-10 sm:p-14 text-center shadow-2xs space-y-6">
+          <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-3xl font-bold shadow-2xs">
+            🛍️
+          </div>
+          <div className="max-w-md mx-auto space-y-2">
+            <h3 className="text-lg font-bold text-gray-900">No Orders Placed Yet</h3>
+            <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
+              When customers send inquiries to your WhatsApp Business number or checkout with your store link, Caterlog will handle stock reservations, invoice delivery, and bank transfer reconciliation automatically.
+            </p>
+          </div>
+
+          <div className="max-w-2xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-left pt-2">
+            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100 space-y-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                1. Inbound Chat
+              </span>
+              <p className="text-xs font-semibold text-gray-900">Buyer chats WhatsApp</p>
+              <p className="text-[11px] text-gray-400 leading-normal">Buyer inquires about product stock or replies to your WhatsApp status.</p>
+            </div>
+            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100 space-y-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                2. Instant NUBAN
+              </span>
+              <p className="text-xs font-semibold text-gray-900">Co-Pilot sends invoice</p>
+              <p className="text-[11px] text-gray-400 leading-normal">AI locks stock for 15 mins and sends dedicated Monnify NUBAN transfer account.</p>
+            </div>
+            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100 space-y-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                3. Auto Verified
+              </span>
+              <p className="text-xs font-semibold text-gray-900">Order appears here</p>
+              <p className="text-[11px] text-gray-400 leading-normal">Payment reconciles via server webhook; live order streams to this table.</p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[680px]">
+              <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-gray-400">
-                    <div className="flex flex-col items-center justify-center">
-                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
-                        🛒
-                      </div>
-                      <p className="text-sm font-bold text-gray-900">No orders found</p>
-                      <p className="text-xs text-gray-400 mt-1 max-w-sm">
-                        {orders.length === 0
-                          ? "New customer orders placed via WhatsApp or checkout links will appear here in real time."
-                          : "No orders match your selected filter criteria."}
-                      </p>
-                    </div>
-                  </td>
+                  <th className="py-3.5 px-5">Order ID</th>
+                  <th className="py-3.5 px-5">Customer</th>
+                  <th className="py-3.5 px-5">Product</th>
+                  <th className="py-3.5 px-5">Amount</th>
+                  <th className="py-3.5 px-5">Status</th>
+                  <th className="py-3.5 px-5 text-right">Actions</th>
                 </tr>
-              ) : (
-                filteredOrders.map((o) => (
-                  <tr
-                    key={o.id}
-                    onClick={() => onSelectOrder(o)}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
-                  >
-                    <td className="py-3.5 px-5">
-                      <span className="font-mono font-bold text-gray-900">{o.shortCode}</span>
-                    </td>
-                    <td className="py-3.5 px-5">
-                      <div className="font-semibold text-gray-900">{o.customerName}</div>
-                      <div className="text-[11px] text-gray-400">{o.customerPhone}</div>
-                    </td>
-                    <td className="py-3.5 px-5">
-                      <div className="font-medium text-gray-900">{o.productName}</div>
-                      <div className="text-[11px] text-gray-400">{o.quantity} unit(s)</div>
-                    </td>
-                    <td className="py-3.5 px-5 font-bold text-gray-900">
-                      {o.totalAmountFormatted || `₦${o.totalAmountNaira.toLocaleString()}`}
-                    </td>
-                    <td className="py-3.5 px-5">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          o.status === "PAID"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : o.status === "PENDING_PAYMENT"
-                            ? "bg-amber-100 text-amber-800"
-                            : "bg-blue-100 text-blue-800"
-                        }`}
-                      >
-                        {o.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-5 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectOrder(o);
-                        }}
-                        className="px-3 py-1 border border-gray-300 hover:border-emerald-600 hover:bg-emerald-50 text-gray-700 hover:text-emerald-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
-                      >
-                        View detail →
-                      </button>
+              </thead>
+              <tbody className="divide-y divide-gray-100 text-gray-700">
+                {filteredOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-gray-400">
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+                          🛒
+                        </div>
+                        <p className="text-sm font-bold text-gray-900">No matching orders found</p>
+                        <p className="text-xs text-gray-400 mt-1 max-w-sm">
+                          No orders match your selected filter criteria.
+                        </p>
+                      </div>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  filteredOrders.map((o) => (
+                    <tr
+                      key={o.id}
+                      onClick={() => onSelectOrder(o)}
+                      className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    >
+                      <td className="py-3.5 px-5">
+                        <span className="font-mono font-bold text-gray-900">{o.shortCode}</span>
+                      </td>
+                      <td className="py-3.5 px-5">
+                        <div className="font-semibold text-gray-900">{o.customerName}</div>
+                        <div className="text-[11px] text-gray-400">{o.customerPhone}</div>
+                      </td>
+                      <td className="py-3.5 px-5">
+                        <div className="font-medium text-gray-900">{o.productName}</div>
+                        <div className="text-[11px] text-gray-400">{o.quantity} unit(s)</div>
+                      </td>
+                      <td className="py-3.5 px-5 font-bold text-gray-900">
+                        {o.totalAmountFormatted || `₦${o.totalAmountNaira.toLocaleString()}`}
+                      </td>
+                      <td className="py-3.5 px-5">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            o.status === "PAID"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : o.status === "PENDING_PAYMENT"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-blue-100 text-blue-800"
+                          }`}
+                        >
+                          {o.status}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-5 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectOrder(o);
+                          }}
+                          className="px-3 py-1 border border-gray-300 hover:border-emerald-600 hover:bg-emerald-50 text-gray-700 hover:text-emerald-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+                        >
+                          View detail →
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Filter Modal */}
       {showFilterModal && (

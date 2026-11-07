@@ -165,292 +165,39 @@ export function ProductsView({
   /* Screen 5: Products · Mirror and set margins (Wizard)                        */
   /* -------------------------------------------------------------------------- */
   if (activeTab === "mirror-wizard") {
-    const fPrice = Number(flaskPrice) || 8000;
-    const lPrice = Number(lunchBoxPrice) || 6000;
-    const jPrice = Number(jarPrice) || 3000;
-
     return (
       <div className="space-y-6 max-w-6xl mx-auto pb-24">
-        {/* Breadcrumb & Title */}
         <div>
-          <div className="text-xs text-gray-500 mb-1">
-            Network / Aroko Wholesale / Mirror products
-          </div>
+          <button
+            onClick={() => setActiveTab("my-inventory")}
+            className="text-xs font-semibold text-gray-500 hover:text-gray-900 mb-2 flex items-center gap-1 cursor-pointer"
+          >
+            ← Back to products
+          </button>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-            Mirror products &amp; set margins
+            Mirror Products &amp; Set Margins
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Choose what Nia Stores charges. Supplier costs and master stock stay linked.
+            Link products from verified wholesale suppliers and set your custom retail markup.
           </p>
         </div>
 
-        {/* 3-Step Wizard Navigation */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs font-semibold">
-          <button
-            onClick={() => {
-              if (onNavigateToNetwork) onNavigateToNetwork("catalog");
-            }}
-            className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors"
-          >
-            ✓ 1 Select products
-          </button>
-          <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
-            2 Set prices
-          </span>
-          <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-500">
-            3 Review &amp; publish
-          </span>
-        </div>
-
-        {/* Linked products configuration table */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-gray-900">Your linked products</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Supplier: Aroko Wholesale · Open catalog · No approval needed</p>
+        <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl font-bold">
+            🤝
           </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[620px]">
-              <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3">Product / Supplier SKU</th>
-                  <th className="px-4 py-3">Cost</th>
-                  <th className="px-4 py-3">Selling Price</th>
-                  <th className="px-4 py-3">Markup</th>
-                  <th className="px-4 py-3 text-right">Gross Margin</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-gray-700">
-                {/* Flask */}
-                <tr>
-                  <td className="px-4 py-3.5">
-                    <div className="font-semibold text-gray-900">Stainless flask · 750ml</div>
-                    <div className="text-[11px] text-gray-400">AW-FL750</div>
-                  </td>
-                  <td className="px-4 py-3.5 font-medium">₦8,000</td>
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-gray-400">NGN</span>
-                      <input
-                        type="number"
-                        value={flaskPrice}
-                        onChange={(e) => setFlaskPrice(e.target.value)}
-                        className={`w-28 px-2.5 py-1.5 border rounded-lg text-xs ${
-                          fPrice < 8000 ? "border-rose-400 bg-rose-50" : "border-gray-200"
-                        }`}
-                      />
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {Math.round(((fPrice - 8000) / 8000) * 100)}%
-                  </td>
-                  <td className="px-4 py-3.5 text-right font-medium text-emerald-700">
-                    ₦{(fPrice - 8000).toLocaleString()} · {Math.round(((fPrice - 8000) / (fPrice || 1)) * 100)}%
-                  </td>
-                </tr>
-
-                {/* Lunch Box */}
-                <tr>
-                  <td className="px-4 py-3.5">
-                    <div className="font-semibold text-gray-900">Lunch box · 1.2L</div>
-                    <div className="text-[11px] text-gray-400">AW-LB1200</div>
-                  </td>
-                  <td className="px-4 py-3.5 font-medium">₦6,000</td>
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-gray-400">NGN</span>
-                      <input
-                        type="number"
-                        value={lunchBoxPrice}
-                        onChange={(e) => setLunchBoxPrice(e.target.value)}
-                        className="w-28 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs"
-                      />
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {Math.round(((lPrice - 6000) / 6000) * 100)}%
-                  </td>
-                  <td className="px-4 py-3.5 text-right font-medium text-emerald-700">
-                    ₦{(lPrice - 6000).toLocaleString()} · {Math.round(((lPrice - 6000) / (lPrice || 1)) * 100)}%
-                  </td>
-                </tr>
-
-                {/* Storage jar */}
-                <tr>
-                  <td className="px-4 py-3.5">
-                    <div className="font-semibold text-gray-900">Storage jar · 1L</div>
-                    <div className="text-[11px] text-gray-400">AW-SJ1000</div>
-                  </td>
-                  <td className="px-4 py-3.5 font-medium">₦3,000</td>
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-gray-400">NGN</span>
-                      <input
-                        type="number"
-                        value={jarPrice}
-                        onChange={(e) => setJarPrice(e.target.value)}
-                        className="w-28 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs"
-                      />
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {Math.round(((jPrice - 3000) / 3000) * 100)}%
-                  </td>
-                  <td className="px-4 py-3.5 text-right font-medium text-emerald-700">
-                    ₦{(jPrice - 3000).toLocaleString()} · {Math.round(((jPrice - 3000) / (jPrice || 1)) * 100)}%
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <p className="text-[11px] text-gray-400 pt-1">
-            Markup = profit ÷ cost. Margin = profit ÷ selling price. Gross margin excludes fees.
+          <h3 className="text-base font-bold text-gray-900">No Supplier Products Selected</h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
+            Visit the Supplier Network directory to select items from verified wholesale importers before configuring retail markup.
           </p>
-        </div>
-
-        {/* 2 Column Bottom: Channels & Review */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: Channels & Price Validation */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-              <h3 className="text-sm font-bold text-gray-900">Choose selling channels</h3>
-
-              <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                <div>
-                  <div className="text-xs font-semibold text-gray-900">Caterlog storefront</div>
-                  <div className="text-[11px] text-gray-400">Publish all 3 products to Nia Stores.</div>
-                </div>
-                <button
-                  onClick={() => setStorefrontChannel(!storefrontChannel)}
-                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                    storefrontChannel ? "bg-[#0d5c3a]" : "bg-gray-200"
-                  }`}
-                >
-                  <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      storefrontChannel ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                <div>
-                  <div className="text-xs font-semibold text-gray-900">WhatsApp catalog</div>
-                  <div className="text-[11px] text-gray-400">Connected · +234 800 000 0142</div>
-                </div>
-                <button
-                  onClick={() => setWhatsappChannel(!whatsappChannel)}
-                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                    whatsappChannel ? "bg-[#0d5c3a]" : "bg-gray-200"
-                  }`}
-                >
-                  <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      whatsappChannel ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <div className="text-xs font-semibold text-gray-900">Instagram</div>
-                  <div className="text-[11px] text-gray-400">
-                    {instagramChannel ? "Connected · Published" : "Not connected · Connect in Settings before publishing."}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setInstagramChannel(!instagramChannel)}
-                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                    instagramChannel ? "bg-[#0d5c3a]" : "bg-gray-200"
-                  }`}
-                >
-                  <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      instagramChannel ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-
-            {/* Price validation alert */}
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1">
-              <div className="font-bold text-amber-900 flex items-center gap-1.5">
-                <span>⚠</span>
-                <span>Price validation</span>
-              </div>
-              <p className="text-[11px] text-amber-800 leading-relaxed">
-                A selling price below the supplier cost cannot be published. For the flask, enter at least ₦8,000; set a higher price to leave room for payment fees.
-              </p>
-            </div>
-          </div>
-
-          {/* Right: Review before publishing */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-            <h3 className="text-xs font-bold text-gray-900">Review before publishing</h3>
-            <div className="divide-y divide-gray-100">
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Linked products</span>
-                <span className="font-semibold text-gray-900">3</span>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Featured price</span>
-                <span className="font-semibold text-gray-900">₦{fPrice.toLocaleString()} / flask</span>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Two-unit sale</span>
-                <span className="font-semibold text-gray-900">₦{(fPrice * 2).toLocaleString()}</span>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Supplier allocation</span>
-                <span className="font-semibold text-gray-900">₦16,000</span>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Gross margin</span>
-                <span className="font-semibold text-emerald-700">₦{((fPrice - 8000) * 2).toLocaleString()}</span>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Sample rep fee</span>
-                <span className="font-semibold text-gray-900">₦300</span>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Net rep earnings</span>
-                <span className="font-bold text-emerald-800">
-                  ₦{Math.max(0, (fPrice - 8000) * 2 - 300).toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            <p className="text-[10px] text-gray-400">
-              Gateway account readiness is checked before a customer can pay.
-            </p>
-          </div>
-        </div>
-
-        {/* Sticky Bottom Wizard Bar */}
-        <div className="fixed bottom-0 left-0 lg:left-64 right-0 bg-white border-t border-gray-200 py-3 px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-end gap-3 z-30 shadow-lg">
-          {wizardSuccess && (
-            <span className="text-xs font-semibold text-emerald-700 mr-auto">
-              ✓ 3 products successfully published with live supplier sync!
-            </span>
+          {onNavigateToNetwork && (
+            <button
+              onClick={() => onNavigateToNetwork("find-suppliers")}
+              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
+            >
+              Browse Verified Suppliers →
+            </button>
           )}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveTab("reselling")}
-              className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              Back to catalog
-            </button>
-            <button
-              onClick={handlePublishWizard}
-              className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs"
-            >
-              Publish 3 linked products
-            </button>
-          </div>
         </div>
       </div>
     );
@@ -474,413 +221,49 @@ export function ProductsView({
         </div>
 
         {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
           <button
             onClick={() => setActiveTab("all")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             All products
           </button>
           <button
             onClick={() => setActiveTab("my-inventory")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             My inventory
           </button>
           <button
             onClick={() => setActiveTab("reselling")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
-            Reselling (3)
+            Reselling ({resellingList.length})
           </button>
           <button
             onClick={() => setActiveTab("exceptions")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
+            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
           >
-            Selling exceptions (3)
+            Selling exceptions (0)
           </button>
         </div>
 
-        {/* Sub-Filter Tabs */}
-        <div className="flex flex-wrap gap-2">
+        {/* Clean Empty State */}
+        <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl font-bold">
+            ✓
+          </div>
+          <h3 className="text-base font-bold text-gray-900">No Selling Exceptions</h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
+            All catalog products, wholesale prices, and WhatsApp stock guardrails are in sync. When a supplier updates pricing or items run low, action items will appear here.
+          </p>
           <button
-            onClick={() => setExceptionFilter("all")}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              exceptionFilter === "all" ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-gray-100 text-gray-600"
-            }`}
+            onClick={() => setActiveTab("my-inventory")}
+            className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
           >
-            All exceptions (3)
-          </button>
-          <button
-            onClick={() => setExceptionFilter("price")}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              exceptionFilter === "price" ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-gray-100 text-gray-600"
-            }`}
-          >
-            Price changes (1)
-          </button>
-          <button
-            onClick={() => setExceptionFilter("stock")}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              exceptionFilter === "stock" ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-gray-100 text-gray-600"
-            }`}
-          >
-            Stock conflicts (1)
-          </button>
-          <button
-            onClick={() => setExceptionFilter("automation")}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              exceptionFilter === "automation" ? "bg-emerald-100 text-emerald-800 font-bold" : "bg-gray-100 text-gray-600"
-            }`}
-          >
-            Automation (1)
+            Manage Inventory →
           </button>
         </div>
-
-        {/* Top Info Banner */}
-        <div className="p-4 bg-blue-50/70 border border-blue-100 rounded-xl text-xs flex items-start gap-3">
-          <span className="text-blue-600 font-bold">ℹ</span>
-          <div className="text-blue-900">
-            <span className="font-bold">Separate scenario examples</span>
-            <p className="text-[11px] text-blue-800 mt-0.5 leading-relaxed">
-              Each panel below is an independent operational example. They are not simultaneous stock or pricing states for paid order CT-1042. That order retains its original ₦8,000 supplier cost and ₦20,000 payment.
-            </p>
-          </div>
-        </div>
-
-        {/* Exception 1: Supplier-price change */}
-        {(exceptionFilter === "all" || exceptionFilter === "price") && (
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">
-                  Supplier-price change · scenario example
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Aroko Wholesale → Stainless flask · AW-FL750
-                </p>
-              </div>
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                  exception1Resolved ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
-                }`}
-              >
-                {exception1Resolved ? "Resolved · Reopened" : "Review required"}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-xl text-xs">
-              <div>
-                <div className="text-[11px] text-gray-400 uppercase font-semibold">Current Supplier Cost</div>
-                <div className="text-sm font-bold text-gray-900 mt-1">₦8,000</div>
-              </div>
-              <div>
-                <div className="text-[11px] text-gray-400 uppercase font-semibold">New Supplier Cost</div>
-                <div className="text-sm font-bold text-rose-700 mt-1">₦8,500 <span className="text-xs text-gray-500 font-normal">· +₦500</span></div>
-              </div>
-              <div>
-                <div className="text-[11px] text-gray-400 uppercase font-semibold">Your Selling Price</div>
-                <div className="text-sm font-bold text-gray-900 mt-1">
-                  ₦{exception1Resolved ? Number(proposedPrice).toLocaleString() : "10,000"}
-                </div>
-              </div>
-              <div>
-                <div className="text-[11px] text-gray-400 uppercase font-semibold">Gross Margin Impact</div>
-                <div className="text-xs font-semibold text-amber-800 mt-1">
-                  {exception1Resolved ? (
-                    <span className="text-emerald-700">₦2,000 / unit (19.0%)</span>
-                  ) : (
-                    <>
-                      ₦2,000 → ₦1,500 / unit <br />
-                      <span className="text-[10px] text-gray-500">20% → 15%</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Proposed selling price (NGN)
-                </label>
-                <input
-                  type="number"
-                  value={proposedPrice}
-                  onChange={(e) => setProposedPrice(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
-                />
-                <p className="text-[11px] text-gray-500 mt-1.5">
-                  Restores ₦2,000 gross profit per unit; margin becomes 19.0%.
-                </p>
-                <p className="text-[11px] text-gray-400 mt-0.5">
-                  New two-unit example: customer ₦21,000; supplier ₦17,000; reseller gross ₦4,000 before fees.
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <p className="text-xs text-gray-600">
-                  {exception1Resolved
-                    ? "New price applied and listing resumed. Customers can checkout at the updated price."
-                    : "Listing paused for review. Accept the new supplier cost and confirm your price before reopening checkout."}
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      setException1Resolved(true);
-                      setResellingList((prev) =>
-                        prev.map((item) =>
-                          item.sku === "AW-FL750"
-                            ? { ...item, sellingPrice: Number(proposedPrice) || 10500, status: "Synced" }
-                            : item
-                        )
-                      );
-                    }}
-                    className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
-                  >
-                    Accept &amp; apply ₦{Number(proposedPrice || 0).toLocaleString()}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setException1Resolved(false);
-                      handleToggleListingPause("AW-FL750");
-                    }}
-                    className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-                  >
-                    Keep paused
-                  </button>
-                </div>
-                <p className="text-[10px] text-gray-400">
-                  Existing paid orders keep their captured allocation. Review new checkouts only.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Exception 2: Stock exhausted before payment */}
-        {(exceptionFilter === "all" || exceptionFilter === "stock") && (
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">
-                  Stock exhausted before payment · scenario example
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Draft checkout CT-D204 · 2 × Stainless flask
-                </p>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800">
-                Checkout blocked
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3 text-xs">
-                <div className="divide-y divide-gray-100">
-                  <div className="py-2 flex justify-between">
-                    <span className="text-gray-500">Last viewed stock</span>
-                    <span className="font-semibold text-gray-900">2 units</span>
-                  </div>
-                  <div className="py-2 flex justify-between">
-                    <span className="text-gray-500">Latest server check</span>
-                    <span className="font-bold text-rose-600">0 available</span>
-                  </div>
-                  <div className="py-2 flex justify-between">
-                    <span className="text-gray-500">Payment status</span>
-                    <span className="font-semibold text-gray-900">Not charged</span>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs space-y-1">
-                  <div className="font-bold text-rose-800 flex items-center gap-1.5">
-                    <span>⚠</span>
-                    <span>Do not collect payment for unavailable stock</span>
-                  </div>
-                  <p className="text-[11px] text-rose-700 leading-relaxed">
-                    The payment link is disabled after the final inventory check. No order allocation or supplier payout was created.
-                  </p>
-                </div>
-
-                <div className="flex gap-2 pt-1">
-                  <button
-                    disabled
-                    className="px-3 py-1.5 bg-gray-100 text-gray-400 text-xs font-medium rounded-lg cursor-not-allowed"
-                  >
-                    Checkout disabled
-                  </button>
-                  <button
-                    onClick={() => {
-                      setStockRechecked(true);
-                      setTimeout(() => setStockRechecked(false), 2000);
-                    }}
-                    className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-                  >
-                    {stockRechecked ? "Rechecking Aroko stock..." : "Recheck stock"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Customer notification preview */}
-              <div className="space-y-3">
-                <div className="text-xs font-bold text-gray-900">Customer notification preview</div>
-                <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-800 leading-relaxed">
-                  &ldquo;The flask sold out before payment completed. Your payment link has been disabled and you have not been charged. We can let you know when it is back in stock.&rdquo;
-                </div>
-                {customerNotified && (
-                  <div className="text-[11px] text-emerald-800 bg-emerald-50 p-2 rounded">
-                    ✓ Notification sent to customer on WhatsApp.
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      setCustomerNotified(true);
-                      setTimeout(() => setCustomerNotified(false), 3000);
-                    }}
-                    className="px-3.5 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
-                  >
-                    Notify customer
-                  </button>
-                  <button
-                    onClick={() => alert("Draft checkout CT-D204 status: Disabled (No payment collected)")}
-                    className="px-3.5 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-                  >
-                    View draft checkout
-                  </button>
-                </div>
-                <p className="text-[10px] text-gray-400">
-                  Notification not sent yet. Restock timing must be confirmed by the supplier.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Exception 3: Automation escalation */}
-        {(exceptionFilter === "all" || exceptionFilter === "automation") && (
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">
-                  Automation escalation · scenario example
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Settings / Sales co-pilot / WA-0882 · Actual unresolved request
-                </p>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                Needs merchant
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
-              <div className="space-y-3">
-                <div className="font-semibold text-gray-900 text-sm">
-                  &ldquo;Can you deliver it to Lekki before 4pm today?&rdquo;
-                </div>
-                <div className="divide-y divide-gray-100">
-                  <div className="py-2 flex justify-between">
-                    <span className="text-gray-500">Guardrail triggered</span>
-                    <span className="font-semibold text-gray-900">Delivery commitment</span>
-                  </div>
-                  <div className="py-2 flex justify-between">
-                    <span className="text-gray-500">Order CT-1042</span>
-                    <span className="font-semibold text-gray-900">Paid · Preparing for pickup</span>
-                  </div>
-                  <div className="py-2 flex justify-between">
-                    <span className="text-gray-500">Automation</span>
-                    <span className="font-semibold text-amber-800">Paused in thread</span>
-                  </div>
-                </div>
-                <p className="text-[11px] text-gray-400">
-                  This is a new request after payment. Do not change the order&apos;s fulfillment terms without confirmation.
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <div className="font-bold text-gray-900">Confirm with supplier, then reply</div>
-                <p className="text-gray-600 text-xs">
-                  Contact Aroko about delivery feasibility and cost. Take over the conversation; automation remains paused until you choose to resume.
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      if (onNavigateToSettings) {
-                        onNavigateToSettings("detail", "WA-0882");
-                      }
-                    }}
-                    className="px-3.5 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
-                  >
-                    Take over in Settings →
-                  </button>
-                  <button
-                    onClick={() => setSupplierMsgModal(true)}
-                    className="px-3.5 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-                  >
-                    Message supplier
-                  </button>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-500 mb-1">
-                    Internal resolution note
-                  </label>
-                  <input
-                    type="text"
-                    value={internalNote}
-                    onChange={(e) => setInternalNote(e.target.value)}
-                    className="w-full text-xs px-3 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Message Supplier Modal */}
-        {supplierMsgModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="font-bold text-gray-900 text-sm">Message Aroko Wholesale</h3>
-                <button onClick={() => setSupplierMsgModal(false)} className="text-gray-400 hover:text-gray-600">
-                  ✕
-                </button>
-              </div>
-              <textarea
-                rows={4}
-                value={supplierMsgText}
-                onChange={(e) => setSupplierMsgText(e.target.value)}
-                className="w-full text-xs p-3 border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600"
-              />
-              {supplierMsgSent && (
-                <div className="text-xs text-emerald-800 bg-emerald-50 p-2 rounded">
-                  ✓ Inquiry sent to Aroko Wholesale representative on WhatsApp!
-                </div>
-              )}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setSupplierMsgSent(true);
-                    setTimeout(() => {
-                      setSupplierMsgSent(false);
-                      setSupplierMsgModal(false);
-                    }, 1500);
-                  }}
-                  className="flex-1 py-2 bg-[#0d5c3a] text-white text-xs font-semibold rounded-lg hover:bg-[#0b4b2f]"
-                >
-                  Send Message
-                </button>
-                <button
-                  onClick={() => setSupplierMsgModal(false)}
-                  className="px-4 py-2 border border-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -1252,7 +635,7 @@ export function ProductsView({
           onClick={() => setActiveTab("exceptions")}
           className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
         >
-          Selling exceptions (3)
+          Selling exceptions (0)
         </button>
       </div>
 

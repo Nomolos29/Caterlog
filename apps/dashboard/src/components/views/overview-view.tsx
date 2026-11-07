@@ -59,6 +59,66 @@ export function OverviewView({
         </div>
       </div>
 
+      {/* Onboarding Checklist for newly connected WhatsApp Business account */}
+      {orders.length === 0 && (
+        <div className="bg-gradient-to-r from-emerald-950 via-[#0d5c3a] to-emerald-900 text-white rounded-3xl p-6 sm:p-8 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-800/80 text-emerald-200 text-xs font-semibold mb-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>WhatsApp Business Connected: {vendor.whatsappPhone || "+234 Active"}</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold">Welcome to Caterlog, {vendor.businessName}!</h2>
+              <p className="text-xs sm:text-sm text-emerald-100/90 mt-1 max-w-xl">
+                Your store and AI Sales Co-Pilot are ready. Complete these setup steps to start receiving automated orders and verified Monnify bank transfers.
+              </p>
+            </div>
+            <div className="text-left sm:text-right">
+              <span className="text-3xl font-black text-emerald-300">1/3</span>
+              <div className="text-[11px] text-emerald-200 uppercase tracking-wider font-bold">Setup Completed</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+            {/* Step 1: WhatsApp Connected */}
+            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">Step 1 · Ready</span>
+                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">✓</span>
+              </div>
+              <div className="font-bold text-sm text-white">WhatsApp Connected</div>
+              <p className="text-xs text-emerald-100/80">
+                Coexistence engine connected. Co-Pilot is listening for buyer inquiries.
+              </p>
+            </div>
+
+            {/* Step 2: Add Products */}
+            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">Step 2 · Action Required</span>
+                <span className="w-5 h-5 rounded-full bg-amber-400 text-gray-900 flex items-center justify-center text-xs font-bold">2</span>
+              </div>
+              <div className="font-bold text-sm text-white">Add Store Products</div>
+              <p className="text-xs text-emerald-100/80">
+                Add items with prices and stock so Co-Pilot knows what to sell.
+              </p>
+            </div>
+
+            {/* Step 3: Test Co-Pilot */}
+            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-200/70 uppercase tracking-wider">Step 3 · Verification</span>
+                <span className="w-5 h-5 rounded-full bg-white/20 text-white flex items-center justify-center text-xs font-bold">3</span>
+              </div>
+              <div className="font-bold text-sm text-white">Test WhatsApp Checkout</div>
+              <p className="text-xs text-emerald-100/80">
+                Message your WhatsApp number to test instant stock check &amp; NUBAN invoice.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 4 Top KPI Metric Cards (Interactive) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* TOTAL REVENUE */}
@@ -76,10 +136,16 @@ export function OverviewView({
           </div>
           <div className="mt-4">
             <div className="text-2xl font-extrabold text-gray-900">{analytics.paidGrossFormatted}</div>
-            <div className="flex items-center gap-1.5 mt-1 text-xs font-semibold text-emerald-600">
-              <span>↑ 12%</span>
-              <span className="text-gray-400 font-normal">vs last 30 days</span>
-            </div>
+            {orders.length === 0 ? (
+              <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 font-normal">
+                <span>Awaiting first customer payment</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 mt-1 text-xs font-semibold text-emerald-600">
+                <span>↑ 12%</span>
+                <span className="text-gray-400 font-normal">vs last 30 days</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -179,38 +245,60 @@ export function OverviewView({
             </div>
           </div>
 
-          {/* Stylized SVG Trend Curve */}
-          <div className="my-6 relative">
-            <div className="h-44 w-full flex items-end">
-              <svg className="w-full h-full overflow-visible" viewBox="0 0 500 150" fill="none" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10B981" stopOpacity="0.25" />
-                    <stop offset="100%" stopColor="#10B981" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-                <path
-                  d="M0 110 C 100 100, 180 130, 260 110 C 340 90, 420 30, 500 45 L 500 150 L 0 150 Z"
-                  fill="url(#revenueGradient)"
-                />
-                <path
-                  d="M0 110 C 100 100, 180 130, 260 110 C 340 90, 420 30, 500 45"
-                  stroke="#10B981"
-                  strokeWidth="4"
-                  strokeLinecap="round"
-                />
-              </svg>
+          {/* Revenue Chart or Clean Zero State */}
+          {orders.length === 0 ? (
+            <div className="my-6 py-10 flex flex-col items-center justify-center text-center px-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+                📈
+              </div>
+              <h3 className="text-sm font-bold text-gray-900">No Sales Curve Recorded Yet</h3>
+              <p className="text-xs text-gray-400 mt-1 max-w-sm leading-relaxed">
+                As buyers purchase products via your WhatsApp Co-Pilot or checkout links, daily revenue and volume curves will graph here automatically.
+              </p>
+              <div className="mt-6 w-full border-b border-dashed border-gray-200 relative">
+                <span className="absolute -top-3 left-0 text-[10px] font-mono text-gray-400 bg-white pr-2">₦0.00</span>
+              </div>
+              <div className="w-full flex justify-between text-[10px] font-semibold text-gray-300 mt-2 px-1">
+                <span>Day 1</span>
+                <span>Day 7</span>
+                <span>Day 14</span>
+                <span>Day 21</span>
+                <span>Day 30</span>
+              </div>
             </div>
+          ) : (
+            <div className="my-6 relative">
+              <div className="h-44 w-full flex items-end">
+                <svg className="w-full h-full overflow-visible" viewBox="0 0 500 150" fill="none" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10B981" stopOpacity="0.25" />
+                      <stop offset="100%" stopColor="#10B981" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M0 110 C 100 100, 180 130, 260 110 C 340 90, 420 30, 500 45 L 500 150 L 0 150 Z"
+                    fill="url(#revenueGradient)"
+                  />
+                  <path
+                    d="M0 110 C 100 100, 180 130, 260 110 C 340 90, 420 30, 500 45"
+                    stroke="#10B981"
+                    strokeWidth="4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
 
-            {/* X-axis date labels */}
-            <div className="flex justify-between text-[11px] font-semibold text-gray-400 mt-4 px-2">
-              <span>01 OCT</span>
-              <span>08 OCT</span>
-              <span>15 OCT</span>
-              <span>22 OCT</span>
-              <span>29 OCT</span>
+              {/* X-axis date labels */}
+              <div className="flex justify-between text-[11px] font-semibold text-gray-400 mt-4 px-2">
+                <span>01 OCT</span>
+                <span>08 OCT</span>
+                <span>15 OCT</span>
+                <span>22 OCT</span>
+                <span>29 OCT</span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Right 1 Col: Recent Activity */}

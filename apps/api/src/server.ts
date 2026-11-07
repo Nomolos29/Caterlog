@@ -1,7 +1,7 @@
 import http from "node:http";
 import { existsSync } from "node:fs";
 import { URL } from "node:url";
-import { nairaToKobo } from "@caterlog/commerce-core";
+import { nairaToKobo, parseVendorWhatsAppCommand } from "@caterlog/commerce-core";
 import { CaterlogStage1Engine } from "./runtime-engine.ts";
 import { createEngineFromEnv } from "./bootstrap.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
@@ -244,10 +244,15 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
               value?: {
                 messages?: Array<{
                   from?: string;
+                  from_user_id?: string;
                   text?: { body?: string };
                   image?: { caption?: string; sha256?: string };
                 }>;
                 message_echoes?: Array<{
+                  from?: string;
+                  text?: { body?: string };
+                }>;
+                smb_message_echoes?: Array<{
                   from?: string;
                   text?: { body?: string };
                 }>;
@@ -259,18 +264,27 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         for (const entry of body.entry ?? []) {
           for (const change of entry.changes ?? []) {
             const val = change.value;
-            // Handle Coexistence `message_echoes` (Vendor replied from mobile app)
-            for (const echo of val?.message_echoes ?? []) {
+            // Handle Coexistence `message_echoes` / `smb_message_echoes` (Vendor replied from mobile app or companion device)
+            const allEchoes = [
+              ...(val?.message_echoes ?? []),
+              ...(val?.smb_message_echoes ?? []),
+            ];
+            for (const echo of allEchoes) {
               if (echo.text?.body) {
                 await engine.recordVendorManualReplyInBuyerThread(echo.text.body);
               }
             }
+
+            if (change.field === "smb_app_state_sync") {
+              console.log("[caterlog:webhook] Received smb_app_state_sync (WhatsApp Business app contact sync event).");
+            }
             // Handle inbound messages (Vendor Keyword CLI or Buyer Inquiry)
             for (const msg of val?.messages ?? []) {
-              const fromPhone = msg.from
-                ? msg.from.startsWith("+")
-                  ? msg.from
-                  : `+${msg.from}`
+              const rawFrom = msg.from ?? msg.from_user_id ?? "";
+              const fromPhone = rawFrom
+                ? rawFrom.startsWith("+")
+                  ? rawFrom
+                  : `+${rawFrom}`
                 : "";
               const text = msg.text?.body ?? msg.image?.caption ?? "";
               if (!text) continue;
@@ -279,12 +293,19 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
               const cleanFromPhone = fromPhone.replace(/\+/g, "");
 
               if (cleanFromPhone === cleanVendorPhone) {
-                await engine.handleVendorWhatsAppKeyword(text);
+                // If the message is an explicit vendor keyword command (#help, sales, stock, ship, discount, etc.),
+                // execute store owner admin CLI. Otherwise, seamlessly route as customer shopping checkout!
+                const cmd = parseVendorWhatsAppCommand(text);
+                if (cmd.type !== "UNKNOWN_COMMAND" || text.trim().startsWith("#")) {
+                  await engine.handleVendorWhatsAppKeyword(text);
+                } else {
+                  await engine.handleBuyerWhatsAppInquiry({
+                    buyerPhone: fromPhone,
+                    text,
+                  });
+                }
               } else {
-                // NOTE: Meta's `image.sha256` is a hash of the uploaded media bytes, not a
-                // perceptual hash, so it cannot be compared with a product's `imagePhash`.
-                // Live status-image matching needs the media download + pHash pipeline;
-                // for now the caption/product words still drive product resolution.
+                // All other phone numbers are customer shoppers
                 await engine.handleBuyerWhatsAppInquiry({
                   buyerPhone: fromPhone,
                   text,
