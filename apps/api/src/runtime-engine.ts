@@ -121,6 +121,18 @@ export class CaterlogStage1Engine {
       stockTotal: 3,
       stockReserved: 0,
     },
+    {
+      id: "prod-4",
+      skuCode: "SKU-0895",
+      name: "Stainless Steel Vacuum Flask",
+      description: "Double-walled stainless steel thermal vacuum flask.",
+      category: "Kitchenware & Drinkware",
+      basePriceKobo: nairaToKobo(10000),
+      primaryImageUrl: "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
+      imagePhash: "1122334455667788",
+      stockTotal: 45,
+      stockReserved: 0,
+    },
   ];
 
   public shippingZones: RuntimeShippingZone[] = [
@@ -314,6 +326,20 @@ export class CaterlogStage1Engine {
         `Vendor "${vendorSlug}" was not found in the database. Run "npm run db:seed" or set PERSISTENCE_VENDOR_SLUG to an existing vendor.`
       );
     }
+    if ("initSnapshot" in store && typeof (store as any).initSnapshot === "function") {
+      (store as any).initSnapshot(this.takeSnapshot());
+    }
+  }
+
+  public takeSnapshot(): RuntimeSnapshot {
+    return {
+      vendor: { ...this.vendor },
+      products: this.products.map((product) => ({ ...product })),
+      shippingZones: this.shippingZones.map((zone) => ({ ...zone })),
+      discounts: this.discounts.map((discount) => ({ ...discount })),
+      orders: this.orders.map((order) => ({ ...order })),
+      processedTransactionRefs: Array.from(this.processedTxRefs),
+    };
   }
 
   public getDataMode(): "memory" | "database" {
@@ -444,6 +470,7 @@ export class CaterlogStage1Engine {
           "• *shipping* / *ship Ibadan #6000* / *shipping delete 2*",
           "• *discount* / *disc VIP #5000* / *discount add PAYDAY 10%*",
           "• *stock SHOE-01 10* — Update inventory count",
+          "• *delete SHOE-01* — Remove product from store & WhatsApp catalog",
           "• *Photo + Name, #25000, stock 5* — Add product with photo",
           "• *mode copilot 60s* / *mode auto* / *mode off* — Co-Pilot switch",
           "• *hold 15* — Set buyer transfer reservation window (mins)",
@@ -582,6 +609,16 @@ export class CaterlogStage1Engine {
           ].join("\n");
         } catch (err) {
           replyText = `⚠️ ${err instanceof Error ? err.message : String(err)}`;
+        }
+        break;
+      }
+
+      case "DELETE_PRODUCT": {
+        const deleted = this.deleteProduct(cmd.skuCode);
+        if (deleted) {
+          replyText = `🗑️ *Product Deleted:* \`${cmd.skuCode.toUpperCase()}\` has been removed from your store and WhatsApp catalog.`;
+        } else {
+          replyText = `⚠️ Product with SKU \`${cmd.skuCode.toUpperCase()}\` was not found.`;
         }
         break;
       }
@@ -1698,6 +1735,26 @@ export class CaterlogStage1Engine {
     this.persistInBackground("addProduct", () => this.persistence.saveProduct(created));
     void this.broadcastStateChange();
     return created;
+  }
+
+  public deleteProduct(skuCode: string): boolean {
+    const cleanSku = skuCode.trim().toUpperCase();
+    const index = this.products.findIndex(
+      (p) => p.skuCode.toUpperCase() === cleanSku
+    );
+    if (index === -1) {
+      return false;
+    }
+    this.products.splice(index, 1);
+    this.persistInBackground("deleteProduct", () => this.persistence.deleteProduct(cleanSku));
+
+    // Remove from Meta WhatsApp Catalog in real-time
+    void this.catalog.deleteProduct(cleanSku).catch((err) => {
+      console.warn(`[caterlog:catalog] Real-time Meta catalog deletion for "${cleanSku}" failed:`, err);
+    });
+
+    void this.broadcastStateChange();
+    return true;
   }
 
   public upsertShippingZone(name: string, feeKobo: bigint): RuntimeShippingZone {

@@ -19,6 +19,7 @@ export type VendorWhatsAppCommand =
     }
   | { type: "DEACTIVATE_DISCOUNT"; code: string }
   | { type: "UPDATE_STOCK"; skuCode: string; stockTotal: number }
+  | { type: "DELETE_PRODUCT"; skuCode: string }
   | { type: "QUICK_ADD_PRODUCT"; name: string; priceKobo: bigint; stockTotal: number }
   | { type: "LIST_ORDERS"; status: "PENDING_PAYMENT" | "PAID" }
   | { type: "REMIND_ORDER"; shortCode: string }
@@ -198,6 +199,23 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
     if (skuCode && Number.isInteger(qty) && qty >= 0) {
       return { type: "UPDATE_STOCK", skuCode, stockTotal: qty };
     }
+  }
+
+  // 6b. Delete / Remove Product (`delete SHOE-01`, `remove SHOE-01`, `del SHOE-01`, `product delete SHOE-01`)
+  if (
+    (firstWord === "delete" || firstWord === "del" || firstWord === "remove" || firstWord === "rm") &&
+    tokens[1] &&
+    !SHIPPING_ALIASES.has((tokens[1] ?? "").toLowerCase()) &&
+    !DISCOUNT_ALIASES.has((tokens[1] ?? "").toLowerCase())
+  ) {
+    return { type: "DELETE_PRODUCT", skuCode: tokens[1].toUpperCase() };
+  }
+  if (
+    (firstWord === "product" || firstWord === "prod") &&
+    (tokens[1]?.toLowerCase() === "delete" || tokens[1]?.toLowerCase() === "del" || tokens[1]?.toLowerCase() === "remove") &&
+    tokens[2]
+  ) {
+    return { type: "DELETE_PRODUCT", skuCode: tokens[2].toUpperCase() };
   }
 
   // 7. Pending & Paid Orders (`pending`, `paid`, `remind 882`, `dispatch ORD-882 0803...`)

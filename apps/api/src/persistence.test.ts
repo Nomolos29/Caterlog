@@ -40,6 +40,11 @@ class FakePersistenceStore implements PersistenceStore {
   public async saveProduct(product: RuntimeProduct): Promise<void> {
     this.savedProducts.push({ ...product });
   }
+  public async deleteProduct(skuCode: string): Promise<void> {
+    this.savedProducts = this.savedProducts.filter(
+      (p) => p.skuCode.toUpperCase() !== skuCode.toUpperCase()
+    );
+  }
   public async saveShippingZone(zone: RuntimeShippingZone): Promise<void> {
     this.savedZones.push({ ...zone });
   }

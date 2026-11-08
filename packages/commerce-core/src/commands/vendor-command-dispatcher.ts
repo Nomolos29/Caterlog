@@ -253,6 +253,20 @@ export class VendorCommandDispatcher {
         };
       }
 
+      case "DELETE_PRODUCT": {
+        const deleted = await this.catalogService.deleteProduct(
+          params.vendorId,
+          cmd.skuCode,
+          actor
+        );
+        return {
+          parsedCommand: cmd,
+          whatsappReplyText: deleted
+            ? `🗑️ *Product Deleted:* \`${cmd.skuCode}\` has been removed from your store and WhatsApp catalog.`
+            : `⚠️ Product with SKU \`${cmd.skuCode}\` was not found.`,
+        };
+      }
+
       case "LIST_ORDERS": {
         const orders = await this.orderPaymentService.listOrdersByStatus(
           params.vendorId,

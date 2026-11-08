@@ -182,6 +182,14 @@ export class PrismaPersistenceStore implements PersistenceStore {
     });
   }
 
+  public async deleteProduct(skuCode: string): Promise<void> {
+    const vendorId = await this.requireVendorId();
+    await prisma.product.updateMany({
+      where: { vendorId, skuCode: skuCode.toUpperCase() },
+      data: { isActive: false },
+    });
+  }
+
   public async saveShippingZone(zone: RuntimeShippingZone): Promise<void> {
     const vendorId = await this.requireVendorId();
     const data = {

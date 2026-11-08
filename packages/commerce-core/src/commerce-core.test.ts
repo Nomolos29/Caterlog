@@ -170,6 +170,14 @@ describe("Layer 1 Commerce Core — Pure Domain & Architecture Tests", () => {
       skuCode: "SHOE-01",
       stockTotal: 12,
     });
+    assert.deepEqual(parseVendorWhatsAppCommand("delete SHOE-01"), {
+      type: "DELETE_PRODUCT",
+      skuCode: "SHOE-01",
+    });
+    assert.deepEqual(parseVendorWhatsAppCommand("remove BAG-01"), {
+      type: "DELETE_PRODUCT",
+      skuCode: "BAG-01",
+    });
     assert.deepEqual(parseVendorWhatsAppCommand("mode copilot 90s"), {
       type: "SET_COPILOT_MODE",
       mode: "COPILOT",

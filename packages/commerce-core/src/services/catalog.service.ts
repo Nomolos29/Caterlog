@@ -192,10 +192,37 @@ export class CatalogService {
     return product;
   }
 
+  public async deleteProduct(
+    vendorId: string,
+    skuCode: string,
+    actor: ActorSource
+  ): Promise<boolean> {
+    const normalizedSku = skuCode.trim().toUpperCase();
+    const existing = await this.db.product.findUnique({
+      where: { vendorId_skuCode: { vendorId, skuCode: normalizedSku } },
+    });
+    if (!existing) {
+      return false;
+    }
+    await this.db.product.update({
+      where: { vendorId_skuCode: { vendorId, skuCode: normalizedSku } },
+      data: { isActive: false },
+    });
+    await this.recordAndPublishEvent({
+      vendorId,
+      actorType: actor,
+      eventType: "PRODUCT_DELETED",
+      entityType: "PRODUCT",
+      entityId: existing.id,
+      payload: { skuCode: normalizedSku },
+    });
+    return true;
+  }
+
   private async recordAndPublishEvent(params: {
     vendorId: string;
     actorType: ActorSource;
-    eventType: "INVENTORY_CHANGED";
+    eventType: "INVENTORY_CHANGED" | "PRODUCT_DELETED";
     entityType: "PRODUCT";
     entityId: string;
     payload: Record<string, unknown>;

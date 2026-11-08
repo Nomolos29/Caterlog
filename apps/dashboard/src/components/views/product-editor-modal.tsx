@@ -16,6 +16,7 @@ interface ProductEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (productData: any) => Promise<boolean> | void;
+  onDelete?: (skuCode: string) => Promise<boolean> | void;
 }
 
 export function ProductEditorModal({
@@ -23,8 +24,10 @@ export function ProductEditorModal({
   isOpen,
   onClose,
   onSave,
+  onDelete,
 }: ProductEditorModalProps) {
   const isEditing = Boolean(product);
+  const [deleting, setDeleting] = useState(false);
 
   const [name, setName] = useState(product?.name || "Stainless Steel Vacuum Flask");
   const [sku, setSku] = useState(product?.skuCode || `SKU-${Date.now().toString().slice(-4)}`);
@@ -423,7 +426,31 @@ export function ProductEditorModal({
             <span>Publish live to WhatsApp & payment links</span>
           </label>
 
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {isEditing && onDelete && (
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={async () => {
+                  if (!product) return;
+                  const confirmed = window.confirm(
+                    `Delete product "${product.name}" (${product.skuCode})?\n\nThis will permanently remove it from your Caterlog store and delete it from your WhatsApp Business Catalog.`
+                  );
+                  if (!confirmed) return;
+                  setDeleting(true);
+                  try {
+                    await onDelete(product.skuCode);
+                    onClose();
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+                className="px-3.5 py-2.5 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-xl transition-all cursor-pointer active:scale-95 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <span>🗑️</span>
+                <span>{deleting ? "Deleting..." : "Delete Product"}</span>
+              </button>
+            )}
             <button
               onClick={onClose}
               className="px-4 py-2.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl transition-all cursor-pointer active:scale-95"

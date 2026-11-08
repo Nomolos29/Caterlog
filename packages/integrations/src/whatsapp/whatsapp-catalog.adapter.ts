@@ -270,23 +270,113 @@ export class WhatsAppCatalogAdapter {
 
     if (options.deleteMissing) {
       const keep = new Set((options.existingSkus ?? products.map((p) => p.skuCode)).map((s) => s.toUpperCase()));
-      for (const [retailerId, itemId] of Array.from(this.productItemIds.entries())) {
-        if (keep.has(retailerId)) continue;
-        try {
-          await this.request(`/${itemId}`, { method: "DELETE" });
-          this.productItemIds.delete(retailerId);
-          result.deleted += 1;
-        } catch (err) {
-          result.failed.push({
-            skuCode: retailerId,
-            error: err instanceof Error ? err.message : String(err),
-          });
+      try {
+        const metaItems = await this.fetchCatalogProducts();
+        for (const item of metaItems) {
+          const retailerId = item.retailer_id.toUpperCase();
+          if (keep.has(retailerId)) continue;
+          try {
+            await this.request(`/${item.id}`, { method: "DELETE" });
+            this.productItemIds.delete(retailerId);
+            result.deleted += 1;
+          } catch (err) {
+            result.failed.push({
+              skuCode: retailerId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
+      } catch (err) {
+        console.warn("Could not query Meta catalog for orphaned items during sync:", err);
       }
     }
 
     this.lastSyncedAt = result.syncedAt;
     return result;
+  }
+
+  /**
+   * Fetches all current items directly from the Meta Commerce Catalog.
+   * Updates the internal retailerId -> Meta product item ID mapping.
+   */
+  public async fetchCatalogProducts(): Promise<
+    Array<{ id: string; retailer_id: string; name: string; price?: string; availability?: string }>
+  > {
+    if (this.isMockMode()) {
+      return Array.from(this.mockCatalog.entries()).map(([retailer_id, item]) => ({
+        id: `mock-item-${retailer_id}`,
+        retailer_id,
+        name: item.name,
+      }));
+    }
+
+    this.assertConfigured(["catalogId", "accessToken"]);
+    const items: Array<{ id: string; retailer_id: string; name: string; price?: string; availability?: string }> = [];
+    let nextPath: string | null = `/${this.config.catalogId}/products?fields=id,retailer_id,name,price,availability&limit=100`;
+
+    while (nextPath) {
+      interface MetaProductPage {
+        data?: Array<{ id: string; retailer_id?: string; name: string; price?: string; availability?: string }>;
+        paging?: { next?: string };
+      }
+      const response: MetaProductPage = await this.request<MetaProductPage>(nextPath, { method: "GET" });
+
+      if (response.data && Array.isArray(response.data)) {
+        for (const item of response.data) {
+          if (item.retailer_id) {
+            items.push({
+              id: item.id,
+              retailer_id: item.retailer_id,
+              name: item.name,
+              price: item.price,
+              availability: item.availability,
+            });
+            this.productItemIds.set(item.retailer_id.toUpperCase(), item.id);
+          }
+        }
+      }
+
+      nextPath = response.paging?.next ?? null;
+    }
+
+    return items;
+  }
+
+  /**
+   * Deletes a single product from the Meta Commerce Catalog by its SKU / retailer_id.
+   */
+  public async deleteProduct(skuCode: string): Promise<boolean> {
+    const cleanSku = skuCode.trim().toUpperCase();
+    if (this.isMockMode()) {
+      return this.mockCatalog.delete(cleanSku);
+    }
+
+    this.assertConfigured(["catalogId", "accessToken"]);
+    let itemId = this.productItemIds.get(cleanSku);
+    if (!itemId) {
+      try {
+        const items = await this.fetchCatalogProducts();
+        const match = items.find((i) => i.retailer_id.toUpperCase() === cleanSku);
+        if (match) {
+          itemId = match.id;
+        }
+      } catch (err) {
+        console.warn(`Failed to look up Meta item ID for SKU "${cleanSku}":`, err);
+      }
+    }
+
+    if (!itemId) {
+      return false;
+    }
+
+    try {
+      await this.request(`/${itemId}`, { method: "DELETE" });
+      this.productItemIds.delete(cleanSku);
+      return true;
+    } catch (err) {
+      console.error(`Failed to delete Meta catalog product item "${cleanSku}" (${itemId}):`, err);
+      return false;
+    }
   }
 
   private assertConfigured(fields: Array<"catalogId" | "businessAccountId" | "accessToken">) {
@@ -308,9 +398,12 @@ export class WhatsAppCatalogAdapter {
     init: { method: string; body?: unknown }
   ): Promise<T & { id?: string; product_item_id?: string }> {
     let response: Response;
+    const url = path.startsWith("http://") || path.startsWith("https://")
+      ? path
+      : `${WHATSAPP_GRAPH_BASE_URL}/${this.config.graphApiVersion}${path}`;
     try {
       response = await fetch(
-        `${WHATSAPP_GRAPH_BASE_URL}/${this.config.graphApiVersion}${path}`,
+        url,
         {
           method: init.method,
           headers: {

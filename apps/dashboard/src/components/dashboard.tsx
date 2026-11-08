@@ -144,6 +144,17 @@ export function Dashboard() {
     }
   };
 
+  const handleDeleteProduct = async (sku: string) => {
+    try {
+      const next = await api.deleteProduct(sku);
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
   const handleSimulateTransfer = async (orderCode: string, amountNaira: number) => {
     try {
       const res = await api.simulateTransfer(orderCode, amountNaira);
@@ -402,6 +413,7 @@ export function Dashboard() {
               products={state.products}
               onAddProduct={handleAddProduct}
               onUpdateStock={handleUpdateStock}
+              onDeleteProduct={handleDeleteProduct}
               onNavigateToNetwork={() => setCurrentView("network")}
               onNavigateToSettings={() => setCurrentView("settings")}
               onSyncWhatsAppCatalog={handleSyncWhatsAppCatalog}

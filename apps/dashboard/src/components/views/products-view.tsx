@@ -16,6 +16,7 @@ interface ProductsViewProps {
     primaryImageUrl?: string;
   }) => Promise<boolean>;
   onUpdateStock: (sku: string, stock: number) => Promise<boolean>;
+  onDeleteProduct?: (skuCode: string) => Promise<boolean>;
   onNavigateToNetwork?: (tab?: string) => void;
   onNavigateToSettings?: (tab?: string, subId?: string) => void;
   onSyncWhatsAppCatalog?: () => Promise<{
@@ -45,6 +46,7 @@ export function ProductsView({
   initialTab = "my-inventory",
   onAddProduct,
   onUpdateStock,
+  onDeleteProduct,
   onNavigateToNetwork,
   onNavigateToSettings,
   onSyncWhatsAppCatalog,
@@ -63,8 +65,10 @@ export function ProductsView({
     try {
       const res = await onSyncWhatsAppCatalog();
       if (res) {
+        const parts = [`${res.upserted} product(s) synced`];
+        if (res.deleted > 0) parts.push(`${res.deleted} deleted`);
         setSyncToast(
-          `✓ WhatsApp Catalog Synced! ${res.upserted} product(s) published to Meta (${res.mode} mode).`
+          `✓ WhatsApp Catalog in Sync! ${parts.join(", ")} with Meta (${res.mode} mode).`
         );
         setTimeout(() => setSyncToast(null), 4000);
       }
@@ -727,8 +731,28 @@ export function ProductsView({
                     </h3>
                     <div className="text-[11px] font-mono text-gray-400 mt-0.5">{p.skuCode}</div>
                   </div>
-                  <div className="font-bold text-emerald-800 text-sm">
-                    {p.basePriceFormatted || `₦${p.basePriceNaira.toLocaleString()}`}
+                  <div className="flex items-center gap-2">
+                    <div className="font-bold text-emerald-800 text-sm">
+                      {p.basePriceFormatted || `₦${p.basePriceNaira.toLocaleString()}`}
+                    </div>
+                    {onDeleteProduct && (
+                      <button
+                        type="button"
+                        title="Delete product"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const confirmed = window.confirm(
+                            `Delete product "${p.name}" (${p.skuCode})?\n\nThis will remove it from Caterlog and sync it off your WhatsApp Catalog.`
+                          );
+                          if (confirmed) {
+                            void onDeleteProduct(p.skuCode);
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-50 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
+                      >
+                        🗑️
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-gray-50 text-xs">
@@ -749,6 +773,7 @@ export function ProductsView({
           setEditorModalOpen(false);
           setEditingProduct(null);
         }}
+        onDelete={onDeleteProduct}
         onSave={async (data) => {
           if (editingProduct) {
             await onUpdateStock(editingProduct.skuCode, data.stockTotal);

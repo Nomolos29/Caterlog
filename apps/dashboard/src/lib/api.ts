@@ -97,6 +97,13 @@ export const api = {
     );
   },
 
+  deleteProduct(skuCode: string): Promise<VendorState> {
+    return request<VendorState>(
+      `/api/v1/vendor/products/${encodeURIComponent(skuCode)}`,
+      { method: "DELETE" }
+    );
+  },
+
   addShippingZone(name: string, feeNaira: number | string): Promise<VendorState> {
     return request<VendorState>("/api/v1/vendor/shipping-zones", {
       method: "POST",

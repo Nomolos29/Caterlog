@@ -90,7 +90,12 @@ export async function createEngineFromEnv(
       `[caterlog] DATA_MODE=database — hydrated vendor "${vendorSlug}" from PostgreSQL.`
     );
   } else {
-    console.log("[caterlog] DATA_MODE=memory — using the in-process demo dataset.");
+    const { createMemoryPersistence } = await import("./persistence/memory.ts");
+    const store = createMemoryPersistence();
+    await engine.attachPersistence(store, vendorSlug);
+    console.log(
+      `[caterlog] DATA_MODE=memory — durable state attached (.caterlog-dev-state.json).`
+    );
   }
 
   return { engine, dataMode, vendorSlug, scheduler, jobsConfig, shutdown };

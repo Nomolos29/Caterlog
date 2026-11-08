@@ -32,6 +32,7 @@ export interface PersistenceStore {
 
   saveVendor(vendor: RuntimeVendor): Promise<void>;
   saveProduct(product: RuntimeProduct): Promise<void>;
+  deleteProduct(skuCode: string): Promise<void>;
   saveShippingZone(zone: RuntimeShippingZone): Promise<void>;
   saveDiscount(discount: RuntimeDiscount): Promise<void>;
 

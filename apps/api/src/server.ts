@@ -420,6 +420,16 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, engine.serializeState());
       }
 
+      // 10b. Dashboard REST API: Delete Product (`DELETE /api/v1/vendor/products/:sku`)
+      if (req.method === "DELETE" && path.startsWith("/api/v1/vendor/products/")) {
+        const sku = decodeURIComponent(path.replace("/api/v1/vendor/products/", ""));
+        const deleted = engine.deleteProduct(sku);
+        if (!deleted) {
+          throw new HttpError(404, `Product SKU "${sku}" not found.`);
+        }
+        return sendJson(res, 200, engine.serializeState());
+      }
+
       // 11. Dashboard REST API: Upsert Shipping Zone (`POST /api/v1/vendor/shipping-zones`)
       if (req.method === "POST" && path === "/api/v1/vendor/shipping-zones") {
         const body = JSON.parse(await readRawBody(req)) as {
