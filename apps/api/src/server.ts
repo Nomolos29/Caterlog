@@ -246,7 +246,12 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
                   from?: string;
                   from_user_id?: string;
                   text?: { body?: string };
-                  image?: { caption?: string; sha256?: string };
+                  image?: { caption?: string; sha256?: string; id?: string; url?: string; link?: string };
+                  interactive?: {
+                    type?: string;
+                    button_reply?: { id?: string; title?: string };
+                    list_reply?: { id?: string; title?: string; description?: string };
+                  };
                 }>;
                 message_echoes?: Array<{
                   from?: string;
@@ -286,7 +291,15 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
                   ? rawFrom
                   : `+${rawFrom}`
                 : "";
-              const text = msg.text?.body ?? msg.image?.caption ?? "";
+              // Handle text messages, image captions, and WhatsApp interactive button/list replies
+              const text =
+                msg.text?.body ??
+                msg.image?.caption ??
+                msg.interactive?.button_reply?.id ??
+                msg.interactive?.button_reply?.title ??
+                msg.interactive?.list_reply?.id ??
+                msg.interactive?.list_reply?.title ??
+                "";
               if (!text) continue;
 
               const cleanVendorPhone = engine.vendor.whatsappPhone.replace(/\+/g, "");

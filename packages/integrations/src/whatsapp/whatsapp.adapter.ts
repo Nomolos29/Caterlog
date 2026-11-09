@@ -21,6 +21,9 @@ export interface WhatsAppCloudConfig {
 
 export type WhatsAppOutboxKind =
   | "TEXT"
+  | "IMAGE"
+  | "INTERACTIVE_BUTTONS"
+  | "INTERACTIVE_LIST"
   | "CATALOG_MESSAGE"
   | "PRODUCT_MESSAGE"
   | "PRODUCT_LIST";
@@ -160,6 +163,249 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
         type: "text",
         text: { preview_url: true, body: params.text },
       },
+    });
+  }
+
+  /**
+   * Sends a media image message with optional caption.
+   */
+  public async sendImageMessage(params: {
+    toPhone: string;
+    imageUrl: string;
+    caption?: string;
+    vendorPhoneId?: string | null;
+  }): Promise<void> {
+    await this.postMessage({
+      toPhone: params.toPhone,
+      vendorPhoneId: params.vendorPhoneId,
+      kind: "IMAGE",
+      text: params.caption ?? "",
+      payload: {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: params.toPhone.replace(/\+/g, ""),
+        type: "image",
+        image: {
+          link: params.imageUrl,
+          ...(params.caption ? { caption: params.caption } : {}),
+        },
+      },
+    });
+  }
+
+  /**
+   * Sends an interactive message with up to 3 quick-reply buttons.
+   * Can include a header image when provided.
+   */
+  public async sendInteractiveButtonsMessage(params: {
+    toPhone: string;
+    bodyText: string;
+    buttons: Array<{ id: string; title: string }>;
+    headerImageUrl?: string;
+    footerText?: string;
+    vendorPhoneId?: string | null;
+  }): Promise<void> {
+    const formattedButtons = params.buttons.slice(0, 3).map((b) => ({
+      type: "reply",
+      reply: {
+        id: b.id.slice(0, 200),
+        title: b.title.slice(0, 20),
+      },
+    }));
+
+    const isPublicHeaderImage = Boolean(
+      params.headerImageUrl &&
+      /^https?:\/\/(?!localhost|127\.0\.0\.1)/i.test(params.headerImageUrl)
+    );
+
+    const interactivePayload: Record<string, unknown> = {
+      type: "button",
+      body: { text: params.bodyText.slice(0, 1024) },
+      action: { buttons: formattedButtons },
+    };
+
+    if (isPublicHeaderImage) {
+      interactivePayload.header = {
+        type: "image",
+        image: { link: params.headerImageUrl },
+      };
+    }
+
+    if (params.footerText) {
+      interactivePayload.footer = { text: params.footerText.slice(0, 60) };
+    }
+
+    await this.postMessage({
+      toPhone: params.toPhone,
+      vendorPhoneId: params.vendorPhoneId,
+      kind: "INTERACTIVE_BUTTONS",
+      text: params.bodyText,
+      payload: {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: params.toPhone.replace(/\+/g, ""),
+        type: "interactive",
+        interactive: interactivePayload,
+      },
+    });
+  }
+
+  /**
+   * Sends an interactive list message (4 to 10 options) that opens a selection sheet.
+   */
+  public async sendInteractiveListMessage(params: {
+    toPhone: string;
+    bodyText: string;
+    buttonText?: string;
+    sections: Array<{
+      title: string;
+      rows: Array<{ id: string; title: string; description?: string }>;
+    }>;
+    headerText?: string;
+    footerText?: string;
+    vendorPhoneId?: string | null;
+  }): Promise<void> {
+    const formattedSections = params.sections.map((sec) => ({
+      title: sec.title.slice(0, 24),
+      rows: sec.rows.slice(0, 10).map((r) => ({
+        id: r.id.slice(0, 200),
+        title: r.title.slice(0, 24),
+        ...(r.description ? { description: r.description.slice(0, 72) } : {}),
+      })),
+    }));
+
+    const interactivePayload: Record<string, unknown> = {
+      type: "list",
+      body: { text: params.bodyText.slice(0, 1024) },
+      action: {
+        button: (params.buttonText ?? "View Options").slice(0, 20),
+        sections: formattedSections,
+      },
+    };
+
+    if (params.headerText) {
+      interactivePayload.header = {
+        type: "text",
+        text: params.headerText.slice(0, 60),
+      };
+    }
+
+    if (params.footerText) {
+      interactivePayload.footer = { text: params.footerText.slice(0, 60) };
+    }
+
+    await this.postMessage({
+      toPhone: params.toPhone,
+      vendorPhoneId: params.vendorPhoneId,
+      kind: "INTERACTIVE_LIST",
+      text: params.bodyText,
+      payload: {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: params.toPhone.replace(/\+/g, ""),
+        type: "interactive",
+        interactive: interactivePayload,
+      },
+    });
+  }
+
+  /**
+   * High-level unified dispatcher that automatically selects the appropriate
+   * Meta WhatsApp message type (Image, Interactive Buttons, Interactive List, or Text),
+   * ensuring real phones render identically to the web dashboard simulator.
+   */
+  public async sendWhatsAppMessage(params: {
+    toPhone: string;
+    text: string;
+    imageUrl?: string;
+    quickReplies?: Array<{ label: string; replyText: string }>;
+    headerText?: string;
+    footerText?: string;
+    vendorPhoneId?: string | null;
+  }): Promise<void> {
+    const isPublicImage = Boolean(
+      params.imageUrl &&
+      /^https?:\/\/(?!localhost|127\.0\.0\.1)/i.test(params.imageUrl)
+    );
+
+    // 1. Interactive Buttons (1 to 3 quick-reply options)
+    if (params.quickReplies && params.quickReplies.length > 0 && params.quickReplies.length <= 3) {
+      try {
+        await this.sendInteractiveButtonsMessage({
+          toPhone: params.toPhone,
+          bodyText: params.text,
+          buttons: params.quickReplies.map((qr) => ({
+            id: qr.replyText,
+            title: qr.label,
+          })),
+          headerImageUrl: isPublicImage ? params.imageUrl : undefined,
+          footerText: params.footerText,
+          vendorPhoneId: params.vendorPhoneId,
+        });
+        return;
+      } catch (err) {
+        console.warn("[caterlog:whatsapp] Failed to send interactive buttons, falling back:", err);
+      }
+    }
+
+    // 2. Interactive List (4 to 10 options)
+    if (params.quickReplies && params.quickReplies.length > 3) {
+      try {
+        if (isPublicImage && params.imageUrl) {
+          try {
+            await this.sendImageMessage({
+              toPhone: params.toPhone,
+              imageUrl: params.imageUrl,
+              vendorPhoneId: params.vendorPhoneId,
+            });
+          } catch {
+            // Ignore image send failure, proceed with list
+          }
+        }
+
+        await this.sendInteractiveListMessage({
+          toPhone: params.toPhone,
+          headerText: params.headerText,
+          bodyText: params.text,
+          buttonText: "View Options",
+          sections: [
+            {
+              title: "Options",
+              rows: params.quickReplies.slice(0, 10).map((qr) => ({
+                id: qr.replyText,
+                title: qr.label,
+              })),
+            },
+          ],
+          footerText: params.footerText,
+          vendorPhoneId: params.vendorPhoneId,
+        });
+        return;
+      } catch (err) {
+        console.warn("[caterlog:whatsapp] Failed to send interactive list, falling back:", err);
+      }
+    }
+
+    // 3. Standalone Image with Caption
+    if (isPublicImage && params.imageUrl) {
+      try {
+        await this.sendImageMessage({
+          toPhone: params.toPhone,
+          imageUrl: params.imageUrl,
+          caption: params.text,
+          vendorPhoneId: params.vendorPhoneId,
+        });
+        return;
+      } catch (err) {
+        console.warn("[caterlog:whatsapp] Failed to send image message, falling back:", err);
+      }
+    }
+
+    // 4. Default Text Message
+    await this.sendTextMessage({
+      toPhone: params.toPhone,
+      text: params.text,
+      vendorPhoneId: params.vendorPhoneId,
     });
   }
 

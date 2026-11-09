@@ -464,6 +464,41 @@ export class CaterlogStage1Engine {
   }
 
   /**
+   * Unified dispatcher: sends the message to WhatsApp Cloud API (with photos,
+   * interactive buttons, or interactive lists) AND appends to the chat store
+   * so the mobile phone experience matches the dashboard simulator identically.
+   */
+  public async dispatchWhatsAppAndRecordChat(params: {
+    channel: "VENDOR_ADMIN_WA" | "BUYER_SHOP_WA";
+    toPhone: string;
+    text: string;
+    imageUrl?: string;
+    quickReplies?: QuickReplyOption[];
+    sender?: "CATERLOG_BOT" | "VENDOR";
+    headerText?: string;
+    footerText?: string;
+  }): Promise<void> {
+    await this.whatsapp.sendWhatsAppMessage({
+      toPhone: params.toPhone,
+      text: params.text,
+      imageUrl: params.imageUrl,
+      quickReplies: params.quickReplies,
+      headerText: params.headerText,
+      footerText: params.footerText,
+      vendorPhoneId: this.vendor.whatsappPhoneId,
+    });
+
+    this.appendChat({
+      channel: params.channel,
+      sender: params.sender ?? "CATERLOG_BOT",
+      fromPhone: "CATERLOG",
+      text: params.text,
+      imageUrl: params.imageUrl,
+      quickReplies: params.quickReplies,
+    });
+  }
+
+  /**
    * Handles Vendor WhatsApp Keyword Commands (including attached product photos!).
    */
   public async handleVendorWhatsAppKeyword(
@@ -831,18 +866,12 @@ export class CaterlogStage1Engine {
       }
     }
 
-    await this.whatsapp.sendTextMessage({
+    await this.dispatchWhatsAppAndRecordChat({
+      channel: "VENDOR_ADMIN_WA",
       toPhone: this.vendor.whatsappPhone,
       text: replyText,
-      vendorPhoneId: this.vendor.whatsappPhoneId,
-    });
-
-    this.appendChat({
-      channel: "VENDOR_ADMIN_WA",
-      sender: "CATERLOG_BOT",
-      fromPhone: "CATERLOG",
-      text: replyText,
       quickReplies,
+      headerText: "Caterlog Vendor Hub",
     });
 
     await this.broadcastStateChange();
@@ -1005,8 +1034,11 @@ export class CaterlogStage1Engine {
       );
       if (matchedProducts.length === 0) {
         const noCatMsg = `📂 No items found in category "*${catMatch[1]}*". Reply *catalog* to view all items!`;
-        await this.whatsapp.sendTextMessage({ toPhone: params.buyerPhone, text: noCatMsg, vendorPhoneId: this.vendor.whatsappPhoneId });
-        this.appendChat({ channel: "BUYER_SHOP_WA", sender: "CATERLOG_BOT", fromPhone: "CATERLOG", text: noCatMsg });
+        await this.dispatchWhatsAppAndRecordChat({
+          channel: "BUYER_SHOP_WA",
+          toPhone: params.buyerPhone,
+          text: noCatMsg,
+        });
         await this.broadcastStateChange();
         return { step: "UNMATCHED" };
       }
@@ -1033,14 +1065,13 @@ export class CaterlogStage1Engine {
           replyText: p.skuCode,
         }));
 
-      await this.whatsapp.sendTextMessage({ toPhone: params.buyerPhone, text: catMsg, vendorPhoneId: this.vendor.whatsappPhoneId });
-      this.appendChat({
+      await this.dispatchWhatsAppAndRecordChat({
         channel: "BUYER_SHOP_WA",
-        sender: "CATERLOG_BOT",
-        fromPhone: "CATERLOG",
+        toPhone: params.buyerPhone,
         text: catMsg,
         imageUrl: matchedProducts[0]?.primaryImageUrl,
         quickReplies,
+        headerText: "Category Catalog",
       });
       await this.broadcastStateChange();
       return { step: "PROMPTED_FOR_SHIPPING_ZONE" };
@@ -1054,8 +1085,11 @@ export class CaterlogStage1Engine {
       this.clearBuyerCart(params.buyerPhone);
       this.buyerSessions.delete(params.buyerPhone);
       const clearMsg = "🗑️ Your shopping cart has been cleared.\nReply with a product name or SKU (e.g. *SHOE-01*) to start shopping!";
-      await this.whatsapp.sendTextMessage({ toPhone: params.buyerPhone, text: clearMsg, vendorPhoneId: this.vendor.whatsappPhoneId });
-      this.appendChat({ channel: "BUYER_SHOP_WA", sender: "CATERLOG_BOT", fromPhone: "CATERLOG", text: clearMsg });
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: params.buyerPhone,
+        text: clearMsg,
+      });
       await this.broadcastStateChange();
       return { step: "UNMATCHED" };
     }
@@ -1065,8 +1099,11 @@ export class CaterlogStage1Engine {
     if (isCartView) {
       if (currentCart.length === 0) {
         const emptyMsg = "🛒 Your cart is currently empty.\nReply with an item name or SKU (e.g. *SHOE-01*) to start shopping!";
-        await this.whatsapp.sendTextMessage({ toPhone: params.buyerPhone, text: emptyMsg, vendorPhoneId: this.vendor.whatsappPhoneId });
-        this.appendChat({ channel: "BUYER_SHOP_WA", sender: "CATERLOG_BOT", fromPhone: "CATERLOG", text: emptyMsg });
+        await this.dispatchWhatsAppAndRecordChat({
+          channel: "BUYER_SHOP_WA",
+          toPhone: params.buyerPhone,
+          text: emptyMsg,
+        });
         await this.broadcastStateChange();
         return { step: "UNMATCHED" };
       }
@@ -1099,8 +1136,13 @@ export class CaterlogStage1Engine {
         { label: "🗑️ Clear Cart", replyText: "clear cart" },
       ];
 
-      await this.whatsapp.sendTextMessage({ toPhone: params.buyerPhone, text: cartMsg, vendorPhoneId: this.vendor.whatsappPhoneId });
-      this.appendChat({ channel: "BUYER_SHOP_WA", sender: "CATERLOG_BOT", fromPhone: "CATERLOG", text: cartMsg, quickReplies });
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: params.buyerPhone,
+        text: cartMsg,
+        quickReplies,
+        headerText: "Your Shopping Cart",
+      });
       await this.broadcastStateChange();
       return { step: "PROMPTED_FOR_SHIPPING_ZONE" };
     }
@@ -1134,8 +1176,11 @@ export class CaterlogStage1Engine {
           const reqQty = existingSession.quantity ?? 1;
           if (vAvail < reqQty) {
             const outMsg = `⚠️ Sorry, *${activeProd.name} — ${variant.name}* is currently sold out! Please select another option:`;
-            await this.whatsapp.sendTextMessage({ toPhone: params.buyerPhone, text: outMsg, vendorPhoneId: this.vendor.whatsappPhoneId });
-            this.appendChat({ channel: "BUYER_SHOP_WA", sender: "CATERLOG_BOT", fromPhone: "CATERLOG", text: outMsg });
+            await this.dispatchWhatsAppAndRecordChat({
+              channel: "BUYER_SHOP_WA",
+              toPhone: params.buyerPhone,
+              text: outMsg,
+            });
             await this.broadcastStateChange();
             return { step: "OUT_OF_STOCK" };
           }
@@ -1205,8 +1250,14 @@ export class CaterlogStage1Engine {
             { label: "🛒 View Cart", replyText: "cart" },
           ];
 
-          await this.whatsapp.sendTextMessage({ toPhone: params.buyerPhone, text: promptText, vendorPhoneId: this.vendor.whatsappPhoneId });
-          this.appendChat({ channel: "BUYER_SHOP_WA", sender: "CATERLOG_BOT", fromPhone: "CATERLOG", text: promptText, quickReplies });
+          await this.dispatchWhatsAppAndRecordChat({
+            channel: "BUYER_SHOP_WA",
+            toPhone: params.buyerPhone,
+            text: promptText,
+            imageUrl: activeProd.primaryImageUrl,
+            quickReplies,
+            headerText: "Delivery Zone",
+          });
           await this.broadcastStateChange();
           return { step: "PROMPTED_FOR_SHIPPING_ZONE" };
         }
@@ -1278,17 +1329,12 @@ export class CaterlogStage1Engine {
           replyText: `I want ${p.skuCode}`,
         }));
 
-      await this.whatsapp.sendTextMessage({
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
         toPhone: params.buyerPhone,
         text: menuMsg,
-        vendorPhoneId: this.vendor.whatsappPhoneId,
-      });
-      this.appendChat({
-        channel: "BUYER_SHOP_WA",
-        sender: "CATERLOG_BOT",
-        fromPhone: "CATERLOG",
-        text: menuMsg,
         quickReplies,
+        headerText: "Store Catalog",
       });
       await this.broadcastStateChange();
       return { step: "UNMATCHED" };
@@ -1384,19 +1430,13 @@ export class CaterlogStage1Engine {
         });
       }
 
-      await this.whatsapp.sendTextMessage({
-        toPhone: params.buyerPhone,
-        text: promptText,
-        vendorPhoneId: this.vendor.whatsappPhoneId,
-      });
-
-      this.appendChat({
+      await this.dispatchWhatsAppAndRecordChat({
         channel: "BUYER_SHOP_WA",
-        sender: "CATERLOG_BOT",
-        fromPhone: "CATERLOG",
+        toPhone: params.buyerPhone,
         text: promptText,
         imageUrl: product.primaryImageUrl,
         quickReplies,
+        headerText: product.name.slice(0, 60),
       });
 
       await this.broadcastStateChange();
@@ -1438,19 +1478,13 @@ export class CaterlogStage1Engine {
           replyText: v.name,
         }));
 
-      await this.whatsapp.sendTextMessage({
-        toPhone: params.buyerPhone,
-        text: promptText,
-        vendorPhoneId: this.vendor.whatsappPhoneId,
-      });
-
-      this.appendChat({
+      await this.dispatchWhatsAppAndRecordChat({
         channel: "BUYER_SHOP_WA",
-        sender: "CATERLOG_BOT",
-        fromPhone: "CATERLOG",
+        toPhone: params.buyerPhone,
         text: promptText,
         imageUrl: product.primaryImageUrl,
         quickReplies,
+        headerText: product.name.slice(0, 60),
       });
 
       await this.broadcastStateChange();
@@ -1469,15 +1503,9 @@ export class CaterlogStage1Engine {
         available <= 0
           ? `😔 Sorry, *${itemLabel}* is currently *Sold Out* (0 available).`
           : `⚠️ Only *${available}* unit(s) of *${itemLabel}* left in stock (you requested ${quantity}).`;
-      await this.whatsapp.sendTextMessage({
-        toPhone: params.buyerPhone,
-        text: soldOutMsg,
-        vendorPhoneId: this.vendor.whatsappPhoneId,
-      });
-      this.appendChat({
+      await this.dispatchWhatsAppAndRecordChat({
         channel: "BUYER_SHOP_WA",
-        sender: "CATERLOG_BOT",
-        fromPhone: "CATERLOG",
+        toPhone: params.buyerPhone,
         text: soldOutMsg,
       });
       await this.broadcastStateChange();
@@ -1564,19 +1592,13 @@ export class CaterlogStage1Engine {
       { label: "🛒 View Cart", replyText: "cart" },
     ];
 
-    await this.whatsapp.sendTextMessage({
-      toPhone: params.buyerPhone,
-      text: promptText,
-      vendorPhoneId: this.vendor.whatsappPhoneId,
-    });
-
-    this.appendChat({
+    await this.dispatchWhatsAppAndRecordChat({
       channel: "BUYER_SHOP_WA",
-      sender: "CATERLOG_BOT",
-      fromPhone: "CATERLOG",
+      toPhone: params.buyerPhone,
       text: promptText,
       imageUrl: product.primaryImageUrl,
       quickReplies,
+      headerText: "Delivery Options",
     });
 
     await this.broadcastStateChange();
@@ -1622,8 +1644,11 @@ export class CaterlogStage1Engine {
       if (avail < item.quantity) {
         const itemLabel = v ? `${prod.name} (${v.name})` : prod.name;
         const outMsg = `⚠️ Sorry, *${itemLabel}* only has ${Math.max(0, avail)} unit(s) left in stock (you requested ${item.quantity}). Please adjust your cart.`;
-        await this.whatsapp.sendTextMessage({ toPhone: params.buyerPhone, text: outMsg, vendorPhoneId: this.vendor.whatsappPhoneId });
-        this.appendChat({ channel: "BUYER_SHOP_WA", sender: "CATERLOG_BOT", fromPhone: "CATERLOG", text: outMsg });
+        await this.dispatchWhatsAppAndRecordChat({
+          channel: "BUYER_SHOP_WA",
+          toPhone: params.buyerPhone,
+          text: outMsg,
+        });
         await this.broadcastStateChange();
         return undefined;
       }

@@ -227,5 +227,105 @@ describe("Layer 1 Integrations — Monnify & WhatsApp Cloud Adapters", () => {
     assert.equal(listPayload.interactive.action.catalog_id, "catalog-123");
     assert.equal(listPayload.interactive.action.sections[0]?.product_items.length, 1);
   });
+
+  it("sends image and interactive quick-reply buttons/lists to real WhatsApp recipients", async () => {
+    const whatsapp = new WhatsAppCloudAdapter({
+      mode: "mock",
+      accessToken: "token",
+      defaultPhoneNumberId: "105992837465001",
+      appSecret: "secret",
+      verifyToken: "verify",
+      graphApiVersion: "v22.0",
+    });
+
+    // 1. Standalone image with caption
+    await whatsapp.sendImageMessage({
+      toPhone: "+2348011223344",
+      imageUrl: "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=600",
+      caption: "Zara Block Heel — ₦25,000",
+    });
+
+    // 2. Interactive buttons with image header (1 to 3 options)
+    await whatsapp.sendInteractiveButtonsMessage({
+      toPhone: "+2348011223344",
+      bodyText: "Zara Block Heel — Select variant:",
+      buttons: [
+        { id: "Add SHOE-01 38", title: "🛒 Add 38 (₦20k)" },
+        { id: "Add SHOE-01 39", title: "🛒 Add 39 (₦25k)" },
+      ],
+      headerImageUrl: "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=600",
+    });
+
+    // 3. Interactive list message (4+ options)
+    await whatsapp.sendInteractiveListMessage({
+      toPhone: "+2348011223344",
+      bodyText: "Choose your delivery zone:",
+      buttonText: "View Zones",
+      sections: [
+        {
+          title: "Delivery Zones",
+          rows: [
+            { id: "Lekki", title: "1. Lekki Phase 1", description: "₦3,500 · 1-2 days" },
+            { id: "Mainland", title: "2. Lagos Mainland", description: "₦2,500 · Same day" },
+            { id: "Ibadan", title: "3. Ibadan", description: "₦6,000 · 2-3 days" },
+            { id: "Abuja", title: "4. Abuja Express", description: "₦8,000 · 1 day" },
+          ],
+        },
+      ],
+    });
+
+    // 4. High-level sendWhatsAppMessage automatically chooses buttons for <= 3 items
+    await whatsapp.sendWhatsAppMessage({
+      toPhone: "+2348011223344",
+      text: "Hermes Slide — Available now",
+      imageUrl: "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=600",
+      quickReplies: [
+        { label: "🛒 Add to Cart", replyText: "Add SHOE-02" },
+        { label: "📂 More in Shoes", replyText: "category fashion" },
+      ],
+    });
+
+    const outbox = whatsapp.getSandboxOutbox();
+    assert.equal(outbox.length, 4);
+
+    // Assert 1: Image
+    assert.equal(outbox[0]?.kind, "IMAGE");
+    const imgPayload = outbox[0]?.payload as { type: string; image: { link: string; caption: string } };
+    assert.equal(imgPayload.type, "image");
+    assert.ok(imgPayload.image.link.includes("unsplash.com"));
+    assert.equal(imgPayload.image.caption, "Zara Block Heel — ₦25,000");
+
+    // Assert 2: Interactive buttons
+    assert.equal(outbox[1]?.kind, "INTERACTIVE_BUTTONS");
+    const btnPayload = outbox[1]?.payload as {
+      type: string;
+      interactive: {
+        type: string;
+        header?: { type: string; image: { link: string } };
+        action: { buttons: Array<{ reply: { id: string; title: string } }> };
+      };
+    };
+    assert.equal(btnPayload.type, "interactive");
+    assert.equal(btnPayload.interactive.type, "button");
+    assert.equal(btnPayload.interactive.action.buttons.length, 2);
+    assert.equal(btnPayload.interactive.action.buttons[0]?.reply.id, "Add SHOE-01 38");
+    assert.ok(btnPayload.interactive.header?.image.link.includes("unsplash.com"));
+
+    // Assert 3: Interactive list
+    assert.equal(outbox[2]?.kind, "INTERACTIVE_LIST");
+    const listPayload = outbox[2]?.payload as {
+      type: string;
+      interactive: {
+        type: string;
+        action: { button: string; sections: Array<{ rows: Array<{ id: string; title: string }> }> };
+      };
+    };
+    assert.equal(listPayload.interactive.type, "list");
+    assert.equal(listPayload.interactive.action.button, "View Zones");
+    assert.equal(listPayload.interactive.action.sections[0]?.rows.length, 4);
+
+    // Assert 4: Unified dispatcher chose interactive buttons
+    assert.equal(outbox[3]?.kind, "INTERACTIVE_BUTTONS");
+  });
 });
 
