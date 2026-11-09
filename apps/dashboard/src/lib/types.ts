@@ -42,6 +42,16 @@ export interface Vendor {
   reservationTtlMinutes: number;
 }
 
+export interface ProductVariant {
+  id: string;
+  name: string;
+  sku: string;
+  priceNaira: number;
+  priceFormatted?: string;
+  stock: number;
+  availableStock?: number;
+}
+
 export interface Product {
   id: string;
   skuCode: string;
@@ -57,6 +67,7 @@ export interface Product {
   stockTotal: number;
   stockReserved: number;
   availableStock: number;
+  variants?: ProductVariant[];
 }
 
 export interface ShippingZone {
@@ -86,6 +97,21 @@ export interface Discount {
   isActive: boolean;
 }
 
+export interface OrderItemRecord {
+  id: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  variantId?: string;
+  variantSku?: string;
+  variantName?: string;
+  quantity: number;
+  unitPriceKobo: string;
+  unitPriceFormatted?: string;
+  subtotalKobo: string;
+  subtotalFormatted?: string;
+}
+
 export interface Order {
   id: string;
   shortCode: string;
@@ -94,7 +120,11 @@ export interface Order {
   productId: string;
   productSku: string;
   productName: string;
+  variantId?: string;
+  variantSku?: string;
+  variantName?: string;
   quantity: number;
+  items?: OrderItemRecord[];
   shippingZoneName: string;
   /** BigInt serialized as a decimal string by the API. */
   subtotalKobo: string;
@@ -144,13 +174,26 @@ export interface Analytics {
   netProductRevenueFormatted: string;
 }
 
+export interface CartItemSession {
+  productId: string;
+  productSku: string;
+  productName: string;
+  variantId?: string;
+  variantSku?: string;
+  variantName?: string;
+  quantity: number;
+  unitPriceNaira?: number;
+}
+
 export interface BuyerSession {
   buyerPhone: string;
   buyerName: string;
-  activeProductId: string;
-  quantity: number;
+  activeProductId?: string;
+  activeVariantId?: string;
+  quantity?: number;
   discountCode?: string;
-  state: "AWAITING_SHIPPING_ZONE";
+  cart?: CartItemSession[];
+  state: "AWAITING_VARIANT" | "AWAITING_SHIPPING_ZONE" | "CART_ACTIVE";
   updatedAt: string;
 }
 

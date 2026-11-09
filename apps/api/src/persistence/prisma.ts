@@ -72,7 +72,11 @@ export class PrismaPersistenceStore implements PersistenceStore {
     const vendor = await prisma.vendor.findUnique({
       where: { slug: this.vendorSlug },
       include: {
-        products: { where: { isActive: true }, orderBy: { createdAt: "asc" } },
+        products: {
+          where: { isActive: true },
+          orderBy: { createdAt: "asc" },
+          include: { variants: true },
+        },
         shippingZones: { where: { isActive: true }, orderBy: { code: "asc" } },
         discounts: { where: { isActive: true }, orderBy: { startsAt: "desc" } },
         orders: {
@@ -119,6 +123,14 @@ export class PrismaPersistenceStore implements PersistenceStore {
         imagePhash: product.imagePhash ?? "",
         stockTotal: product.stockTotal,
         stockReserved: product.stockReserved,
+        variants: product.variants?.map((v) => ({
+          id: v.id,
+          name: v.name,
+          skuCode: `${product.skuCode}-${v.skuSuffix}`,
+          priceKobo: v.priceKobo ?? undefined,
+          stockTotal: v.stockTotal,
+          stockReserved: v.stockReserved,
+        })),
       })),
       shippingZones: vendor.shippingZones.map((zone) => ({
         id: zone.id,
@@ -175,11 +187,42 @@ export class PrismaPersistenceStore implements PersistenceStore {
       isActive: true,
     };
 
-    await prisma.product.upsert({
+    const upserted = await prisma.product.upsert({
       where: { vendorId_skuCode: { vendorId, skuCode } },
       create: { vendorId, skuCode, ...data },
       update: data,
     });
+
+    if (product.variants && product.variants.length > 0) {
+      for (const v of product.variants) {
+        const skuSuffix = v.skuCode.startsWith(`${skuCode}-`)
+          ? v.skuCode.slice(skuCode.length + 1)
+          : v.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10).toUpperCase() || "VAR";
+
+        await prisma.productVariant.upsert({
+          where: {
+            productId_skuSuffix: {
+              productId: upserted.id,
+              skuSuffix,
+            },
+          },
+          create: {
+            productId: upserted.id,
+            name: v.name,
+            skuSuffix,
+            priceKobo: v.priceKobo ?? null,
+            stockTotal: v.stockTotal,
+            stockReserved: v.stockReserved,
+          },
+          update: {
+            name: v.name,
+            priceKobo: v.priceKobo ?? null,
+            stockTotal: v.stockTotal,
+            stockReserved: v.stockReserved,
+          },
+        });
+      }
+    }
   }
 
   public async deleteProduct(skuCode: string): Promise<void> {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import type { ProductItem } from "@/lib/types";
 
 interface ProductVariant {
@@ -29,40 +29,87 @@ export function ProductEditorModal({
   const isEditing = Boolean(product);
   const [deleting, setDeleting] = useState(false);
 
-  const [name, setName] = useState(product?.name || "Stainless Steel Vacuum Flask");
+  const [name, setName] = useState(product?.name || "");
   const [sku, setSku] = useState(product?.skuCode || `SKU-${Date.now().toString().slice(-4)}`);
   const [category, setCategory] = useState(product?.category || "Kitchenware & Drinkware");
-  const [description, setDescription] = useState(
-    product?.description ||
-      "Double-walled stainless steel thermal vacuum flask. Keeps beverages hot for 12 hours and cold for 24 hours. Leak-proof lid with silicone seal."
-  );
+  const [description, setDescription] = useState(product?.description || "");
 
   // Pricing & Margins
   const [wholesaleCost, setWholesaleCost] = useState(product ? Math.round(product.basePriceNaira * 0.75) : 7500);
   const [sellingPrice, setSellingPrice] = useState(product?.basePriceNaira || 10000);
-  const [stockTotal, setStockTotal] = useState(product?.stockTotal || 45);
+  const [stockTotal, setStockTotal] = useState(product?.stockTotal || 10);
   const [lowStockThreshold, setLowStockThreshold] = useState(5);
   const [isPublished, setIsPublished] = useState(true);
 
   // Images
   const [images, setImages] = useState<string[]>([
     product?.primaryImageUrl || "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
-    "https://images.unsplash.com/photo-1544816155-12df9643f363?w=500&auto=format&fit=crop&q=60",
   ]);
   const [newImageUrl, setNewImageUrl] = useState("");
   const [showAddImage, setShowAddImage] = useState(false);
 
   // Variants Matrix
-  const [hasVariants, setHasVariants] = useState(true);
-  const [variants, setVariants] = useState<ProductVariant[]>([
-    { id: "v1", name: "750ml / Matte Black", sku: `${sku}-BLK`, priceNaira: sellingPrice, stock: 25 },
-    { id: "v2", name: "750ml / Rose Gold", sku: `${sku}-RGD`, priceNaira: sellingPrice, stock: 12 },
-    { id: "v3", name: "1000ml / Silver", sku: `${sku}-SLV`, priceNaira: sellingPrice + 2000, stock: 8 },
-  ]);
+  const [hasVariants, setHasVariants] = useState(Boolean(product?.variants && product.variants.length > 0));
+  const [variants, setVariants] = useState<ProductVariant[]>(
+    product?.variants
+      ? product.variants.map((v) => ({
+          id: v.id,
+          name: v.name,
+          sku: v.sku,
+          priceNaira: v.priceNaira ?? product.basePriceNaira,
+          stock: v.stock,
+        }))
+      : []
+  );
 
   const [newVariantName, setNewVariantName] = useState("");
   const [newVariantPrice, setNewVariantPrice] = useState(sellingPrice);
   const [newVariantStock, setNewVariantStock] = useState(10);
+
+  // Hydrate fields whenever modal opens with a product
+  useEffect(() => {
+    if (product) {
+      setName(product.name);
+      setSku(product.skuCode);
+      setCategory(product.category || "Kitchenware & Drinkware");
+      setDescription(product.description || "");
+      setSellingPrice(product.basePriceNaira);
+      setWholesaleCost(Math.round(product.basePriceNaira * 0.75));
+      setStockTotal(product.stockTotal);
+      setImages([
+        product.primaryImageUrl ||
+          "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
+      ]);
+      if (product.variants && product.variants.length > 0) {
+        setHasVariants(true);
+        setVariants(
+          product.variants.map((v) => ({
+            id: v.id,
+            name: v.name,
+            sku: v.sku,
+            priceNaira: v.priceNaira ?? product.basePriceNaira,
+            stock: v.stock,
+          }))
+        );
+      } else {
+        setHasVariants(false);
+        setVariants([]);
+      }
+    } else if (isOpen) {
+      setName("");
+      setSku(`SKU-${Date.now().toString().slice(-4)}`);
+      setCategory("Kitchenware & Drinkware");
+      setDescription("");
+      setSellingPrice(10000);
+      setWholesaleCost(7500);
+      setStockTotal(10);
+      setHasVariants(false);
+      setVariants([]);
+      setImages([
+        "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
+      ]);
+    }
+  }, [product, isOpen]);
 
   // Computed Margins
   const grossProfit = sellingPrice - wholesaleCost;

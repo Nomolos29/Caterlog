@@ -10,6 +10,18 @@ export const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000"
 ).replace(/\/+$/, "");
 
+/**
+ * Normalizes image URLs so relative backend media endpoints (/api/v1/media/...)
+ * resolve to the full API server address.
+ */
+export function resolveImageUrl(url?: string): string {
+  if (!url) return "";
+  if (url.startsWith("/api/v1/media/")) {
+    return `${API_BASE_URL}${url}`;
+  }
+  return url;
+}
+
 export class ApiError extends Error {
   public readonly status: number;
 
@@ -77,15 +89,35 @@ export const api = {
   },
 
   addProduct(input: {
-    skuCode: string;
+    skuCode?: string;
     name: string;
+    description?: string;
     priceNaira: number | string;
-    stockTotal: number;
+    stockTotal?: number;
     category?: string;
     primaryImageUrl?: string;
+    variants?: any[];
   }): Promise<VendorState> {
     return request<VendorState>("/api/v1/vendor/products", {
       method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  updateProduct(
+    skuCode: string,
+    input: {
+      name?: string;
+      description?: string;
+      category?: string;
+      priceNaira?: number | string;
+      stockTotal?: number;
+      primaryImageUrl?: string;
+      variants?: any[];
+    }
+  ): Promise<VendorState> {
+    return request<VendorState>(`/api/v1/vendor/products/${encodeURIComponent(skuCode)}`, {
+      method: "PUT",
       ...jsonBody(input),
     });
   },

@@ -116,6 +116,7 @@ export function Dashboard() {
     priceNaira: number;
     stockTotal: number;
     primaryImageUrl?: string;
+    variants?: any[];
   }) => {
     try {
       const next = await api.addProduct({
@@ -124,7 +125,30 @@ export function Dashboard() {
         priceNaira: input.priceNaira,
         stockTotal: input.stockTotal,
         primaryImageUrl: input.primaryImageUrl,
+        variants: input.variants,
       });
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const handleUpdateProduct = async (
+    sku: string,
+    input: {
+      name?: string;
+      description?: string;
+      category?: string;
+      priceNaira?: number | string;
+      stockTotal?: number;
+      primaryImageUrl?: string;
+      variants?: any[];
+    }
+  ) => {
+    try {
+      const next = await api.updateProduct(sku, input);
       setState(next);
       return true;
     } catch (err) {
@@ -412,6 +436,7 @@ export function Dashboard() {
             <ProductsView
               products={state.products}
               onAddProduct={handleAddProduct}
+              onUpdateProduct={handleUpdateProduct}
               onUpdateStock={handleUpdateStock}
               onDeleteProduct={handleDeleteProduct}
               onNavigateToNetwork={() => setCurrentView("network")}
@@ -442,6 +467,7 @@ export function Dashboard() {
           {currentView === "payments" && (
             <PaymentsView
               orders={state.orders}
+              initialOrderCode={selectedOrder?.shortCode}
               onNavigateToOrder={(code) => {
                 const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
                 if (target) {
@@ -487,6 +513,9 @@ export function Dashboard() {
 
           {currentView === "notifications" && (
             <NotificationsView
+              orders={state.orders}
+              products={state.products}
+              chatMessages={state.chatMessages}
               onNavigateToOrder={(code) => {
                 const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
                 if (target) {

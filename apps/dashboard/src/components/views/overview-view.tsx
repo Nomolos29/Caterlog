@@ -247,15 +247,15 @@ export function OverviewView({
 
           {/* Revenue Chart or Clean Zero State */}
           {orders.length === 0 ? (
-            <div className="my-6 py-10 flex flex-col items-center justify-center text-center px-4">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+            <div className="my-8 py-10 flex flex-col items-center justify-center text-center px-4">
+              <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center mb-4 text-2xl font-bold ring-8 ring-emerald-500/[0.04]">
                 📈
               </div>
-              <h3 className="text-sm font-bold text-gray-900">No Sales Curve Recorded Yet</h3>
-              <p className="text-xs text-gray-400 mt-1 max-w-sm leading-relaxed">
+              <h3 className="text-lg font-extrabold text-gray-900 tracking-tight">No Sales Curve Recorded Yet</h3>
+              <p className="text-xs sm:text-sm text-gray-500 mt-1.5 max-w-md leading-relaxed font-normal">
                 As buyers purchase products via your WhatsApp Co-Pilot or checkout links, daily revenue and volume curves will graph here automatically.
               </p>
-              <div className="mt-6 w-full border-b border-dashed border-gray-200 relative">
+              <div className="mt-8 w-full border-b border-dashed border-gray-200 relative">
                 <span className="absolute -top-3 left-0 text-[10px] font-mono text-gray-400 bg-white pr-2">₦0.00</span>
               </div>
               <div className="w-full flex justify-between text-[10px] font-semibold text-gray-300 mt-2 px-1">
@@ -310,12 +310,12 @@ export function OverviewView({
 
           <div className="space-y-3 flex-1 flex flex-col justify-center">
             {orders.length === 0 ? (
-              <div className="py-8 text-center text-xs text-gray-400 flex flex-col items-center justify-center">
-                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-2 font-mono text-sm">
+              <div className="py-10 text-center flex flex-col items-center justify-center px-2">
+                <div className="w-14 h-14 rounded-3xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center mb-3 text-xl font-bold ring-8 ring-emerald-500/[0.04]">
                   ⚡
                 </div>
-                <p className="font-semibold text-gray-700">No activity yet</p>
-                <p className="text-[11px] text-gray-400 mt-1 max-w-[220px]">
+                <p className="text-base font-extrabold text-gray-900 tracking-tight">No activity yet</p>
+                <p className="text-xs text-gray-400 mt-1.5 max-w-[220px] leading-relaxed">
                   Incoming orders, buyer WhatsApp conversations, and Monnify escrow payments will appear here in real time.
                 </p>
               </div>
@@ -331,7 +331,12 @@ export function OverviewView({
                   </div>
                   <div className="text-xs min-w-0 flex-1">
                     <div className="text-gray-900 truncate">
-                      <span className="font-semibold">{o.customerName}</span> ordered <span className="font-medium">{o.productName}</span>
+                      <span className="font-semibold">{o.customerName}</span> ordered{" "}
+                      <span className="font-medium">
+                        {o.items && o.items.length > 1
+                          ? `${o.items.length} items (${o.items[0].productName} + ${o.items.length - 1} more)`
+                          : `${o.productName}${o.variantName ? ` (${o.variantName})` : ""}`}
+                      </span>
                     </div>
                     <div className="text-gray-400 text-[11px] mt-0.5 flex items-center gap-1.5">
                       <span>{o.shortCode}</span>
@@ -370,12 +375,12 @@ export function OverviewView({
         </div>
 
         {needsAttention.length === 0 ? (
-          <div className="py-12 px-4 text-center flex flex-col items-center justify-center">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
+          <div className="py-16 px-4 text-center flex flex-col items-center justify-center">
+            <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center mb-4 text-2xl font-bold ring-8 ring-emerald-500/[0.04]">
               ✓
             </div>
-            <p className="text-sm font-bold text-gray-900">All caught up!</p>
-            <p className="text-xs text-gray-400 mt-1 max-w-sm">
+            <p className="text-xl font-black text-gray-900 tracking-tight">All Caught Up!</p>
+            <p className="text-xs sm:text-sm text-gray-500 mt-1 max-w-md">
               No pending orders or expiring checkout holds requiring attention right now.
             </p>
           </div>

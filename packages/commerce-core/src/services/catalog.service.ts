@@ -102,6 +102,12 @@ export class CatalogService {
       stockTotal: number;
       primaryImageUrl?: string;
       imagePhash?: string;
+      variants?: Array<{
+        name: string;
+        stockTotal: number;
+        priceKobo?: bigint;
+        skuSuffix?: string;
+      }>;
     },
     actor: ActorSource
   ): Promise<Product> {
@@ -134,6 +140,36 @@ export class CatalogService {
       },
     });
 
+    if (input.variants && input.variants.length > 0) {
+      for (const [idx, v] of input.variants.entries()) {
+        const skuSuffix = (
+          v.skuSuffix ||
+          v.name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase() ||
+          String(idx + 1)
+        );
+        await this.db.productVariant.upsert({
+          where: {
+            productId_skuSuffix: {
+              productId: product.id,
+              skuSuffix,
+            },
+          },
+          update: {
+            name: v.name,
+            stockTotal: v.stockTotal,
+            priceKobo: v.priceKobo,
+          },
+          create: {
+            productId: product.id,
+            name: v.name,
+            skuSuffix,
+            stockTotal: v.stockTotal,
+            priceKobo: v.priceKobo,
+          },
+        });
+      }
+    }
+
     await this.recordAndPublishEvent({
       vendorId,
       actorType: actor,
@@ -146,6 +182,7 @@ export class CatalogService {
         basePriceKobo: product.basePriceKobo.toString(),
         stockTotal: product.stockTotal,
         stockReserved: product.stockReserved,
+        variantsCount: input.variants?.length ?? 0,
       },
     });
 

@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import type { ProductItem } from "@/lib/types";
 import { PlusIcon } from "../icons";
 import { ProductEditorModal } from "./product-editor-modal";
+import { EmptyState } from "../ui/empty-state";
+import { resolveImageUrl } from "@/lib/api";
 
 interface ProductsViewProps {
   products: ProductItem[];
@@ -14,7 +16,30 @@ interface ProductsViewProps {
     priceNaira: number;
     stockTotal: number;
     primaryImageUrl?: string;
+    variants?: Array<{
+      id?: string;
+      name: string;
+      skuCode?: string;
+      priceNaira?: number;
+      stockTotal: number;
+    }>;
   }) => Promise<boolean>;
+  onUpdateProduct?: (
+    sku: string,
+    input: {
+      name?: string;
+      priceNaira?: number;
+      stockTotal?: number;
+      primaryImageUrl?: string;
+      variants?: Array<{
+        id?: string;
+        name: string;
+        skuCode?: string;
+        priceNaira?: number;
+        stockTotal: number;
+      }>;
+    }
+  ) => Promise<boolean>;
   onUpdateStock: (sku: string, stock: number) => Promise<boolean>;
   onDeleteProduct?: (skuCode: string) => Promise<boolean>;
   onNavigateToNetwork?: (tab?: string) => void;
@@ -45,6 +70,7 @@ export function ProductsView({
   products,
   initialTab = "my-inventory",
   onAddProduct,
+  onUpdateProduct,
   onUpdateStock,
   onDeleteProduct,
   onNavigateToNetwork,
@@ -253,21 +279,16 @@ export function ProductsView({
         </div>
 
         {/* Clean Empty State */}
-        <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl font-bold">
-            ✓
-          </div>
-          <h3 className="text-base font-bold text-gray-900">No Selling Exceptions</h3>
-          <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
-            All catalog products, wholesale prices, and WhatsApp stock guardrails are in sync. When a supplier updates pricing or items run low, action items will appear here.
-          </p>
-          <button
-            onClick={() => setActiveTab("my-inventory")}
-            className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
-          >
-            Manage Inventory →
-          </button>
-        </div>
+        <EmptyState
+          badge="In Sync"
+          icon="✓"
+          title="No Selling Exceptions"
+          description="All catalog products, wholesale prices, and WhatsApp stock guardrails are in sync. When a supplier updates pricing or items run low, action items will appear here."
+          action={{
+            label: "Manage Inventory",
+            onClick: () => setActiveTab("my-inventory"),
+          }}
+        />
       </div>
     );
   }
@@ -357,23 +378,20 @@ export function ProductsView({
         </div>
 
         {resellingList.length === 0 ? (
-          <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl font-bold">
-              🤝
-            </div>
-            <h3 className="text-base font-bold text-gray-900">No Supplier Products Mirrored Yet</h3>
-            <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
-              You haven&apos;t connected with wholesale suppliers yet. You can browse the Network tab to discover verified Nigerian importers and mirror their products with zero inventory capital.
-            </p>
-            {onNavigateToNetwork && (
-              <button
-                onClick={() => onNavigateToNetwork("find-suppliers")}
-                className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
-              >
-                Explore Supplier Directory →
-              </button>
-            )}
-          </div>
+          <EmptyState
+            badge="Wholesale Network"
+            icon="🤝"
+            title="No Supplier Products Mirrored Yet"
+            description="You haven't connected with wholesale suppliers yet. Browse the Network directory to discover verified Nigerian importers and mirror their products with zero inventory capital."
+            action={
+              onNavigateToNetwork
+                ? {
+                    label: "Explore Supplier Directory",
+                    onClick: () => onNavigateToNetwork("find-suppliers"),
+                  }
+                : undefined
+            }
+          />
         ) : (
           <>
             {/* 3 Metric Cards */}
@@ -689,21 +707,28 @@ export function ProductsView({
 
       {/* Products Grid */}
       {products.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl font-bold">
-            📦
-          </div>
-          <h3 className="text-base font-bold text-gray-900">Your Product Catalog is Empty</h3>
-          <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
-            Add products with price and stock to start selling. When customers message you on WhatsApp or swipe up on your WhatsApp Status, Caterlog matches products and closes sales automatically.
-          </p>
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
-          >
-            + Add First Product
-          </button>
-        </div>
+        <EmptyState
+          badge="Product Catalog"
+          icon="📦"
+          title="Your Product Catalog is Empty"
+          description="Add products with prices and inventory to begin selling. Your AI Sales Co-Pilot will automatically reference them during WhatsApp conversations, invoice generation, and status checkouts."
+          action={{
+            label: "Add Your First Product",
+            icon: <PlusIcon className="w-4 h-4" />,
+            onClick: () => {
+              setEditingProduct(null);
+              setEditorModalOpen(true);
+            },
+          }}
+          secondaryAction={
+            onNavigateToNetwork
+              ? {
+                  label: "Explore Wholesale Suppliers",
+                  onClick: () => onNavigateToNetwork("find-suppliers"),
+                }
+              : undefined
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {products.map((p) => (
@@ -715,12 +740,25 @@ export function ProductsView({
               }}
               className="bg-white rounded-2xl border border-gray-100 hover:border-gray-300 overflow-hidden shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
             >
-              <div className="h-44 bg-gray-50 flex items-center justify-center border-b border-gray-100 overflow-hidden">
+              <div className="h-44 bg-gray-50 flex items-center justify-center border-b border-gray-100 overflow-hidden relative">
                 {p.primaryImageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.primaryImageUrl} alt={p.name} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200" />
+                  <img
+                    src={resolveImageUrl(p.primaryImageUrl)}
+                    alt={p.name}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&q=80";
+                    }}
+                    className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
+                  />
                 ) : (
                   <div className="text-3xl">📦</div>
+                )}
+                {p.variants && p.variants.length > 0 && (
+                  <span className="absolute top-2.5 left-2.5 bg-gray-900/85 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                    <span>🎛️</span>
+                    <span>{p.variants.length} Variants</span>
+                  </span>
                 )}
               </div>
               <div className="p-5 space-y-3">
@@ -733,7 +771,20 @@ export function ProductsView({
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="font-bold text-emerald-800 text-sm">
-                      {p.basePriceFormatted || `₦${p.basePriceNaira.toLocaleString()}`}
+                      {(() => {
+                        const variantPrices =
+                          p.variants
+                            ?.map((v) => v.priceNaira)
+                            .filter((pr): pr is number => typeof pr === "number" && pr > 0) || [];
+                        if (variantPrices.length > 0) {
+                          const minP = Math.min(...variantPrices);
+                          const maxP = Math.max(...variantPrices);
+                          if (minP !== maxP) {
+                            return `₦${minP.toLocaleString()} - ₦${maxP.toLocaleString()}`;
+                          }
+                        }
+                        return p.basePriceFormatted || `₦${p.basePriceNaira.toLocaleString()}`;
+                      })()}
                     </div>
                     {onDeleteProduct && (
                       <button
@@ -755,8 +806,31 @@ export function ProductsView({
                     )}
                   </div>
                 </div>
+
+                {/* Variable Products Breakdown Chips with Individual Prices */}
+                {p.variants && p.variants.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {p.variants.map((v) => (
+                      <span
+                        key={v.id || v.sku}
+                        className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 border border-gray-200"
+                      >
+                        <span className="font-semibold">{v.name}</span>
+                        <span className="text-gray-400">·</span>
+                        <span className="font-bold text-gray-900">
+                          {v.priceFormatted || `₦${(v.priceNaira ?? p.basePriceNaira).toLocaleString()}`}
+                        </span>
+                        <span className="text-gray-400">·</span>
+                        <span className="font-mono text-emerald-700 font-bold">
+                          {v.availableStock !== undefined ? v.availableStock : v.stock} left
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between pt-2 border-t border-gray-50 text-xs">
-                  <span className="text-gray-500">Stock available:</span>
+                  <span className="text-gray-500">Total stock available:</span>
                   <span className="font-bold text-gray-900">{p.availableStock} units</span>
                 </div>
               </div>
@@ -775,7 +849,15 @@ export function ProductsView({
         }}
         onDelete={onDeleteProduct}
         onSave={async (data) => {
-          if (editingProduct) {
+          if (editingProduct && onUpdateProduct) {
+            await onUpdateProduct(editingProduct.skuCode, {
+              name: data.name,
+              priceNaira: data.priceNaira,
+              stockTotal: data.stockTotal,
+              primaryImageUrl: data.primaryImageUrl,
+              variants: data.variants,
+            });
+          } else if (editingProduct) {
             await onUpdateStock(editingProduct.skuCode, data.stockTotal);
           } else {
             await onAddProduct({
@@ -784,6 +866,7 @@ export function ProductsView({
               priceNaira: data.priceNaira,
               stockTotal: data.stockTotal,
               primaryImageUrl: data.primaryImageUrl,
+              variants: data.variants,
             });
           }
           return true;

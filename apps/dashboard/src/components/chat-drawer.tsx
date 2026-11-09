@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import type { ChatMessage, Order, Product, Vendor } from "@/lib/types";
 import { CloseIcon, WhatsAppBadgeIcon } from "./icons";
+import { resolveImageUrl } from "@/lib/api";
 
 interface ChatDrawerProps {
   isOpen: boolean;
@@ -45,6 +46,20 @@ export function ChatDrawer({
   const [attachedImage, setAttachedImage] = useState("");
   const [sending, setSending] = useState(false);
   const [transferring, setTransferring] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result;
+      if (typeof result === "string") {
+        setAttachedImage(result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Phone simulator state for customer mode
   const [selectedBuyerIndex, setSelectedBuyerIndex] = useState(0); // 0 = Chidinma, 1 = Babatunde, 2 = Custom
@@ -276,22 +291,46 @@ export function ChatDrawer({
           {activeChannel === "BUYER_SHOP_WA" ? (
             <>
               {products.length > 0 ? (
-                products.slice(0, 2).map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() =>
-                      onSendBuyerInquiry(
-                        `I want ${p.name}`,
-                        undefined,
-                        currentBuyerPhone,
-                        currentBuyerName
-                      )
-                    }
-                    className="px-2 py-1 bg-white border border-gray-200 rounded text-emerald-700 hover:bg-emerald-50 cursor-pointer"
-                  >
-                    Buy {p.name.slice(0, 16)}...
-                  </button>
-                ))
+                <>
+                  {products.slice(0, 2).map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() =>
+                        onSendBuyerInquiry(
+                          `I want ${p.name}`,
+                          undefined,
+                          currentBuyerPhone,
+                          currentBuyerName
+                        )
+                      }
+                      className="px-2 py-1 bg-white border border-gray-200 rounded text-emerald-700 hover:bg-emerald-50 cursor-pointer"
+                    >
+                      {p.variants && p.variants.length > 0
+                        ? `Order ${p.name.slice(0, 12)}...`
+                        : `Buy ${p.name.slice(0, 16)}...`}
+                    </button>
+                  ))}
+                  {products.some((p) => p.variants && p.variants.length > 0) && (() => {
+                    const vp = products.find((p) => p.variants && p.variants.length > 0);
+                    const firstVar = vp?.variants?.[0];
+                    if (!vp || !firstVar) return null;
+                    return (
+                      <button
+                        onClick={() =>
+                          onSendBuyerInquiry(
+                            `I want ${vp.name} ${firstVar.name}`,
+                            undefined,
+                            currentBuyerPhone,
+                            currentBuyerName
+                          )
+                        }
+                        className="px-2 py-1 bg-white border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-50 cursor-pointer font-medium"
+                      >
+                        Order {firstVar.name}
+                      </button>
+                    );
+                  })()}
+                </>
               ) : (
                 <button
                   onClick={() =>
@@ -307,6 +346,19 @@ export function ChatDrawer({
                   Order sample item
                 </button>
               )}
+              <button
+                onClick={() =>
+                  onSendBuyerInquiry(
+                    "view cart",
+                    undefined,
+                    currentBuyerPhone,
+                    currentBuyerName
+                  )
+                }
+                className="px-2 py-1 bg-white border border-gray-200 rounded text-emerald-800 hover:bg-emerald-50 cursor-pointer font-medium"
+              >
+                🛒 View Cart
+              </button>
               <button
                 onClick={() =>
                   onSendBuyerInquiry(
@@ -361,6 +413,36 @@ export function ChatDrawer({
               >
                 discount add PAYDAY 10%
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setInputText("Zara Block Heel, #25000, sizes: 38 (2), 39 (3), 40 (5)");
+                  setAttachedImage("https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=600&q=80");
+                }}
+                className="px-2 py-1 bg-emerald-50 border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-100 font-medium cursor-pointer"
+              >
+                📸 + Variable Shoes
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setInputText("Vacuum Flask, #10000, variants: 500ml #8000 (10), 750ml #10000 (15), 1000ml #12000 (5)");
+                  setAttachedImage("https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60");
+                }}
+                className="px-2 py-1 bg-emerald-50 border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-100 font-medium cursor-pointer"
+              >
+                📸 + Variable Flask
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setInputText("Mini Leather Bag, #38000, stock 6");
+                  setAttachedImage("https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=600&q=80");
+                }}
+                className="px-2 py-1 bg-emerald-50 border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-100 font-medium cursor-pointer"
+              >
+                📸 + Simple Bag
+              </button>
             </>
           )}
         </div>
@@ -398,8 +480,11 @@ export function ChatDrawer({
                     {m.imageUrl && (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={m.imageUrl}
+                        src={resolveImageUrl(m.imageUrl)}
                         alt="Attachment"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=600&q=80";
+                        }}
                         className="w-full max-h-40 object-cover rounded-xl mb-2"
                       />
                     )}
@@ -412,14 +497,21 @@ export function ChatDrawer({
                           (qr: { label: string; replyText: string }, idx: number) => (
                             <button
                               key={idx}
-                              onClick={() =>
-                                onSendBuyerInquiry(
-                                  qr.replyText,
-                                  undefined,
-                                  currentBuyerPhone,
-                                  currentBuyerName
-                                )
-                              }
+                              onClick={() => {
+                                if (
+                                  m.channel === "VENDOR_ADMIN_WA" ||
+                                  activeChannel === "VENDOR_ADMIN_WA"
+                                ) {
+                                  onSendVendorKeyword(qr.replyText);
+                                } else {
+                                  onSendBuyerInquiry(
+                                    qr.replyText,
+                                    undefined,
+                                    currentBuyerPhone,
+                                    currentBuyerName
+                                  );
+                                }
+                              }}
                               className="w-full text-left bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] block transition-all cursor-pointer"
                             >
                               {qr.label}
@@ -440,22 +532,76 @@ export function ChatDrawer({
 
         {/* Input Form */}
         <form onSubmit={handleSend} className="p-3 bg-white border-t border-gray-200 space-y-2">
-          {activeChannel === "VENDOR_ADMIN_WA" && (
-            <input
-              type="url"
-              placeholder="Optional attached image URL for new product photo..."
-              value={attachedImage}
-              onChange={(e) => setAttachedImage(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1 text-[11px] text-gray-900 focus:outline-none focus:border-emerald-500"
-            />
+          {attachedImage && (
+            <div className="flex items-center gap-2 p-1.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={attachedImage}
+                alt="Attachment preview"
+                className="w-9 h-9 object-cover rounded-lg border border-emerald-300 shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-semibold text-emerald-900 truncate">
+                  Photo attached
+                </div>
+                <div className="text-[10px] text-emerald-700 truncate">{attachedImage}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAttachedImage("")}
+                className="w-5 h-5 rounded-full bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center text-xs cursor-pointer shrink-0"
+                title="Remove photo"
+              >
+                ✕
+              </button>
+            </div>
           )}
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+
+          {activeChannel === "VENDOR_ADMIN_WA" && !attachedImage && (
+            <div className="flex gap-1.5 items-center">
+              <input
+                type="url"
+                placeholder="Optional attached image URL (or tap 📷 to attach file)..."
+                value={attachedImage}
+                onChange={(e) => setAttachedImage(e.target.value)}
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1 text-[11px] text-gray-900 focus:outline-none focus:border-emerald-500"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs cursor-pointer transition-colors whitespace-nowrap"
+                title="Attach photo from disk"
+              >
+                📷 Photo
+              </button>
+            </div>
+          )}
+
           <div className="flex gap-2">
+            {activeChannel === "VENDOR_ADMIN_WA" && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 text-gray-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl cursor-pointer transition-colors"
+                title="Attach image from disk"
+              >
+                📎
+              </button>
+            )}
             <input
               type="text"
               required
               placeholder={
                 activeChannel === "VENDOR_ADMIN_WA"
-                  ? "Send command (#help, sales, stock, ship Lekki 3500)..."
+                  ? "Send command (e.g. Zara Heel, #25000, sizes: 38 (2), 39 (3))..."
                   : `Send message as ${currentBuyerName}...`
               }
               value={inputText}

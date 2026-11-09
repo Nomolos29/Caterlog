@@ -244,12 +244,25 @@ export class VendorCommandDispatcher {
             stockTotal: cmd.stockTotal,
             primaryImageUrl: params.attachedImageUrl,
             imagePhash: params.attachedImagePhash,
+            variants: cmd.variants,
           },
           actor
         );
+
+        const variantLines =
+          cmd.variants && cmd.variants.length > 0
+            ? [
+                `\n🎛️ *Variants (${cmd.variants.length}):*`,
+                ...cmd.variants.map(
+                  (v) =>
+                    `  • *${v.name}*: ${v.stockTotal} units (${formatNaira(v.priceKobo ?? cmd.priceKobo)})`
+                ),
+              ].join("\n")
+            : "";
+
         return {
           parsedCommand: cmd,
-          whatsappReplyText: `✅ *Product Saved to Catalog:*\n📦 *${product.name}*\n🏷️ SKU: *${product.skuCode}*\n💰 Price: *${formatNaira(product.basePriceKobo)}*\n🔢 Stock: *${product.stockTotal}*`,
+          whatsappReplyText: `✅ *Product Saved to Catalog:*\n📦 *${product.name}*\n🏷️ SKU: *${product.skuCode}*\n💰 Base Price: *${formatNaira(product.basePriceKobo)}*\n🔢 Total Stock: *${product.stockTotal}*${variantLines}`,
         };
       }
 

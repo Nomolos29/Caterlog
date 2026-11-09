@@ -198,6 +198,50 @@ describe("Layer 1 Commerce Core — Pure Domain & Architecture Tests", () => {
       priceKobo: 2500000n,
       stockTotal: 5,
     });
+    // Variable product with sizes and quantities
+    assert.deepEqual(
+      parseVendorWhatsAppCommand("Zara Block Heel, #25000, sizes: 38 (2), 39 (3), 40 (5)"),
+      {
+        type: "QUICK_ADD_PRODUCT",
+        name: "Zara Block Heel",
+        priceKobo: 2500000n,
+        stockTotal: 10,
+        variants: [
+          { name: "38", stockTotal: 2, priceKobo: 2500000n, skuSuffix: "38" },
+          { name: "39", stockTotal: 3, priceKobo: 2500000n, skuSuffix: "39" },
+          { name: "40", stockTotal: 5, priceKobo: 2500000n, skuSuffix: "40" },
+        ],
+      }
+    );
+    // Variable product where each variation has its own price (no overall base price)
+    assert.deepEqual(
+      parseVendorWhatsAppCommand("Zara Block Heel, 38: #20000 (5), 39: #25000 (3), 40: #28000 (2)"),
+      {
+        type: "QUICK_ADD_PRODUCT",
+        name: "Zara Block Heel",
+        priceKobo: 2000000n,
+        stockTotal: 10,
+        variants: [
+          { name: "38", stockTotal: 5, priceKobo: 2000000n, skuSuffix: "38" },
+          { name: "39", stockTotal: 3, priceKobo: 2500000n, skuSuffix: "39" },
+          { name: "40", stockTotal: 2, priceKobo: 2800000n, skuSuffix: "40" },
+        ],
+      }
+    );
+    // Variable product with @ 15k format
+    assert.deepEqual(
+      parseVendorWhatsAppCommand("Silk Scarf, Red @ 15k (4), Blue @ 18k (6)"),
+      {
+        type: "QUICK_ADD_PRODUCT",
+        name: "Silk Scarf",
+        priceKobo: 1500000n,
+        stockTotal: 10,
+        variants: [
+          { name: "Red", stockTotal: 4, priceKobo: 1500000n, skuSuffix: "RED" },
+          { name: "Blue", stockTotal: 6, priceKobo: 1800000n, skuSuffix: "BLUE" },
+        ],
+      }
+    );
   });
 
   it("publishes cross-layer domain events so future layers subscribe without coupling", async () => {

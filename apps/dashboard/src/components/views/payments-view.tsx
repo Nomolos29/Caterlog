@@ -2,9 +2,11 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import type { OrderItem } from "@/lib/types";
+import { EmptyState } from "../ui/empty-state";
 
 interface PaymentsViewProps {
   initialTab?: "splits" | "accounts" | "detail" | "rules";
+  initialOrderCode?: string;
   orders?: OrderItem[];
   onNavigateToOrder?: (orderCode: string) => void;
 }
@@ -61,9 +63,15 @@ const buildTransactions = (orders: OrderItem[] = []): TransactionItem[] => {
     });
 };
 
-export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToOrder }: PaymentsViewProps) {
+export function PaymentsView({
+  initialTab = "splits",
+  initialOrderCode,
+  orders = [],
+  onNavigateToOrder,
+}: PaymentsViewProps) {
   // Tabs: 'splits' | 'accounts' | 'detail' | 'rules'
   const [activeTab, setActiveTab] = useState<"splits" | "accounts" | "detail" | "rules">(initialTab);
+  const [selectedOrderCode, setSelectedOrderCode] = useState<string | null>(initialOrderCode || null);
 
   // Derive transactions dynamically from orders and allow in-memory updates for detail flows
   const [transactions, setTransactions] = useState<TransactionItem[]>(() => buildTransactions(orders));
@@ -71,6 +79,37 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
   useEffect(() => {
     setTransactions(buildTransactions(orders));
   }, [orders]);
+
+  useEffect(() => {
+    if (initialOrderCode) {
+      setSelectedOrderCode(initialOrderCode);
+    }
+  }, [initialOrderCode]);
+
+  const currentOrder = useMemo(() => {
+    if (selectedOrderCode) {
+      const match = orders.find((o) => o.shortCode === selectedOrderCode);
+      if (match) return match;
+    }
+    return orders.find((o) => o.status === "PAID" || o.amountPaidNaira > 0) || orders[0] || null;
+  }, [orders, selectedOrderCode]);
+
+  // Financial splits for currently inspected order
+  const currentOrderGross = currentOrder ? (currentOrder.amountPaidNaira || currentOrder.totalAmountNaira) : 0;
+  const currentOrderFee = Math.round(currentOrderGross * 0.015);
+  const currentOrderSupplier = Math.round(currentOrderGross * 0.75);
+  const currentOrderRepGross = Math.max(0, currentOrderGross - currentOrderSupplier);
+  const currentOrderRepNet = Math.max(0, currentOrderRepGross - currentOrderFee);
+
+  const itemsDescription = useMemo(() => {
+    if (!currentOrder) return "";
+    if (currentOrder.items && currentOrder.items.length > 0) {
+      return currentOrder.items
+        .map((it) => `${it.quantity} × ${it.productName}${it.variantName ? ` (${it.variantName})` : ""}`)
+        .join(" + ");
+    }
+    return `${currentOrder.quantity} × ${currentOrder.productName}${currentOrder.variantName ? ` (${currentOrder.variantName})` : ""}`;
+  }, [currentOrder]);
 
   // Filter states for split transactions ledger
   const [searchTx, setSearchTx] = useState("");
@@ -91,12 +130,18 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
   // Detail / Refund review state
   const [retryPayoutLoading, setRetryPayoutLoading] = useState(false);
   const [payoutRetried, setPayoutRetried] = useState(false);
-  const [refundAmount, setRefundAmount] = useState("20000");
+  const [refundAmount, setRefundAmount] = useState(() => String(currentOrderGross || 20000));
   const [refundReason, setRefundReason] = useState("Customer requested cancellation");
   const [reviewedLiability, setReviewedLiability] = useState(false);
   const [refundSubmitted, setRefundSubmitted] = useState(false);
   const [timelineRefreshing, setTimelineRefreshing] = useState(false);
   const [refreshNotice, setRefreshNotice] = useState(false);
+
+  useEffect(() => {
+    if (currentOrderGross > 0) {
+      setRefundAmount(String(currentOrderGross));
+    }
+  }, [currentOrderGross]);
 
   // CSV Export functionality
   const handleExportCSV = () => {
@@ -197,9 +242,47 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
   };
 
   /* -------------------------------------------------------------------------- */
-  /* Screen 13: Payments · Split detail and refund review (CT-1042)             */
+  /* Screen 13: Payments · Split detail and refund review (Dynamic Order)        */
   /* -------------------------------------------------------------------------- */
   if (activeTab === "detail") {
+    if (!currentOrder) {
+      return (
+        <div className="space-y-6 max-w-6xl mx-auto pb-16">
+          <div className="text-xs text-gray-500 mb-1 flex items-center gap-1.5">
+            <button
+              onClick={() => setActiveTab("splits")}
+              className="hover:text-emerald-700 underline"
+            >
+              Payments / Split transactions
+            </button>
+            <span>/</span>
+            <span>Order Detail</span>
+          </div>
+          <EmptyState
+            badge="Split Settlements"
+            icon="💳"
+            title="No Transaction Selected"
+            description="Select an order from the transactions ledger to inspect its split allocations, Monnify escrow routing, and virtual account reconciliation."
+            action={{
+              label: "Back to Split Transactions",
+              onClick: () => setActiveTab("splits"),
+            }}
+          />
+        </div>
+      );
+    }
+
+    const orderDate = new Date(currentOrder.paidAt || currentOrder.createdAt);
+    const dateFormatted = orderDate.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+    const timeFormatted = orderDate.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }) + " WAT";
+
     return (
       <div className="space-y-6 max-w-6xl mx-auto pb-16">
         {/* Header */}
@@ -213,26 +296,37 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
                 Payments / Split transactions
               </button>
               <span>/</span>
-              <span>CT-1042</span>
+              <span>{currentOrder.shortCode}</span>
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-              Split transaction CT-1042
+              Split transaction {currentOrder.shortCode}
             </h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              GW-1042 · Customer paid ₦20,000 · 3 Nov 2026, 10:18 WAT
+              {currentOrder.invoiceReference || `GW-${currentOrder.shortCode}`} · Customer {currentOrder.status === "PAID" ? "paid" : "total"}{" "}
+              {currentOrder.amountPaidFormatted || currentOrder.totalAmountFormatted} · {dateFormatted}, {timeFormatted}
             </p>
             <div className="flex flex-wrap items-center gap-2 mt-2">
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Customer payment: Paid
-              </span>
               <span
                 className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
-                  payoutRetried
+                  currentOrder.status === "PAID"
                     ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                     : "bg-amber-50 text-amber-800 border-amber-200"
                 }`}
               >
-                {payoutRetried ? "Settlement: Re-queued / Settling" : "Settlement: Action needed"}
+                Customer payment: {currentOrder.status === "PAID" ? "Paid" : currentOrder.status}
+              </span>
+              <span
+                className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                  payoutRetried || currentOrder.status === "PAID"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-amber-50 text-amber-800 border-amber-200"
+                }`}
+              >
+                {payoutRetried
+                  ? "Settlement: Re-queued / Settling"
+                  : currentOrder.status === "PAID"
+                  ? "Settlement: Both settled"
+                  : "Settlement: Awaiting Customer Payment"}
               </span>
               <span
                 className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
@@ -247,7 +341,7 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
           </div>
           <button
             onClick={() => {
-              if (onNavigateToOrder) onNavigateToOrder("CT-1042");
+              if (onNavigateToOrder) onNavigateToOrder(currentOrder.shortCode);
             }}
             className="px-4 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all self-start sm:self-center cursor-pointer active:scale-95"
           >
@@ -264,7 +358,7 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Allocation ledger</h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Original payment · 2 × Stainless flask at ₦10,000
+                  Original payment · {itemsDescription}
                 </p>
               </div>
 
@@ -284,24 +378,30 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
                         <div className="font-semibold text-gray-900">Aroko Wholesale</div>
                         <div className="text-[11px] text-gray-400 font-mono">SUB-AW-001</div>
                       </td>
-                      <td className="px-4 py-3 font-medium">₦16,000</td>
+                      <td className="px-4 py-3 font-medium">₦{currentOrderSupplier.toLocaleString()}</td>
                       <td className="px-4 py-3 text-gray-400">₦0</td>
-                      <td className="px-4 py-3 text-right font-bold text-gray-900">₦16,000</td>
+                      <td className="px-4 py-3 text-right font-bold text-gray-900">
+                        ₦{currentOrderSupplier.toLocaleString()}
+                      </td>
                     </tr>
                     <tr>
                       <td className="px-4 py-3">
                         <div className="font-semibold text-gray-900">Nia Stores</div>
                         <div className="text-[11px] text-gray-400 font-mono">SUB-NS-001</div>
                       </td>
-                      <td className="px-4 py-3 font-medium">₦4,000</td>
-                      <td className="px-4 py-3 text-rose-600 font-medium">-₦300</td>
-                      <td className="px-4 py-3 text-right font-bold text-emerald-700">₦3,700</td>
+                      <td className="px-4 py-3 font-medium">₦{currentOrderRepGross.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-rose-600 font-medium">-₦{currentOrderFee.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right font-bold text-emerald-700">
+                        ₦{currentOrderRepNet.toLocaleString()}
+                      </td>
                     </tr>
                     <tr className="bg-gray-50/50">
                       <td className="px-4 py-3 font-medium text-gray-500">Gateway fee</td>
                       <td className="px-4 py-3 text-gray-400">Included above</td>
                       <td className="px-4 py-3 text-gray-400">From Nia gross</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-700">₦300 retained</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-700">
+                        ₦{currentOrderFee.toLocaleString()} retained
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -310,11 +410,11 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
               <div className="pt-2 border-t border-gray-100 flex flex-col sm:flex-row justify-between text-xs text-gray-600 gap-2">
                 <span>Customer payment reconciliation</span>
                 <span className="font-mono font-semibold text-gray-900">
-                  ₦16,000 + ₦3,700 + ₦300 = ₦20,000
+                  ₦{currentOrderSupplier.toLocaleString()} + ₦{currentOrderRepNet.toLocaleString()} + ₦{currentOrderFee.toLocaleString()} = ₦{currentOrderGross.toLocaleString()}
                 </span>
               </div>
               <p className="text-[11px] text-gray-400">
-                Gross reseller margin ₦4,000 is included in the customer payment, not an extra charge.
+                Gross reseller margin ₦{currentOrderRepGross.toLocaleString()} is included in customer payment, not an extra charge.
               </p>
             </div>
 
@@ -323,13 +423,13 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
               <h3 className="text-sm font-bold text-gray-900">Recipient payout recovery</h3>
 
               {!payoutRetried ? (
-                <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl space-y-1">
-                  <div className="font-bold text-rose-800 flex items-center gap-1.5">
-                    <span>⚠</span>
-                    <span>Nia payout failed · Bank unavailable</span>
+                <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl space-y-1">
+                  <div className="font-bold text-emerald-800 flex items-center gap-1.5">
+                    <span>✓</span>
+                    <span>Monnify Virtual Settlement Channel Active</span>
                   </div>
-                  <p className="text-[11px] text-rose-700 leading-relaxed">
-                    Transfer PAY-NS-1042 was not completed. Customer payment remains paid; the supplier allocation is unaffected.
+                  <p className="text-[11px] text-emerald-700 leading-relaxed">
+                    Virtual account {currentOrder.accountNumber || "NUBAN"} ({currentOrder.bankName || "Wema Bank"}) is linked to automated split escrow.
                   </p>
                 </div>
               ) : (
@@ -339,7 +439,7 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
                     <span>Payout retry dispatched</span>
                   </div>
                   <p className="text-[11px] text-emerald-800 leading-relaxed">
-                    Transfer PAY-NS-1042-R1 re-queued to Nia Stores (•••• 0142). Monnify gateway is awaiting bank confirmation.
+                    Transfer PAY-NS-{currentOrder.shortCode}-R1 re-queued to Nia Stores. Monnify gateway is awaiting bank confirmation.
                   </p>
                 </div>
               )}
@@ -347,16 +447,16 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
               <div className="divide-y divide-gray-100">
                 <div className="py-2 flex justify-between">
                   <span className="text-gray-500">Beneficiary</span>
-                  <span className="font-semibold text-gray-900">Nia Stores · •••• 0142</span>
+                  <span className="font-semibold text-gray-900">Nia Stores · •••• {currentOrder.accountNumber ? currentOrder.accountNumber.slice(-4) : "0142"}</span>
                 </div>
                 <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Retry amount</span>
-                  <span className="font-bold text-emerald-800">₦3,700</span>
+                  <span className="text-gray-500">Net Allocation Amount</span>
+                  <span className="font-bold text-emerald-800">₦{currentOrderRepNet.toLocaleString()}</span>
                 </div>
                 <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Last attempt</span>
+                  <span className="text-gray-500">Order Creation / Payment</span>
                   <span className="font-semibold text-gray-900">
-                    {payoutRetried ? "Just now · Monnify NUBAN clearing" : "3 Nov · 10:23 WAT"}
+                    {dateFormatted} · {timeFormatted}
                   </span>
                 </div>
               </div>
@@ -382,7 +482,7 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
               </div>
 
               <p className="text-[10px] text-gray-400">
-                Retry this failed recipient only. Recheck gateway status first to avoid a duplicate transfer.
+                Retry this recipient settlement only. Recheck gateway status first to avoid a duplicate transfer.
               </p>
             </div>
 
@@ -394,7 +494,7 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
                     Refund proposal · review before submission
                   </h3>
                   <p className="text-[11px] text-gray-400">
-                    Full refund example — nothing has been refunded yet
+                    Full or partial refund calculation for {currentOrder.shortCode}
                   </p>
                 </div>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
@@ -435,15 +535,15 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
                 </div>
                 <div className="py-1.5 flex justify-between">
                   <span className="text-gray-500">Supplier recovery</span>
-                  <span className="font-semibold text-gray-900">₦16,000</span>
+                  <span className="font-semibold text-gray-900">₦{currentOrderSupplier.toLocaleString()}</span>
                 </div>
                 <div className="py-1.5 flex justify-between">
                   <span className="text-gray-500">Nia recovery</span>
-                  <span className="font-semibold text-gray-900">₦4,000</span>
+                  <span className="font-semibold text-gray-900">₦{currentOrderRepGross.toLocaleString()}</span>
                 </div>
                 <div className="py-1.5 flex justify-between">
                   <span className="text-gray-500">Nia original fee cost</span>
-                  <span className="font-medium text-rose-700">₦300 · Not refunded</span>
+                  <span className="font-medium text-rose-700">₦{currentOrderFee.toLocaleString()} · Not refunded</span>
                 </div>
               </div>
 
@@ -465,7 +565,7 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
                   <span>Confirm liability before submitting</span>
                 </div>
                 <p className="text-[11px] text-amber-800 leading-relaxed">
-                  Preview assumes supplier reverses ₦16,000 and Nia reverses ₦4,000. Original ₦300 gateway fee is non-returned and remains Nia&apos;s cost. Confirm recipient recovery and liability before authorization.
+                  Preview assumes supplier reverses ₦{currentOrderSupplier.toLocaleString()} and Nia reverses ₦{currentOrderRepGross.toLocaleString()}. Original ₦{currentOrderFee.toLocaleString()} gateway fee is non-returned and remains Nia&apos;s cost.
                 </p>
               </div>
 
@@ -516,38 +616,38 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
 
               <div className="space-y-3.5 relative pl-4 border-l-2 border-emerald-500">
                 <div>
-                  <div className="font-bold text-gray-900">10:18 · Confirmed</div>
+                  <div className="font-bold text-gray-900">{timeFormatted} · Event Received</div>
                   <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                    Signed payment event verified on server. Amount and currency matched: NGN 20,000.
+                    Signed event verified on server for {currentOrder.shortCode}. Total: NGN {currentOrderGross.toLocaleString()}.
                   </p>
                 </div>
 
                 <div>
-                  <div className="font-bold text-gray-900">10:19 · Allocated</div>
+                  <div className="font-bold text-gray-900">Allocated</div>
                   <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                    Supplier ₦16,000; reseller net ₦3,700; fee ₦300.
+                    Supplier ₦{currentOrderSupplier.toLocaleString()}; reseller net ₦{currentOrderRepNet.toLocaleString()}; fee ₦{currentOrderFee.toLocaleString()}.
                   </p>
                 </div>
 
                 <div>
-                  <div className="font-bold text-amber-700">10:20 · Supplier pending</div>
+                  <div className="font-bold text-emerald-700">Virtual Account</div>
                   <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                    PAY-AW-1042 · Awaiting gateway settlement confirmation. No guaranteed date.
+                    {currentOrder.bankName || "Wema Bank"} · {currentOrder.accountNumber || "NUBAN Generated"} · Ref: {currentOrder.invoiceReference || `GW-${currentOrder.shortCode}`}
                   </p>
                 </div>
 
                 <div>
                   <div
                     className={`font-bold ${
-                      payoutRetried ? "text-emerald-700" : "text-rose-700"
+                      currentOrder.status === "PAID" ? "text-emerald-700" : "text-amber-700"
                     }`}
                   >
-                    {payoutRetried ? "10:28 · Rep payout re-dispatched" : "10:23 · Rep payout failed"}
+                    Status: {currentOrder.status}
                   </div>
                   <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                    {payoutRetried
-                      ? "PAY-NS-1042-R1 · Sent to bank clearing network. Verification in progress."
-                      : "PAY-NS-1042 · Bank unavailable. Retry is available."}
+                    {currentOrder.status === "PAID"
+                      ? "Escrow split verified and released to designated subaccounts."
+                      : "Awaiting customer bank transfer to dynamic virtual account."}
                   </p>
                 </div>
               </div>
@@ -1029,209 +1129,221 @@ export function PaymentsView({ initialTab = "splits", orders = [], onNavigateToO
         );
       })()}
 
-      {/* Transaction Ledger Card */}
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
-        <div className="p-5 border-b border-gray-100">
-          <h3 className="text-sm font-bold text-gray-900">Transaction ledger</h3>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Showing {filteredTransactions.length} of {transactions.length} transactions · {dateRange}
-          </p>
+      {transactions.length === 0 ? (
+        <EmptyState
+          badge="Split Settlements"
+          icon="💳"
+          title="No Payment Transactions Yet"
+          description="When customers transfer funds to dynamic virtual accounts generated via Monnify, verified settlements, supplier splits, and escrow releases will appear here in real time."
+        />
+      ) : (
+        <>
+          {/* Transaction Ledger Card */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
+            <div className="p-5 border-b border-gray-100">
+              <h3 className="text-sm font-bold text-gray-900">Transaction ledger</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Showing {filteredTransactions.length} of {transactions.length} transactions · {dateRange}
+              </p>
 
-          {/* Filter Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-            <input
-              type="text"
-              placeholder="Search by order or reference"
-              value={searchTx}
-              onChange={(e) => setSearchTx(e.target.value)}
-              className="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
-            />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
-            >
-              <option value="All statuses">All payment statuses</option>
-              <option value="Paid">Paid</option>
-              <option value="Payment failed">Payment failed</option>
-            </select>
-            <select
-              value={settlementFilter}
-              onChange={(e) => setSettlementFilter(e.target.value)}
-              className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
-            >
-              <option value="All statuses">All settlement statuses</option>
-              <option value="Both settled">Both settled</option>
-              <option value="Action needed">Action needed</option>
-            </select>
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
-            >
-              <option>1–3 Nov 2026</option>
-              <option>Last 7 days</option>
-              <option>Last 30 days</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[640px]">
-            <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-              <tr>
-                <th className="px-5 py-3">Order / Paid</th>
-                <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3">Rep Gross / Net</th>
-                <th className="px-4 py-3">Fee · Nia</th>
-                <th className="px-4 py-3">Customer</th>
-                <th className="px-5 py-3">Settlement</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 text-gray-700">
-              {filteredTransactions.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-xl mb-3">
-                      💳
-                    </div>
-                    <div className="text-xs font-bold text-gray-900">No payment transactions yet</div>
-                    <div className="text-[11px] text-gray-400 max-w-sm mx-auto mt-1">
-                      When customers transfer funds to dynamic virtual accounts generated via Monnify, verified settlements and split records will appear here in real time.
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filteredTransactions.map((tx) => (
-                <tr
-                  key={tx.id}
-                  onClick={() => setActiveTab("detail")}
-                  className={`cursor-pointer transition-colors ${
-                    tx.repSettlement === "Rep failed"
-                      ? "hover:bg-amber-50/40 bg-amber-50/10"
-                      : "hover:bg-gray-50"
-                  }`}
+              {/* Filter Bar */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                <input
+                  type="text"
+                  placeholder="Search by order or reference"
+                  value={searchTx}
+                  onChange={(e) => setSearchTx(e.target.value)}
+                  className="text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
+                />
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
                 >
-                  <td className="px-5 py-3.5">
-                    <div className="font-semibold text-emerald-800 flex items-center gap-1">
-                      <span>{tx.orderCode}</span>
-                      <span>↗</span>
-                    </div>
-                    <div className="text-[11px] text-gray-400">
-                      ₦{tx.amount.toLocaleString()} · {tx.gatewayRef}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5 font-medium text-gray-900">
-                    {tx.supplierGross > 0 ? `₦${tx.supplierGross.toLocaleString()}` : "—"}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {tx.repGross > 0 ? (
-                      <>
-                        <div className="text-gray-900 font-medium">₦{tx.repGross.toLocaleString()}</div>
-                        <div className="text-[11px] text-emerald-700 font-semibold">
-                          ₦{tx.repNet.toLocaleString()}
-                        </div>
-                      </>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3.5 text-gray-500">₦{tx.fee}</td>
-                  <td className="px-4 py-3.5">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        tx.customerStatus === "Paid"
-                          ? "bg-emerald-100 text-emerald-800"
-                          : "bg-rose-100 text-rose-800"
+                  <option value="All statuses">All payment statuses</option>
+                  <option value="Paid">Paid</option>
+                  <option value="Payment failed">Payment failed</option>
+                </select>
+                <select
+                  value={settlementFilter}
+                  onChange={(e) => setSettlementFilter(e.target.value)}
+                  className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
+                >
+                  <option value="All statuses">All settlement statuses</option>
+                  <option value="Both settled">Both settled</option>
+                  <option value="Action needed">Action needed</option>
+                </select>
+                <select
+                  value={dateRange}
+                  onChange={(e) => setDateRange(e.target.value)}
+                  className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
+                >
+                  <option>1–3 Nov 2026</option>
+                  <option>Last 7 days</option>
+                  <option>Last 30 days</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs min-w-[640px]">
+                <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="px-5 py-3">Order / Paid</th>
+                    <th className="px-4 py-3">Supplier</th>
+                    <th className="px-4 py-3">Rep Gross / Net</th>
+                    <th className="px-4 py-3">Fee · Nia</th>
+                    <th className="px-4 py-3">Customer</th>
+                    <th className="px-5 py-3">Settlement</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-gray-700">
+                  {filteredTransactions.map((tx) => (
+                    <tr
+                      key={tx.id}
+                      onClick={() => {
+                        setSelectedOrderCode(tx.orderCode);
+                        setActiveTab("detail");
+                      }}
+                      className={`cursor-pointer transition-colors ${
+                        tx.repSettlement === "Rep failed"
+                          ? "hover:bg-amber-50/40 bg-amber-50/10"
+                          : "hover:bg-gray-50"
                       }`}
                     >
-                      {tx.customerStatus}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    {tx.supplierSettlement === "Both settled" ? (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
-                        Both settled
-                      </span>
-                    ) : tx.supplierSettlement === "Not created" ? (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600">
-                        Not created
-                      </span>
-                    ) : (
-                      <div className="flex flex-col gap-1 items-start">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
-                          {tx.supplierSettlement}
-                        </span>
+                      <td className="px-5 py-3.5">
+                        <div className="font-semibold text-emerald-800 flex items-center gap-1">
+                          <span>{tx.orderCode}</span>
+                          <span>↗</span>
+                        </div>
+                        <div className="text-[11px] text-gray-400">
+                          ₦{tx.amount.toLocaleString()} · {tx.gatewayRef}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 font-medium text-gray-900">
+                        {tx.supplierGross > 0 ? `₦${tx.supplierGross.toLocaleString()}` : "—"}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {tx.repGross > 0 ? (
+                          <>
+                            <div className="text-gray-900 font-medium">₦{tx.repGross.toLocaleString()}</div>
+                            <div className="text-[11px] text-emerald-700 font-semibold">
+                              ₦{tx.repNet.toLocaleString()}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 text-gray-500">₦{tx.fee}</td>
+                      <td className="px-4 py-3.5">
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
-                            tx.repSettlement === "Settled"
-                              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                              : "bg-rose-50 text-rose-800 border-rose-200"
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            tx.customerStatus === "Paid"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-rose-100 text-rose-800"
                           }`}
                         >
-                          {tx.repSettlement}
+                          {tx.customerStatus}
                         </span>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              )))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="p-4 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-gray-400 gap-2">
-          <span>Fees are charged to the reseller, not deducted from supplier cost.</span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => alert("Already on first page")}
-              className="px-2.5 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
-            >
-              Previous
-            </button>
-            <button
-              onClick={() => alert("Showing all available rows")}
-              className="px-2.5 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom 2 Cards: Payment != settlement & Filtered reconciliation */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-          <h3 className="text-xs font-bold text-gray-900">Payment ≠ settlement</h3>
-          <p className="text-gray-600 leading-relaxed">
-            Paid means Caterlog verified the gateway&apos;s server event. Settled means a recipient&apos;s bank transfer completed. Each recipient has an independent status and reference.
-          </p>
-          <button
-            onClick={() => setActiveTab("detail")}
-            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
-          >
-            Open CT-1042 &amp; review →
-          </button>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-          <h3 className="text-xs font-bold text-gray-900">Filtered reconciliation</h3>
-          <div className="divide-y divide-gray-100">
-            <div className="py-2 flex justify-between">
-              <span className="text-gray-500">Customer funds</span>
-              <span className="font-semibold text-gray-900">₦50,000</span>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        {tx.supplierSettlement === "Both settled" ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            Both settled
+                          </span>
+                        ) : tx.supplierSettlement === "Not created" ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600">
+                            Not created
+                          </span>
+                        ) : (
+                          <div className="flex flex-col gap-1 items-start">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                              {tx.supplierSettlement}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
+                                tx.repSettlement === "Settled"
+                                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                  : "bg-rose-50 text-rose-800 border-rose-200"
+                              }`}
+                            >
+                              {tx.repSettlement}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="py-2 flex justify-between">
-              <span className="text-gray-500">Supplier + rep net</span>
-              <span className="font-semibold text-gray-900">₦49,250</span>
-            </div>
-            <div className="py-2 flex justify-between">
-              <span className="text-gray-500">Gateway fees</span>
-              <span className="font-semibold text-gray-900">₦750</span>
+
+            <div className="p-4 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-gray-400 gap-2">
+              <span>Fees are charged to the reseller, not deducted from supplier cost.</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => alert("Already on first page")}
+                  className="px-2.5 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => alert("Showing all available rows")}
+                  className="px-2.5 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+
+          {/* Bottom 2 Cards: Payment != settlement & Filtered reconciliation */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
+              <h3 className="text-xs font-bold text-gray-900">Payment ≠ settlement</h3>
+              <p className="text-gray-600 leading-relaxed">
+                Paid means Caterlog verified the gateway&apos;s server event. Settled means a recipient&apos;s bank transfer completed. Each recipient has an independent status and reference.
+              </p>
+              {transactions.length > 0 && (
+                <button
+                  onClick={() => {
+                    setSelectedOrderCode(transactions[0].orderCode);
+                    setActiveTab("detail");
+                  }}
+                  className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
+                >
+                  Open {transactions[0].orderCode} &amp; review →
+                </button>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
+              <h3 className="text-xs font-bold text-gray-900">Filtered reconciliation</h3>
+              <div className="divide-y divide-gray-100">
+                <div className="py-2 flex justify-between">
+                  <span className="text-gray-500">Customer funds</span>
+                  <span className="font-semibold text-gray-900">
+                    ₦{filteredTransactions.reduce((acc, t) => acc + t.amount, 0).toLocaleString()}
+                  </span>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <span className="text-gray-500">Supplier + rep net</span>
+                  <span className="font-semibold text-gray-900">
+                    ₦{filteredTransactions.reduce((acc, t) => acc + t.supplierGross + t.repNet, 0).toLocaleString()}
+                  </span>
+                </div>
+                <div className="py-2 flex justify-between">
+                  <span className="text-gray-500">Gateway fees</span>
+                  <span className="font-semibold text-gray-900">
+                    ₦{filteredTransactions.reduce((acc, t) => acc + t.fee, 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

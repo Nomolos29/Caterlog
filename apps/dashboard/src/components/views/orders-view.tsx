@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import type { OrderItem } from "@/lib/types";
 import { FilterIcon, ExportIcon } from "../icons";
+import { EmptyState } from "../ui/empty-state";
 
 interface OrdersViewProps {
   orders: OrderItem[];
@@ -165,24 +166,63 @@ export function OrdersView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 text-gray-700">
-                    <tr>
-                      <td className="px-4 py-3 flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-lg">
-                          🧴
-                        </div>
-                        <div>
-                          <div className="font-semibold text-gray-900">
-                            {selectedOrder.productName || "Stainless flask"}
+                    {selectedOrder.items && selectedOrder.items.length > 0 ? (
+                      selectedOrder.items.map((it, idx) => (
+                        <tr key={it.id || idx}>
+                          <td className="px-4 py-3 flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-lg">
+                              🛍️
+                            </div>
+                            <div>
+                              <div className="font-semibold text-gray-900">
+                                {it.productName}
+                              </div>
+                              {it.variantName ? (
+                                <div className="text-[11px] font-medium text-emerald-700">
+                                  {it.variantName} {it.variantSku ? `· ${it.variantSku}` : ""}
+                                </div>
+                              ) : (
+                                <div className="text-[11px] text-gray-400">{it.productSku || ""}</div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 font-medium">
+                            {it.unitPriceFormatted || `₦${(Number(it.unitPriceKobo) / 100).toLocaleString()}`}
+                          </td>
+                          <td className="px-4 py-3 font-medium">{it.quantity}</td>
+                          <td className="px-4 py-3 text-right font-bold text-gray-900">
+                            {it.subtotalFormatted || `₦${(Number(it.subtotalKobo) / 100).toLocaleString()}`}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="px-4 py-3 flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-lg">
+                            🧴
                           </div>
-                          <div className="text-[11px] text-gray-400">750ml · AW-FL750</div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-medium">₦10,000</td>
-                      <td className="px-4 py-3 font-medium">{selectedOrder.quantity || 2}</td>
-                      <td className="px-4 py-3 text-right font-bold text-gray-900">
-                        {selectedOrder.totalAmountFormatted || `₦${selectedOrder.totalAmountNaira.toLocaleString()}`}
-                      </td>
-                    </tr>
+                          <div>
+                            <div className="font-semibold text-gray-900">
+                              {selectedOrder.productName || "Product"}
+                            </div>
+                            {selectedOrder.variantName ? (
+                              <div className="text-[11px] font-medium text-emerald-700">
+                                {selectedOrder.variantName} {selectedOrder.variantSku ? `· ${selectedOrder.variantSku}` : ""}
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-gray-400">{selectedOrder.productSku || ""}</div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-medium">
+                          ₦{Math.round((Number(selectedOrder.subtotalKobo || selectedOrder.totalAmountKobo) / (selectedOrder.quantity || 1)) / 100).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 font-medium">{selectedOrder.quantity || 1}</td>
+                        <td className="px-4 py-3 text-right font-bold text-gray-900">
+                          {selectedOrder.totalAmountFormatted || `₦${selectedOrder.totalAmountNaira.toLocaleString()}`}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -527,41 +567,42 @@ export function OrdersView({
 
       {/* Orders Content: Dedicated Clean Account Guide vs Table */}
       {orders.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-gray-100 p-10 sm:p-14 text-center shadow-2xs space-y-6">
-          <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-3xl font-bold shadow-2xs">
-            🛍️
-          </div>
-          <div className="max-w-md mx-auto space-y-2">
-            <h3 className="text-lg font-bold text-gray-900">No Orders Placed Yet</h3>
-            <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
-              When customers send inquiries to your WhatsApp Business number or checkout with your store link, Caterlog will handle stock reservations, invoice delivery, and bank transfer reconciliation automatically.
-            </p>
-          </div>
-
+        <EmptyState
+          badge="Orders & Settlements"
+          icon="🛍️"
+          title="No Orders Placed Yet"
+          description="When customers send inquiries to your WhatsApp Business number or checkout with your store link, Caterlog will handle stock reservations, invoice delivery, and bank transfer reconciliation automatically."
+        >
           <div className="max-w-2xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-left pt-2">
-            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100 space-y-1.5">
+            <div className="p-4 rounded-2xl bg-gray-50/80 border border-gray-100 space-y-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
                 1. Inbound Chat
               </span>
               <p className="text-xs font-semibold text-gray-900">Buyer chats WhatsApp</p>
-              <p className="text-[11px] text-gray-400 leading-normal">Buyer inquires about product stock or replies to your WhatsApp status.</p>
+              <p className="text-[11px] text-gray-400 leading-normal">
+                Buyer inquires about product stock or replies to your WhatsApp status.
+              </p>
             </div>
-            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100 space-y-1.5">
+            <div className="p-4 rounded-2xl bg-gray-50/80 border border-gray-100 space-y-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
                 2. Instant NUBAN
               </span>
               <p className="text-xs font-semibold text-gray-900">Co-Pilot sends invoice</p>
-              <p className="text-[11px] text-gray-400 leading-normal">AI locks stock for 15 mins and sends dedicated Monnify NUBAN transfer account.</p>
+              <p className="text-[11px] text-gray-400 leading-normal">
+                AI locks stock for 15 mins and sends dedicated Monnify NUBAN transfer account.
+              </p>
             </div>
-            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100 space-y-1.5">
+            <div className="p-4 rounded-2xl bg-gray-50/80 border border-gray-100 space-y-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
                 3. Auto Verified
               </span>
               <p className="text-xs font-semibold text-gray-900">Order appears here</p>
-              <p className="text-[11px] text-gray-400 leading-normal">Payment reconciles via server webhook; live order streams to this table.</p>
+              <p className="text-[11px] text-gray-400 leading-normal">
+                Payment reconciles via server webhook; live order streams to this table.
+              </p>
             </div>
           </div>
-        </div>
+        </EmptyState>
       ) : (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
@@ -607,7 +648,17 @@ export function OrdersView({
                       </td>
                       <td className="py-3.5 px-5">
                         <div className="font-medium text-gray-900">{o.productName}</div>
-                        <div className="text-[11px] text-gray-400">{o.quantity} unit(s)</div>
+                        {o.variantName ? (
+                          <div className="text-[11px] font-semibold text-emerald-700">
+                            {o.variantName} {o.variantSku ? `(${o.variantSku})` : ""} · {o.quantity} unit(s)
+                          </div>
+                        ) : o.items && o.items.length > 1 ? (
+                          <div className="text-[11px] font-medium text-emerald-700">
+                            🛒 {o.items.length} cart items · {o.quantity} unit(s) total
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-gray-400">{o.quantity} unit(s)</div>
+                        )}
                       </td>
                       <td className="py-3.5 px-5 font-bold text-gray-900">
                         {o.totalAmountFormatted || `₦${o.totalAmountNaira.toLocaleString()}`}

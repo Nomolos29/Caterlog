@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { CheckIcon } from "../icons";
+import { EmptyState } from "../ui/empty-state";
+import type { OrderItem, ProductItem, ChatMessageItem } from "@/lib/types";
 
 export interface NotificationRecord {
   id: string;
@@ -16,19 +18,124 @@ export interface NotificationRecord {
 }
 
 interface NotificationsViewProps {
+  orders?: OrderItem[];
+  products?: ProductItem[];
+  chatMessages?: ChatMessageItem[];
   onNavigateToOrder?: (code: string) => void;
   onNavigateToPayments?: () => void;
   onNavigateToProducts?: () => void;
 }
 
 export function NotificationsView({
+  orders = [],
+  products = [],
+  chatMessages = [],
   onNavigateToOrder,
   onNavigateToPayments,
   onNavigateToProducts,
 }: NotificationsViewProps) {
   const [filter, setFilter] = useState<"ALL" | "UNREAD" | "ORDERS" | "PAYOUTS" | "INVENTORY">("ALL");
 
-  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  // Track user reads & dismissals
+  const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
+
+  // Dynamically derive live notification items from orders, products, and chat
+  const notifications: NotificationRecord[] = useMemo(() => {
+    const list: NotificationRecord[] = [];
+
+    // 1. Orders and Escrow settlements
+    for (const o of orders) {
+      const orderDate = new Date(o.paidAt || o.createdAt);
+      const timeStr = orderDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+      if (o.status === "PAID") {
+        list.push({
+          id: `notif-paid-${o.shortCode}`,
+          title: `Payment Verified: ${o.shortCode}`,
+          message: `Monnify verified ₦${(o.amountPaidNaira || o.totalAmountNaira).toLocaleString()} transfer from ${o.customerName} (${o.customerPhone}). Escrow split allocated.`,
+          category: "PAYOUTS",
+          timestamp: timeStr,
+          read: readIds.has(`notif-paid-${o.shortCode}`),
+          linkText: "View Settlement",
+          targetView: "payments",
+          targetRef: o.shortCode,
+        });
+      }
+
+      const itemsSummary =
+        o.items && o.items.length > 0
+          ? o.items.map((it) => `${it.quantity}× ${it.productName}${it.variantName ? ` (${it.variantName})` : ""}`).join(", ")
+          : `${o.quantity}× ${o.productName}${o.variantName ? ` (${o.variantName})` : ""}`;
+
+      list.push({
+        id: `notif-ord-${o.shortCode}`,
+        title: `Order Placed: ${o.shortCode}`,
+        message: `${o.customerName} ordered ${itemsSummary} (${o.totalAmountFormatted}). Status: ${o.status}. Delivery to ${o.shippingZoneName || "Local Delivery"}.`,
+        category: "ORDERS",
+        timestamp: timeStr,
+        read: readIds.has(`notif-ord-${o.shortCode}`) || o.status === "PAID",
+        linkText: "Inspect Order",
+        targetView: "orders",
+        targetRef: o.shortCode,
+      });
+    }
+
+    // 2. Inventory / Low Stock Alerts
+    for (const p of products) {
+      if (p.variants && p.variants.length > 0) {
+        for (const v of p.variants) {
+          if (v.stock <= 5) {
+            const notifId = `notif-stock-${v.sku}`;
+            list.push({
+              id: notifId,
+              title: `Low Stock: ${p.name} (${v.name})`,
+              message: `Variant SKU ${v.sku} has only ${v.stock} unit${v.stock === 1 ? "" : "s"} left.`,
+              category: "INVENTORY",
+              timestamp: "Live Alert",
+              read: readIds.has(notifId),
+              linkText: "Update Stock",
+              targetView: "products",
+              targetRef: p.skuCode,
+            });
+          }
+        }
+      } else if (p.availableStock <= 5) {
+        const notifId = `notif-stock-${p.skuCode}`;
+        list.push({
+          id: notifId,
+          title: `Low Stock: ${p.name}`,
+          message: `SKU ${p.skuCode} has only ${p.availableStock} unit${p.availableStock === 1 ? "" : "s"} left.`,
+          category: "INVENTORY",
+          timestamp: "Live Alert",
+          read: readIds.has(notifId),
+          linkText: "Update Stock",
+          targetView: "products",
+          targetRef: p.skuCode,
+        });
+      }
+    }
+
+    // 3. Buyer WhatsApp Inquiries / Handoffs
+    if (chatMessages && chatMessages.length > 0) {
+      const recentBuyerMessages = chatMessages.filter((m) => m.sender === "BUYER").slice(-5);
+      for (const msg of recentBuyerMessages) {
+        const notifId = `notif-chat-${msg.id}`;
+        list.push({
+          id: notifId,
+          title: `WhatsApp Inquiry: ${msg.fromPhone || "Buyer"}`,
+          message: `"${msg.text}"`,
+          category: "COPILOT",
+          timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          read: readIds.has(notifId),
+          linkText: "Open Co-Pilot",
+          targetView: "orders",
+        });
+      }
+    }
+
+    return list.filter((n) => !deletedIds.has(n.id));
+  }, [orders, products, chatMessages, readIds, deletedIds]);
 
   // Notification Preferences State
   const [waNotifications, setWaNotifications] = useState(true);
@@ -38,15 +145,15 @@ export function NotificationsView({
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const handleMarkAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setReadIds(new Set(notifications.map((n) => n.id)));
   };
 
   const handleMarkAsRead = (id: string) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    setReadIds((prev) => new Set([...prev, id]));
   };
 
   const handleDeleteNotification = (id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    setDeletedIds((prev) => new Set([...prev, id]));
   };
 
   const filteredNotifications = useMemo(() => {
@@ -120,20 +227,17 @@ export function NotificationsView({
             ))}
           </div>
 
-          {/* Notifications Card List */}
-          <div className="bg-white rounded-3xl border border-gray-100 shadow-2xs overflow-hidden divide-y divide-gray-100">
-            {filteredNotifications.length === 0 ? (
-              <div className="py-16 px-4 text-center text-gray-400 flex flex-col items-center justify-center">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 text-lg font-bold">
-                  🔔
-                </div>
-                <p className="text-sm font-bold text-gray-900">No notifications yet</p>
-                <p className="text-xs text-gray-400 mt-1 max-w-sm">
-                  Instant escrow payout confirmations, buyer WhatsApp inquiry alerts, and low stock notices will stream here in real time.
-                </p>
-              </div>
-            ) : (
-              filteredNotifications.map((n) => (
+          {/* Notifications Feed */}
+          {filteredNotifications.length === 0 ? (
+            <EmptyState
+              badge="Alerts & Live Activity"
+              icon="🔔"
+              title="No Notifications Yet"
+              description="Instant escrow payout confirmations, buyer WhatsApp inquiry alerts, and low stock notices will stream here in real time as events occur."
+            />
+          ) : (
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-2xs overflow-hidden divide-y divide-gray-100">
+              {filteredNotifications.map((n) => (
                 <div
                   key={n.id}
                   className={`p-5 transition-colors flex items-start justify-between gap-4 ${
@@ -220,9 +324,9 @@ export function NotificationsView({
                     </button>
                   </div>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Right 4 Cols: Notification Delivery Channels & Preferences */}

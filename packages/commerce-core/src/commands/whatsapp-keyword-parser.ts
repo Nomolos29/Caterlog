@@ -1,6 +1,13 @@
 import { isNigerianPriceToken, nairaToKobo } from "../domain/money.ts";
 import type { DomainCopilotMode } from "../domain/copilot-policy.ts";
 
+export interface ParsedProductVariant {
+  name: string;
+  stockTotal: number;
+  priceKobo?: bigint;
+  skuSuffix?: string;
+}
+
 export type VendorWhatsAppCommand =
   | { type: "OPEN_DASHBOARD" }
   | { type: "HELP_MENU" }
@@ -20,7 +27,13 @@ export type VendorWhatsAppCommand =
   | { type: "DEACTIVATE_DISCOUNT"; code: string }
   | { type: "UPDATE_STOCK"; skuCode: string; stockTotal: number }
   | { type: "DELETE_PRODUCT"; skuCode: string }
-  | { type: "QUICK_ADD_PRODUCT"; name: string; priceKobo: bigint; stockTotal: number }
+  | {
+      type: "QUICK_ADD_PRODUCT";
+      name: string;
+      priceKobo: bigint;
+      stockTotal: number;
+      variants?: ParsedProductVariant[];
+    }
   | { type: "LIST_ORDERS"; status: "PENDING_PAYMENT" | "PAID" }
   | { type: "REMIND_ORDER"; shortCode: string }
   | { type: "DISPATCH_ORDER"; shortCode: string; riderPhone?: string }
@@ -269,24 +282,236 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
     }
   }
 
-  // 10. Quick Product Caption Format: "Zara Heel, #25000, stock 5" or "Zara Heel, 25k, 5"
-  if (trimmed.includes(",")) {
-    const parts = trimmed.split(",").map((p) => p.trim());
+  // 10. Quick Product Caption Format (Simple or Variable Products)
+  // Examples:
+  // - "Zara Heel, #25000, stock 5"
+  // - "Zara Heel, 25k, 5"
+  // - "Zara Heel, #25000, sizes: 38 (2), 39 (3), 40 (5)"
+  // - "Zara Heel, #25000, Red: 5, Blue: 3, Black: 2"
+  // - "Zara Heel, 25k, 38: 2, 39: 3"
+  // - "Zara Heel, #25000, sizes: 38, 39, 40"
+  // - "Flask, #10000, variants: 750ml #8000 (5), 1000ml #12000 (3)"
+  // - Optional verb prefixes: "add product ...", "new product ...", "prod add ..."
+  let textToParse = trimmed;
+  const prefixMatch =
+    textToParse.match(/^(?:add|new|create)\s+product\s+/i) ||
+    textToParse.match(/^(?:product|prod)\s+(?:add|new|create)\s+/i);
+  if (prefixMatch) {
+    textToParse = textToParse.slice(prefixMatch[0].length).trim();
+  }
+
+  // 10a. Multi-line caption format
+  if (textToParse.includes("\n")) {
+    const lines = textToParse.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length >= 2) {
+      let name = lines[0] ?? "";
+      let priceStr = "";
+      let variantStartIdx = 1;
+
+      if (name.includes(",")) {
+        const sub = name.split(",").map((s) => s.trim());
+        name = sub[0] ?? "";
+        priceStr = sub[1] ?? "";
+      } else {
+        const line1 = lines[1] ?? "";
+        if (isNigerianPriceToken(line1)) {
+          priceStr = line1;
+          variantStartIdx = 2;
+        } else {
+          const pMatch = line1.match(/(?:price\s*[:=]?\s*)?((?:#|₦|NGN|N)\s*[\d,]+|\b\d+k\b)/i);
+          if (pMatch && isNigerianPriceToken(pMatch[1])) {
+            priceStr = pMatch[1];
+            variantStartIdx = 2;
+          }
+        }
+      }
+
+      // Check if lines[1..N] are variants where each variation has its own price (e.g. "38: #20000 (5)")
+      const varLinesOnly = parseProductVariants(lines.slice(1));
+      if (varLinesOnly.length > 0 && varLinesOnly.some((v) => v.priceKobo !== undefined)) {
+        const stockTotal = varLinesOnly.reduce((sum, v) => sum + v.stockTotal, 0);
+        const basePriceKobo = varLinesOnly.find((v) => v.priceKobo !== undefined)?.priceKobo ?? 0n;
+        return {
+          type: "QUICK_ADD_PRODUCT",
+          name,
+          priceKobo: basePriceKobo,
+          stockTotal,
+          variants: varLinesOnly,
+        };
+      }
+
+      if (name && priceStr && isNigerianPriceToken(priceStr)) {
+        const priceKobo = nairaToKobo(priceStr);
+        const candidateLines = lines.slice(variantStartIdx);
+        const variants = parseProductVariants(candidateLines, priceKobo);
+        if (variants.length > 0) {
+          const stockTotal = variants.reduce((sum, v) => sum + v.stockTotal, 0);
+          return {
+            type: "QUICK_ADD_PRODUCT",
+            name,
+            priceKobo,
+            stockTotal,
+            variants,
+          };
+        }
+      }
+    }
+  }
+
+  // 10b. Comma-separated caption format
+  if (textToParse.includes(",")) {
+    const parts = textToParse.split(",").map((p) => p.trim());
     if (parts.length >= 2) {
       const name = parts[0] ?? "";
       const priceStr = parts[1] ?? "";
-      const stockMatch = (parts[2] ?? "stock 1").match(/(\d+)/);
+
+      // Case 1: First part after name is an explicit base price (e.g. "Zara Heel, #25000, ...")
       if (name && isNigerianPriceToken(priceStr)) {
+        const priceKobo = nairaToKobo(priceStr);
+        const remainderParts = parts.slice(2);
+
+        if (remainderParts.length === 0) {
+          return {
+            type: "QUICK_ADD_PRODUCT",
+            name,
+            priceKobo,
+            stockTotal: 1,
+          };
+        }
+
+        const singleToken = remainderParts[0] ?? "";
+        const isSimpleStock =
+          remainderParts.length === 1 &&
+          /^(?:stock|qty|total|count)?\s*\d+\s*(?:units?|pcs?|pieces?|items?)?$/i.test(singleToken) &&
+          !/(?:variations?|variants?|sizes?|colors?|options?|:|\(|@)/i.test(singleToken);
+
+        if (isSimpleStock) {
+          const stockMatch = singleToken.match(/(\d+)/);
+          const stockTotal = stockMatch ? Number.parseInt(stockMatch[1] ?? "1", 10) : 1;
+          return {
+            type: "QUICK_ADD_PRODUCT",
+            name,
+            priceKobo,
+            stockTotal,
+          };
+        }
+
+        const variants = parseProductVariants(remainderParts, priceKobo);
+        if (variants.length > 0) {
+          const stockTotal = variants.reduce((sum, v) => sum + v.stockTotal, 0);
+          return {
+            type: "QUICK_ADD_PRODUCT",
+            name,
+            priceKobo,
+            stockTotal,
+            variants,
+          };
+        }
+
+        const stockMatch = (singleToken || "stock 1").match(/(\d+)/);
         const stockTotal = stockMatch ? Number.parseInt(stockMatch[1] ?? "1", 10) : 1;
         return {
           type: "QUICK_ADD_PRODUCT",
           name,
-          priceKobo: nairaToKobo(priceStr),
+          priceKobo,
           stockTotal,
         };
+      }
+
+      // Case 2: No overall base price provided — each variation has its own price!
+      // (e.g. "Zara Heel, 38: #20000 (5), 39: #25000 (3)" or "Zara Heel, sizes: 38 @ 20k (5), 39 @ 25k (3)")
+      if (name) {
+        const candidateVariants = parseProductVariants(parts.slice(1));
+        if (candidateVariants.length > 0) {
+          const stockTotal = candidateVariants.reduce((sum, v) => sum + v.stockTotal, 0);
+          const basePriceKobo =
+            candidateVariants.find((v) => v.priceKobo !== undefined)?.priceKobo ?? 0n;
+          return {
+            type: "QUICK_ADD_PRODUCT",
+            name,
+            priceKobo: basePriceKobo,
+            stockTotal,
+            variants: candidateVariants,
+          };
+        }
       }
     }
   }
 
   return { type: "UNKNOWN_COMMAND", rawInput: trimmed };
+}
+
+/**
+ * Parses individual variant tokens with optional custom variation pricing:
+ * - "sizes: 38 (2), 39 (3), 40 (5)"
+ * - "38: #20000 (5), 39: #25000 (3)"
+ * - "38 (#20000, 5), 39 (#25000, 3)"
+ * - "38 @ 20k (5), 39 @ 25k (3)"
+ * - "500ml #8000 (10), 750ml #10000 (15)"
+ * - "Red: 5, Blue: 3, Black: 2"
+ */
+export function parseProductVariants(
+  candidateStrings: string[],
+  defaultPriceKobo?: bigint
+): ParsedProductVariant[] {
+  const variants: ParsedProductVariant[] = [];
+
+  for (const raw of candidateStrings) {
+    if (!raw.trim()) continue;
+    const clean = raw.replace(/^(?:variations?|variants?|sizes?|colors?|options?|flavors?)\s*[:=-]?\s*/i, "").trim();
+    if (!clean) continue;
+
+    const subTokens = clean.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
+    for (let token of subTokens) {
+      token = token.replace(/^[•\-\*]\s*/, "").trim();
+      if (!token) continue;
+
+      // 1. Extract variant-specific price if present (e.g. "#20000", "20000", "@ 20k", "at #25,000", "₦18500", "N10000")
+      let variantPriceKobo: bigint | undefined = undefined;
+      const priceRegex = /(?:@|at\s+|[:\-]\s*)?((?:#|₦|NGN|N)\s*[\d,]+|\b\d+k\b|(?<=[:@\s\-])\d{4,7}\b)/i;
+      const priceMatch = token.match(priceRegex);
+      if (priceMatch && isNigerianPriceToken(priceMatch[1])) {
+        variantPriceKobo = nairaToKobo(priceMatch[1]);
+        token = token.replace(priceMatch[0], " ").trim();
+      }
+
+      // 2. Extract stock count
+      let stock = 1;
+      const parensMatch = token.match(/\(\s*(?:stock|qty|units?|pcs?)?[:\s,]*(\d+)\s*(?:units?|pcs?|items?)?\s*\)/i);
+      const multiMatch = token.match(/[x×*]\s*(\d+)\b/i);
+      const keywordMatch = token.match(/\b(?:stock|qty|total|count)\s*[:=]?\s*(\d+)\b/i) || token.match(/\b(\d+)\s*(?:units?|pcs?|items?|pieces?)\b/i);
+      const colonDashMatch = token.match(/[:=\-]\s*(\d+)\s*$/);
+      const trailingNumMatch = token.match(/\s+(\d+)$/);
+
+      if (parensMatch) {
+        stock = Number.parseInt(parensMatch[1], 10);
+        token = token.replace(parensMatch[0], " ").trim();
+      } else if (multiMatch) {
+        stock = Number.parseInt(multiMatch[1], 10);
+        token = token.replace(multiMatch[0], " ").trim();
+      } else if (keywordMatch) {
+        stock = Number.parseInt(keywordMatch[1], 10);
+        token = token.replace(keywordMatch[0], " ").trim();
+      } else if (colonDashMatch) {
+        stock = Number.parseInt(colonDashMatch[1], 10);
+        token = token.slice(0, colonDashMatch.index).trim();
+      } else if (trailingNumMatch && !/^\d+$/.test(token.trim())) {
+        stock = Number.parseInt(trailingNumMatch[1], 10);
+        token = token.slice(0, trailingNumMatch.index).trim();
+      }
+
+      const name = token.replace(/^[:=,\-@/() ]+|[:=,\-@/() ]+$/g, "").replace(/\s+/g, " ").trim();
+      if (name) {
+        const skuSuffix = name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase();
+        variants.push({
+          name,
+          stockTotal: Number.isInteger(stock) && stock >= 0 ? stock : 1,
+          priceKobo: variantPriceKobo ?? defaultPriceKobo,
+          skuSuffix: skuSuffix || undefined,
+        });
+      }
+    }
+  }
+
+  return variants;
 }

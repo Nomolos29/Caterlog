@@ -19,6 +19,15 @@ export interface RuntimeVendor {
   reservationTtlMinutes: number;
 }
 
+export interface RuntimeProductVariant {
+  id: string;
+  name: string; // e.g. "Size 39 / Gold" or "750ml / Matte Black"
+  skuCode: string; // e.g. "SHOE-01-39" or "SKU-0895-BLK"
+  priceKobo?: bigint; // Specific price for this variant (defaults to parent basePriceKobo)
+  stockTotal: number;
+  stockReserved: number;
+}
+
 export interface RuntimeProduct {
   id: string;
   skuCode: string;
@@ -30,6 +39,7 @@ export interface RuntimeProduct {
   imagePhash: string;
   stockTotal: number;
   stockReserved: number;
+  variants?: RuntimeProductVariant[];
 }
 
 export interface RuntimeShippingZone {
@@ -52,6 +62,30 @@ export interface RuntimeDiscount {
   isActive: boolean;
 }
 
+export interface RuntimeOrderItem {
+  id: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  variantId?: string;
+  variantSku?: string;
+  variantName?: string;
+  quantity: number;
+  unitPriceKobo: bigint;
+  subtotalKobo: bigint;
+}
+
+export interface RuntimeCartItem {
+  productId: string;
+  productSku: string;
+  productName: string;
+  variantId?: string;
+  variantSku?: string;
+  variantName?: string;
+  quantity: number;
+  unitPriceKobo: bigint;
+}
+
 export interface RuntimeOrder {
   id: string;
   shortCode: string;
@@ -60,7 +94,11 @@ export interface RuntimeOrder {
   productId: string;
   productSku: string;
   productName: string;
+  variantId?: string;
+  variantSku?: string;
+  variantName?: string;
   quantity: number;
+  items?: RuntimeOrderItem[];
   shippingZoneName: string;
   subtotalKobo: bigint;
   shippingFeeKobo: bigint;
@@ -101,10 +139,12 @@ export interface ChatThreadMessage {
 export interface BuyerConversationSession {
   buyerPhone: string;
   buyerName: string;
-  activeProductId: string;
-  quantity: number;
+  activeProductId?: string;
+  activeVariantId?: string;
+  quantity?: number;
   discountCode?: string;
-  state: "AWAITING_SHIPPING_ZONE";
+  cart?: RuntimeCartItem[];
+  state: "AWAITING_VARIANT" | "AWAITING_SHIPPING_ZONE" | "CART_ACTIVE";
   updatedAt: Date;
 }
 

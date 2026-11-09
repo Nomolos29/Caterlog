@@ -26,12 +26,18 @@ export function AnalyticsView({
   const marginPercent = totalGMV > 0 ? Math.round((netGrossProfit / totalGMV) * 100) : 0;
   const avgOrderValue = analytics.paidOrdersCount > 0 ? Math.round(totalGMV / analytics.paidOrdersCount) : 0;
 
-  // Top products calculated from live paid orders
+  // Top products calculated from live paid/active orders
   const topProducts = useMemo(() => {
-    const paidOrders = orders.filter((o) => o.status === "PAID");
+    const paidOrders = orders.filter((o) => o.status === "PAID" || o.amountPaidNaira > 0);
     const countsBySku = new Map<string, number>();
     for (const o of paidOrders) {
-      countsBySku.set(o.productSku, (countsBySku.get(o.productSku) || 0) + o.quantity);
+      if (o.items && o.items.length > 0) {
+        for (const it of o.items) {
+          countsBySku.set(it.productSku, (countsBySku.get(it.productSku) || 0) + it.quantity);
+        }
+      } else if (o.productSku) {
+        countsBySku.set(o.productSku, (countsBySku.get(o.productSku) || 0) + (o.quantity || 1));
+      }
     }
     return products
       .filter((p) => (countsBySku.get(p.skuCode) || 0) > 0)
@@ -49,6 +55,32 @@ export function AnalyticsView({
       .sort((a, b) => b.unitsSold - a.unitsSold)
       .slice(0, 5);
   }, [orders, products]);
+
+  // Dynamic Sales Attribution
+  const channelStats = useMemo(() => {
+    if (orders.length === 0) {
+      return { waPercent: 0, linksPercent: 0, networkPercent: 0, hasOrders: false };
+    }
+    let waCount = 0;
+    let linksCount = 0;
+    let networkCount = 0;
+    for (const o of orders) {
+      if (o.shortCode.startsWith("PL-") || o.shortCode.startsWith("LINK-")) {
+        linksCount++;
+      } else if (o.shortCode.startsWith("RS-") || o.shortCode.startsWith("NET-")) {
+        networkCount++;
+      } else {
+        waCount++;
+      }
+    }
+    const total = orders.length;
+    return {
+      waPercent: Math.round((waCount / total) * 100),
+      linksPercent: Math.round((linksCount / total) * 100),
+      networkPercent: Math.round((networkCount / total) * 100),
+      hasOrders: true,
+    };
+  }, [orders]);
 
   // Export Analytics CSV
   const handleExportReport = () => {
@@ -236,30 +268,45 @@ export function AnalyticsView({
             <div>
               <div className="flex justify-between text-xs font-semibold mb-1">
                 <span className="text-gray-700">WhatsApp Sales Co-Pilot</span>
-                <span className="text-gray-900">68%</span>
+                <span className="text-gray-900">
+                  {channelStats.hasOrders ? `${channelStats.waPercent}%` : "—"}
+                </span>
               </div>
               <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden">
-                <div className="h-full bg-emerald-500 rounded-full" style={{ width: "68%" }} />
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                  style={{ width: channelStats.hasOrders ? `${channelStats.waPercent}%` : "0%" }}
+                />
               </div>
             </div>
 
             <div>
               <div className="flex justify-between text-xs font-semibold mb-1">
                 <span className="text-gray-700">Direct Payment Links</span>
-                <span className="text-gray-900">22%</span>
+                <span className="text-gray-900">
+                  {channelStats.hasOrders ? `${channelStats.linksPercent}%` : "—"}
+                </span>
               </div>
               <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden">
-                <div className="h-full bg-blue-500 rounded-full" style={{ width: "22%" }} />
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                  style={{ width: channelStats.hasOrders ? `${channelStats.linksPercent}%` : "0%" }}
+                />
               </div>
             </div>
 
             <div>
               <div className="flex justify-between text-xs font-semibold mb-1">
                 <span className="text-gray-700">Reseller Network Directory</span>
-                <span className="text-gray-900">10%</span>
+                <span className="text-gray-900">
+                  {channelStats.hasOrders ? `${channelStats.networkPercent}%` : "—"}
+                </span>
               </div>
               <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden">
-                <div className="h-full bg-purple-500 rounded-full" style={{ width: "10%" }} />
+                <div
+                  className="h-full bg-purple-500 rounded-full transition-all duration-500"
+                  style={{ width: channelStats.hasOrders ? `${channelStats.networkPercent}%` : "0%" }}
+                />
               </div>
             </div>
           </div>

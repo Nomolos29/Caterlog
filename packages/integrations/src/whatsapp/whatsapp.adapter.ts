@@ -117,6 +117,28 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
     return this.sandboxOutbox;
   }
 
+  /**
+   * Retrieves the temporary download URL for a WhatsApp media ID from Meta Graph API.
+   */
+  public async getMediaUrl(mediaId: string): Promise<string | null> {
+    if (this.isMockMode() || !this.config.accessToken) {
+      return null;
+    }
+    try {
+      const url = `https://graph.facebook.com/${this.config.graphApiVersion}/${encodeURIComponent(mediaId)}`;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${this.config.accessToken}`,
+        },
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { url?: string };
+      return data.url ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   public clearSandboxOutbox(): void {
     this.sandboxOutbox.length = 0;
   }

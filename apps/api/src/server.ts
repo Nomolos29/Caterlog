@@ -292,12 +292,33 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
               const cleanVendorPhone = engine.vendor.whatsappPhone.replace(/\+/g, "");
               const cleanFromPhone = fromPhone.replace(/\+/g, "");
 
+              // Extract attached product photo/media from WhatsApp payload if present
+              let attachedImageUrl: string | undefined = undefined;
+              if (msg.image) {
+                if (msg.image.url) {
+                  attachedImageUrl = msg.image.url;
+                } else if (msg.image.link) {
+                  attachedImageUrl = msg.image.link;
+                } else if (msg.image.id) {
+                  const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
+                  attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(msg.image.id)}`;
+                }
+              }
+
+              // Also check if text contained an image URL directly
+              if (!attachedImageUrl) {
+                const embeddedMatch = text.match(/https?:\/\/[^\s,]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s,]*)?/i);
+                if (embeddedMatch) {
+                  attachedImageUrl = embeddedMatch[0];
+                }
+              }
+
               if (cleanFromPhone === cleanVendorPhone) {
                 // If the message is an explicit vendor keyword command (#help, sales, stock, ship, discount, etc.),
                 // execute store owner admin CLI. Otherwise, seamlessly route as customer shopping checkout!
                 const cmd = parseVendorWhatsAppCommand(text);
                 if (cmd.type !== "UNKNOWN_COMMAND" || text.trim().startsWith("#")) {
-                  await engine.handleVendorWhatsAppKeyword(text);
+                  await engine.handleVendorWhatsAppKeyword(text, attachedImageUrl);
                 } else {
                   await engine.handleBuyerWhatsAppInquiry({
                     buyerPhone: fromPhone,
@@ -356,6 +377,42 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
+      // 6b. WhatsApp Media Proxy (`GET /api/v1/media/:mediaId`)
+      if (req.method === "GET" && path.startsWith("/api/v1/media/")) {
+        const mediaId = decodeURIComponent(path.replace("/api/v1/media/", ""));
+        try {
+          const mediaUrl = await engine.whatsapp.getMediaUrl(mediaId);
+          if (mediaUrl) {
+            const upstreamRes = await fetch(mediaUrl, {
+              headers: {
+                Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN || ""}`,
+              },
+            });
+            if (upstreamRes.ok) {
+              const contentType = upstreamRes.headers.get("content-type") || "image/jpeg";
+              const arrayBuf = await upstreamRes.arrayBuffer();
+              res.writeHead(200, {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": contentType,
+                "Cache-Control": "public, max-age=86400",
+              });
+              res.end(Buffer.from(arrayBuf));
+              return;
+            }
+          }
+        } catch (err) {
+          console.error("[caterlog:media-proxy] Failed to proxy media from Meta:", err);
+        }
+
+        // Fallback product photo when running in mock/sandbox mode or upstream unavailable
+        res.writeHead(302, {
+          "Access-Control-Allow-Origin": "*",
+          Location: "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=600&q=80",
+        });
+        res.end();
+        return;
+      }
+
       // 7. Dashboard REST API: Full Vendor State (`GET /api/v1/vendor/state`)
       if (req.method === "GET" && path === "/api/v1/vendor/state") {
         return sendJson(res, 200, engine.serializeState());
@@ -387,20 +444,87 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         const body = JSON.parse(await readRawBody(req)) as {
           skuCode?: string;
           name: string;
+          description?: string;
           priceNaira: number | string;
-          stockTotal: number;
+          stockTotal?: number;
           category?: string;
           primaryImageUrl?: string;
+          variants?: Array<{
+            id?: string;
+            name: string;
+            sku?: string;
+            skuCode?: string;
+            priceNaira?: number | string;
+            stock?: number;
+            stockTotal?: number;
+          }>;
         };
+
+        const mappedVariants = body.variants?.map((v) => ({
+          id: v.id || `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: v.name,
+          skuCode: (v.sku || v.skuCode || `${body.skuCode || "ITEM"}-${v.name.slice(0, 3)}`).toUpperCase(),
+          priceKobo: v.priceNaira !== undefined ? nairaToKobo(v.priceNaira) : undefined,
+          stockTotal: Number(v.stock ?? v.stockTotal ?? 0),
+          stockReserved: 0,
+        }));
+
         engine.addProduct({
           skuCode: body.skuCode,
           name: body.name,
+          description: body.description,
           basePriceKobo: nairaToKobo(body.priceNaira),
-          stockTotal: Number(body.stockTotal),
+          stockTotal: Number(body.stockTotal ?? 0),
           category: body.category,
           primaryImageUrl: body.primaryImageUrl,
+          variants: mappedVariants,
         });
         return sendJson(res, 201, engine.serializeState());
+      }
+
+      // 9b. Dashboard REST API: Full Product/Variant Update (`PUT /api/v1/vendor/products/:sku`)
+      if (req.method === "PUT" && path.startsWith("/api/v1/vendor/products/")) {
+        const sku = decodeURIComponent(path.replace("/api/v1/vendor/products/", ""));
+        const body = JSON.parse(await readRawBody(req)) as {
+          name?: string;
+          description?: string;
+          category?: string;
+          priceNaira?: number | string;
+          stockTotal?: number;
+          primaryImageUrl?: string;
+          variants?: Array<{
+            id?: string;
+            name: string;
+            sku?: string;
+            skuCode?: string;
+            priceNaira?: number | string;
+            stock?: number;
+            stockTotal?: number;
+          }>;
+        };
+
+        const mappedVariants = body.variants?.map((v) => ({
+          id: v.id || `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: v.name,
+          skuCode: (v.sku || v.skuCode || `${sku}-${v.name.slice(0, 3)}`).toUpperCase(),
+          priceKobo: v.priceNaira !== undefined ? nairaToKobo(v.priceNaira) : undefined,
+          stockTotal: Number(v.stock ?? v.stockTotal ?? 0),
+          stockReserved: 0,
+        }));
+
+        const updated = engine.updateProduct(sku, {
+          name: body.name,
+          description: body.description,
+          category: body.category,
+          basePriceKobo: body.priceNaira !== undefined ? nairaToKobo(body.priceNaira) : undefined,
+          stockTotal: body.stockTotal !== undefined ? Number(body.stockTotal) : undefined,
+          primaryImageUrl: body.primaryImageUrl,
+          variants: mappedVariants,
+        });
+        if (!updated) {
+          throw new HttpError(404, `Product SKU "${sku}" not found.`);
+        }
+        return sendJson(res, 200, engine.serializeState());
       }
 
       // 10. Dashboard REST API: Update Stock (`PATCH /api/v1/vendor/products/:sku/stock`)

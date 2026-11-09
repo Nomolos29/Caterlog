@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import type { OrderItem } from "@/lib/types";
+import { EmptyState } from "../ui/empty-state";
 
 interface CustomerProfile {
   id: string;
@@ -191,17 +192,12 @@ export function CustomersView({
 
       {/* Customers Content */}
       {customers.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-gray-100 p-10 sm:p-14 text-center shadow-2xs space-y-4">
-          <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-3xl font-bold shadow-2xs">
-            👥
-          </div>
-          <div className="max-w-md mx-auto space-y-1.5">
-            <h3 className="text-lg font-bold text-gray-900">Your WhatsApp Customer Directory is Empty</h3>
-            <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
-              When customers message your connected WhatsApp Business account or purchase through your store link, their profile, phone number, order history, and delivery addresses will automatically populate here.
-            </p>
-          </div>
-        </div>
+        <EmptyState
+          badge="Customer Directory"
+          icon="👥"
+          title="Customer Directory is Empty"
+          description="When customers message your connected WhatsApp Business account or purchase through your store link, their profile, phone number, order history, and delivery addresses will automatically populate here."
+        />
       ) : (
         <>
           {/* Search & Tag Filter Bar */}

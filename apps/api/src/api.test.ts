@@ -33,6 +33,32 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.equal(engine.vendor.copilotMode, "COPILOT");
     assert.equal(engine.vendor.copilotIdleSeconds, 90);
     assert.equal(engine.vendor.reservationTtlMinutes, 25);
+
+    // 5. Vendor adds a variable product with attached photo via WhatsApp
+    const attachedPhoto = "https://images.unsplash.com/photo-example-heel.jpg";
+    const res = await engine.handleVendorWhatsAppKeyword(
+      "Louboutin Pigalle Pump, #45000, sizes: 38 (3), 39 (4), 40 (2)",
+      attachedPhoto
+    );
+    assert.equal(res.commandType, "QUICK_ADD_PRODUCT");
+    assert.match(res.replyText, /Variants \(3\)/);
+
+    const louboutin = engine.products.find((p) => p.name === "Louboutin Pigalle Pump");
+    assert.ok(louboutin);
+    assert.equal(louboutin.primaryImageUrl, attachedPhoto);
+    assert.equal(louboutin.stockTotal, 9);
+    assert.equal(louboutin.variants?.length, 3);
+    assert.equal(louboutin.variants[0].name, "38");
+    assert.equal(louboutin.variants[0].stockTotal, 3);
+    assert.equal(louboutin.variants[1].name, "39");
+    assert.equal(louboutin.variants[1].stockTotal, 4);
+
+    // Verify dashboard serialized state retains image and variants
+    const dashboardState = engine.serializeState();
+    const serializedProd = dashboardState.products.find((p) => p.name === "Louboutin Pigalle Pump");
+    assert.ok(serializedProd);
+    assert.equal(serializedProd.primaryImageUrl, attachedPhoto);
+    assert.equal(serializedProd.variants?.length, 3);
   });
 
   it("executes end-to-end WhatsApp Status reply -> Dynamic NUBAN -> Partial & Full Monnify Reconciliation", async () => {
@@ -474,6 +500,147 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.equal(expiredOrder?.reservationReleased, true);
 
     await scheduler.stop();
+  });
+
+  it("handles categorized vendor Help menu with interactive button-like quick replies", async () => {
+    const engine = new CaterlogStage1Engine();
+    const result = await engine.handleVendorWhatsAppKeyword("help");
+
+    assert.equal(result.commandType, "HELP_MENU");
+    assert.ok(result.replyText.includes("CATALOG & INVENTORY"));
+    assert.ok(result.replyText.includes("SALES & ORDERS"));
+    assert.ok(result.replyText.includes("SHIPPING & DISCOUNTS"));
+    assert.ok(result.replyText.includes("SETTINGS & CO-PILOT"));
+
+    const botMsg = engine.chatMessages.find(
+      (m) => m.channel === "VENDOR_ADMIN_WA" && m.sender === "CATERLOG_BOT" && m.quickReplies
+    );
+    assert.ok(botMsg);
+    assert.ok(botMsg.quickReplies && botMsg.quickReplies.length >= 5);
+    const replyTexts = botMsg.quickReplies.map((qr) => qr.replyText);
+    assert.ok(replyTexts.includes("products"));
+    assert.ok(replyTexts.includes("sales"));
+    assert.ok(replyTexts.includes("shipping"));
+    assert.ok(replyTexts.includes("discount"));
+    assert.ok(replyTexts.includes("pending"));
+    assert.ok(replyTexts.includes("paid"));
+    assert.ok(replyTexts.includes("dashboard"));
+  });
+
+  it("adds variable product with individual prices per variation and smart fallback image", async () => {
+    const engine = new CaterlogStage1Engine();
+    const result = await engine.handleVendorWhatsAppKeyword(
+      "Zara Stiletto Heel, 38: #20000 (5), 39: #25000 (3)"
+    );
+
+    assert.equal(result.commandType, "QUICK_ADD_PRODUCT");
+    assert.ok(result.replyText.includes("Zara Stiletto Heel"));
+    assert.ok(result.replyText.includes("₦20,000"));
+    assert.ok(result.replyText.includes("₦25,000"));
+
+    const prod = engine.products.find((p) => p.name === "Zara Stiletto Heel");
+    assert.ok(prod);
+    assert.equal(prod.stockTotal, 8);
+    assert.equal(prod.basePriceKobo, 2000000n);
+    assert.ok(prod.variants && prod.variants.length === 2);
+
+    const v38 = prod.variants.find((v) => v.name === "38");
+    assert.ok(v38);
+    assert.equal(v38.stockTotal, 5);
+    assert.equal(v38.priceKobo, 2000000n);
+
+    const v39 = prod.variants.find((v) => v.name === "39");
+    assert.ok(v39);
+    assert.equal(v39.stockTotal, 3);
+    assert.equal(v39.priceKobo, 2500000n);
+
+    // Smart fallback image assigned (not placehold.co)
+    assert.ok(prod.primaryImageUrl.includes("images.unsplash.com"));
+  });
+
+  it("inquiring about a product displays image and variations WITHOUT adding to cart", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Add variable product with individual prices
+    await engine.handleVendorWhatsAppKeyword(
+      "Bella Block Heel, 38: #22000 (4), 39: #26000 (2)"
+    );
+
+    const buyerPhone = "+2348077778888";
+
+    // 2. Buyer merely asks about the product
+    const inquiry = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Amaka Eze",
+      text: "Bella Block Heel",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    // CRUCIAL: Must NOT automatically add to cart!
+    const cart = engine.getBuyerCart(buyerPhone);
+    assert.equal(cart.length, 0, "Inquiring about an item must NOT add it to the cart");
+
+    // Must display image and variations with individual prices & stock
+    const lastBotMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+
+    assert.ok(lastBotMsg);
+    assert.ok(lastBotMsg.imageUrl, "Product card must include image");
+    assert.ok(lastBotMsg.text.includes("Bella Block Heel"));
+    assert.ok(lastBotMsg.text.includes("38"));
+    assert.ok(lastBotMsg.text.includes("₦22,000"));
+    assert.ok(lastBotMsg.text.includes("4 in stock"));
+    assert.ok(lastBotMsg.text.includes("39"));
+    assert.ok(lastBotMsg.text.includes("₦26,000"));
+    assert.ok(lastBotMsg.text.includes("2 in stock"));
+
+    // Must offer quick replies to add each variant to cart + category exploration
+    assert.ok(lastBotMsg.quickReplies && lastBotMsg.quickReplies.length >= 2);
+    const replyLabels = lastBotMsg.quickReplies.map((qr) => qr.label);
+    assert.ok(replyLabels.some((l) => l.includes("Add 38") && l.includes("₦22,000")));
+    assert.ok(replyLabels.some((l) => l.includes("Add 39") && l.includes("₦26,000")));
+    assert.ok(lastBotMsg.quickReplies.some((qr) => qr.replyText.startsWith("category")));
+
+    // 3. Buyer clicks the quick reply to add variant 38
+    const addReply = lastBotMsg.quickReplies.find((qr) => qr.label.includes("Add 38"))!;
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Amaka Eze",
+      text: addReply.replyText,
+      simulateFastForwardIdleTimer: true,
+    });
+
+    // NOW the item is added to cart
+    const updatedCart = engine.getBuyerCart(buyerPhone);
+    assert.equal(updatedCart.length, 1);
+    assert.equal(updatedCart[0].variantName, "38");
+    assert.equal(updatedCart[0].unitPriceKobo, 2200000n);
+
+    // And buyer is prompted for delivery zone
+    const promptMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(promptMsg?.text.includes("Where should we deliver your order"));
+  });
+
+  it("browses items under a category with quick-reply cards", async () => {
+    const engine = new CaterlogStage1Engine();
+    const buyerPhone = "+2348033334444";
+
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      text: "category fashion",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    const lastBotMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+
+    assert.ok(lastBotMsg);
+    assert.ok(lastBotMsg.text.includes("Items in Category"));
+    assert.ok(lastBotMsg.quickReplies && lastBotMsg.quickReplies.length >= 1);
   });
 });
 
