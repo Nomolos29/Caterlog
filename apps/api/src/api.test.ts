@@ -527,10 +527,12 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.ok(replyTexts.includes("dashboard"));
   });
 
-  it("adds variable product with individual prices per variation and smart fallback image", async () => {
+  it("adds variable product with individual prices per variation and preserves original photo", async () => {
     const engine = new CaterlogStage1Engine();
+    const originalPhoto = "https://cdn.caterlog.com/uploads/original-zara-stiletto.jpg";
     const result = await engine.handleVendorWhatsAppKeyword(
-      "Zara Stiletto Heel, 38: #20000 (5), 39: #25000 (3)"
+      "Zara Stiletto Heel, 38: #20000 (5), 39: #25000 (3)",
+      originalPhoto
     );
 
     assert.equal(result.commandType, "QUICK_ADD_PRODUCT");
@@ -554,16 +556,18 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.equal(v39.stockTotal, 3);
     assert.equal(v39.priceKobo, 2500000n);
 
-    // Smart fallback image assigned (not placehold.co)
-    assert.ok(prod.primaryImageUrl.includes("images.unsplash.com"));
+    // Original vendor photo is preserved, NEVER replaced by random unsplash
+    assert.equal(prod.primaryImageUrl, originalPhoto);
   });
 
   it("inquiring about a product displays image and variations WITHOUT adding to cart", async () => {
     const engine = new CaterlogStage1Engine();
+    const originalPhoto = "https://cdn.caterlog.com/uploads/original-bella-heel.jpg";
 
-    // 1. Add variable product with individual prices
+    // 1. Add variable product with individual prices and attached photo
     await engine.handleVendorWhatsAppKeyword(
-      "Bella Block Heel, 38: #22000 (4), 39: #26000 (2)"
+      "Bella Block Heel, 38: #22000 (4), 39: #26000 (2)",
+      originalPhoto
     );
 
     const buyerPhone = "+2348077778888";
@@ -641,6 +645,276 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.ok(lastBotMsg);
     assert.ok(lastBotMsg.text.includes("Items in Category"));
     assert.ok(lastBotMsg.quickReplies && lastBotMsg.quickReplies.length >= 1);
+  });
+
+  it("syncs Co-Pilot with Vendor Chat: escalates assistance requests, pauses Co-Pilot during vendor assistance, and resumes seamlessly", async () => {
+    const engine = new CaterlogStage1Engine();
+    const buyerPhone = "+2348033334444";
+    const buyerName = "Chioma Nwosu";
+
+    // 1. Buyer asks to speak with the vendor/owner
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName,
+      text: "Can I talk to the store owner please?",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    // Verify session flagged as NEEDS_ASSISTANCE
+    const session = engine.buyerSessions.get(buyerPhone);
+    assert.ok(session);
+    assert.equal(session.state, "NEEDS_ASSISTANCE");
+
+    // Verify buyer received support acknowledgment
+    const buyerAck = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(buyerAck?.text.includes("Customer Assistance Request Received"));
+
+    // Verify vendor was alerted on WhatsApp
+    const vendorAlert = engine.chatMessages
+      .filter((m) => m.channel === "VENDOR_ADMIN_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(vendorAlert?.text.includes("Customer Assistance Request"));
+    assert.ok(vendorAlert?.text.includes(buyerName));
+
+    // 2. Vendor replies to customer via WhatsApp keyword command
+    const vendorReplyRes = await engine.handleVendorWhatsAppKeyword(
+      "reply 4444 Hello Chioma! I am the store owner, how can I assist with your order?"
+    );
+    assert.equal(vendorReplyRes.commandType, "VENDOR_ASSIST_REPLY");
+
+    // Verify customer received the vendor message formatted as Store Owner
+    const deliveredMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "VENDOR")
+      .pop();
+    assert.ok(deliveredMsg);
+    assert.ok(deliveredMsg.text.includes("Store Owner"));
+    assert.ok(deliveredMsg.text.includes("how can I assist"));
+
+    // Verify Co-Pilot is paused for this thread
+    assert.equal(session.copilotPaused, true);
+    assert.equal(session.state, "ASSISTING");
+
+    // 3. Buyer replies while vendor is assisting -> Co-Pilot stays paused & forwards to vendor
+    const buyerFollowUp = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName,
+      text: "Do you have size 43 available in white leather?",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.equal(buyerFollowUp.copilotDecision.action, "DO_NOTHING");
+    assert.ok(buyerFollowUp.copilotDecision.reason.includes("Vendor is actively assisting customer"));
+
+    const vendorForward = engine.chatMessages
+      .filter((m) => m.channel === "VENDOR_ADMIN_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(vendorForward?.text.includes("Do you have size 43 available in white leather?"));
+
+    // 4. Vendor hands customer back to Co-Pilot
+    const resumeRes = await engine.handleVendorWhatsAppKeyword("resume");
+    assert.equal(resumeRes.commandType, "RESUME_COPILOT");
+    assert.equal(session.copilotPaused, false);
+
+    // Verify buyer received Co-Pilot back online message
+    const botResumedMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(botResumedMsg?.text.includes("Sales Co-Pilot is back online"));
+  });
+
+  it("supports ordering more than one unit at a time with stock validation and variant selection", async () => {
+    const engine = new CaterlogStage1Engine();
+    const buyerPhone = "+2348055554433";
+
+    // Add product with variants
+    await engine.handleVendorWhatsAppKeyword(
+      "Designer Sneaker, 40: #30000 (10), 41: #30000 (2)"
+    );
+
+    // 1. Natural multi-unit order: "I want 3 Designer Sneaker"
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Tolu Adeleke",
+      text: "I want 3 Designer Sneaker",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    const session = engine.buyerSessions.get(buyerPhone);
+    assert.ok(session);
+    assert.equal(session.quantity, 3);
+    assert.equal(session.state, "AWAITING_VARIANT");
+
+    // 2. Select variant 40 for the 3 units
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Tolu Adeleke",
+      text: "40",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    const cart = engine.getBuyerCart(buyerPhone);
+    assert.equal(cart.length, 1);
+    assert.equal(cart[0].productName, "Designer Sneaker");
+    assert.equal(cart[0].variantName, "40");
+    assert.equal(cart[0].quantity, 3);
+    assert.equal(cart[0].unitPriceKobo, 3000000n);
+
+    // 3. Test multi-unit variant with natural expression: "2 size 41"
+    const buyer2Phone = "+2348011112222";
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyer2Phone,
+      buyerName: "Chuka Obi",
+      text: "Designer Sneaker",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyer2Phone,
+      buyerName: "Chuka Obi",
+      text: "2 size 41",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    const cart2 = engine.getBuyerCart(buyer2Phone);
+    assert.equal(cart2.length, 1);
+    assert.equal(cart2[0].variantName, "41");
+    assert.equal(cart2[0].quantity, 2);
+
+    // 4. Exceeding stock: asking for 5 units when only 2 available
+    const buyer3Phone = "+2348099990000";
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyer3Phone,
+      buyerName: "Kunle",
+      text: "Designer Sneaker",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    const overStockRes = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyer3Phone,
+      buyerName: "Kunle",
+      text: "5 size 41",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.equal(overStockRes.step, "OUT_OF_STOCK");
+  });
+
+  it("supports 1-tap cart viewing and instant checkout displaying Monnify virtual account details", async () => {
+    const engine = new CaterlogStage1Engine();
+    const buyerPhone = "+2348088887766";
+
+    // 1. Add simple product and add 2 units to cart
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Ngozi Eze",
+      text: "I want 2 BAG-01",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    // 2. View cart
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Ngozi Eze",
+      text: "view cart",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    const cartMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(cartMsg?.text.includes("Your Shopping Cart"));
+    assert.ok(cartMsg?.text.includes("×2"));
+    assert.ok(cartMsg?.quickReplies?.some((qr) => qr.label.includes("Checkout")));
+
+    // 3. Instant checkout via "checkout" command
+    const checkoutRes = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Ngozi Eze",
+      text: "checkout",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    assert.equal(checkoutRes.step, "INVOICE_CREATED");
+    assert.ok(checkoutRes.createdOrder);
+    assert.equal(checkoutRes.createdOrder.quantity, 2);
+    assert.ok(checkoutRes.createdOrder.accountNumber);
+    assert.ok(checkoutRes.createdOrder.bankName);
+
+    // Cart is emptied and invoice is delivered
+    const cartAfter = engine.getBuyerCart(buyerPhone);
+    assert.equal(cartAfter.length, 0);
+
+    const invoiceMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .slice(-2)[0];
+    assert.ok(invoiceMsg?.text.includes("Order Invoice"));
+    assert.ok(invoiceMsg?.text.includes("Account No:"));
+
+    // Standalone 10-digit NUBAN bubble for 1-tap mobile copying
+    const nubanBubble = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.equal(nubanBubble?.text, checkoutRes.createdOrder.accountNumber);
+  });
+
+  it("computes real 64-bit dHash via MediaStore, preserves original images without Unsplash replacement, and matches WhatsApp status photo", async () => {
+    const { mediaStore } = await import("./media/media-store.ts");
+
+    // Generate test image buffer (PNG) using sharp
+    const sharp = (await import("sharp")).default;
+    const testImageBuffer = await sharp({
+      create: {
+        width: 100,
+        height: 100,
+        channels: 4,
+        background: { r: 255, g: 0, b: 128, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    const stored = await mediaStore.saveMedia({
+      buffer: testImageBuffer,
+      contentType: "image/png",
+    });
+
+    assert.ok(stored.mediaId.startsWith("med_"));
+    assert.ok(stored.phash.length === 16, "Perceptual dHash must be 16-hex-char 64-bit string");
+
+    // Verify retrieving by mediaId
+    const retrieved = mediaStore.getMedia(stored.mediaId);
+    assert.ok(retrieved);
+    assert.equal(retrieved.contentType, "image/png");
+    assert.equal(retrieved.phash, stored.phash);
+
+    // Register product with this real perceptual hash
+    const engine = new CaterlogStage1Engine();
+    const prod = engine.addProduct({
+      name: "Original Amaka Loafer",
+      basePriceKobo: 4500000n,
+      stockTotal: 10,
+      primaryImageUrl: `/api/v1/media/${stored.mediaId}`,
+      imagePhash: stored.phash,
+    });
+
+    assert.equal(prod.primaryImageUrl, `/api/v1/media/${stored.mediaId}`);
+    assert.equal(prod.imagePhash, stored.phash);
+
+    // Match status photo inquiry using the real perceptual hash
+    const inquiry = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: "+2348044443322",
+      buyerName: "Simi",
+      text: "How much is this?",
+      quotedStatusImagePhash: stored.phash,
+      simulateFastForwardIdleTimer: true,
+    });
+
+    assert.equal(inquiry.step, "PROMPTED_FOR_SHIPPING_ZONE");
+    const lastMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(lastMsg?.text.includes("Original Amaka Loafer"));
+    assert.ok(lastMsg?.text.includes("₦45,000"));
   });
 });
 

@@ -747,7 +747,7 @@ export function ProductsView({
                     src={resolveImageUrl(p.primaryImageUrl)}
                     alt={p.name}
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&q=80";
+                      (e.target as HTMLImageElement).style.display = "none";
                     }}
                     className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
                   />

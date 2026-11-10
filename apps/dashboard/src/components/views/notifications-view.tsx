@@ -121,14 +121,17 @@ export function NotificationsView({
       const recentBuyerMessages = chatMessages.filter((m) => m.sender === "BUYER").slice(-5);
       for (const msg of recentBuyerMessages) {
         const notifId = `notif-chat-${msg.id}`;
+        const isAssist = /talk|human|owner|vendor|support|help|assistance|care|agent/i.test(msg.text);
         list.push({
           id: notifId,
-          title: `WhatsApp Inquiry: ${msg.fromPhone || "Buyer"}`,
+          title: isAssist
+            ? `🔔 Customer Assistance: ${msg.fromPhone || "Buyer"}`
+            : `WhatsApp Inquiry: ${msg.fromPhone || "Buyer"}`,
           message: `"${msg.text}"`,
           category: "COPILOT",
           timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           read: readIds.has(notifId),
-          linkText: "Open Co-Pilot",
+          linkText: isAssist ? "Assist Customer" : "Open Co-Pilot",
           targetView: "orders",
         });
       }

@@ -142,6 +142,32 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
     }
   }
 
+  /**
+   * Downloads the raw binary media buffer and content type directly from Meta Cloud API.
+   */
+  public async downloadMedia(
+    mediaId: string
+  ): Promise<{ buffer: Buffer; contentType: string } | null> {
+    if (this.isMockMode() || !this.config.accessToken) {
+      return null;
+    }
+    const mediaUrl = await this.getMediaUrl(mediaId);
+    if (!mediaUrl) return null;
+    try {
+      const res = await fetch(mediaUrl, {
+        headers: {
+          Authorization: `Bearer ${this.config.accessToken}`,
+        },
+      });
+      if (!res.ok) return null;
+      const contentType = res.headers.get("content-type") || "image/jpeg";
+      const arrayBuf = await res.arrayBuffer();
+      return { buffer: Buffer.from(arrayBuf), contentType };
+    } catch {
+      return null;
+    }
+  }
+
   public clearSandboxOutbox(): void {
     this.sandboxOutbox.length = 0;
   }

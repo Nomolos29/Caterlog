@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { ProductItem } from "@/lib/types";
 
 interface ProductVariant {
@@ -42,11 +42,25 @@ export function ProductEditorModal({
   const [isPublished, setIsPublished] = useState(true);
 
   // Images
-  const [images, setImages] = useState<string[]>([
-    product?.primaryImageUrl || "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
-  ]);
+  const [images, setImages] = useState<string[]>(
+    product?.primaryImageUrl ? [product.primaryImageUrl] : []
+  );
   const [newImageUrl, setNewImageUrl] = useState("");
   const [showAddImage, setShowAddImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result;
+      if (typeof dataUrl === "string") {
+        setImages((prev) => [dataUrl, ...prev]);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Variants Matrix
   const [hasVariants, setHasVariants] = useState(Boolean(product?.variants && product.variants.length > 0));
@@ -76,10 +90,7 @@ export function ProductEditorModal({
       setSellingPrice(product.basePriceNaira);
       setWholesaleCost(Math.round(product.basePriceNaira * 0.75));
       setStockTotal(product.stockTotal);
-      setImages([
-        product.primaryImageUrl ||
-          "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
-      ]);
+      setImages(product.primaryImageUrl ? [product.primaryImageUrl] : []);
       if (product.variants && product.variants.length > 0) {
         setHasVariants(true);
         setVariants(
@@ -105,9 +116,7 @@ export function ProductEditorModal({
       setStockTotal(10);
       setHasVariants(false);
       setVariants([]);
-      setImages([
-        "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
-      ]);
+      setImages([]);
     }
   }, [product, isOpen]);
 
@@ -217,13 +226,30 @@ export function ProductEditorModal({
               </div>
             ))}
 
-            {/* Add Photo Button */}
+            {/* Add Photo Buttons */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageFileChange}
+            />
             <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-2xl border-2 border-dashed border-emerald-300 hover:border-emerald-600 hover:bg-emerald-50/50 aspect-square flex flex-col items-center justify-center text-emerald-700 transition-all cursor-pointer p-4 text-center group"
+            >
+              <span className="text-xl font-bold group-hover:scale-110 transition-transform">📷</span>
+              <span className="text-[11px] font-bold mt-1">Upload Photo</span>
+              <span className="text-[9px] text-gray-400 mt-0.5">From Device</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setShowAddImage(true)}
               className="rounded-2xl border-2 border-dashed border-gray-200 hover:border-emerald-500 hover:bg-emerald-50/30 aspect-square flex flex-col items-center justify-center text-gray-400 hover:text-emerald-700 transition-all cursor-pointer p-4 text-center"
             >
-              <span className="text-xl font-bold">+</span>
-              <span className="text-[11px] font-semibold mt-1">Add Photo</span>
+              <span className="text-xl font-bold">🔗</span>
+              <span className="text-[11px] font-semibold mt-1">Add URL</span>
             </button>
           </div>
 
@@ -231,7 +257,7 @@ export function ProductEditorModal({
             <div className="flex gap-2 mt-2">
               <input
                 type="text"
-                placeholder="Paste image URL (https://...)"
+                placeholder="Paste original product image URL (https://...)"
                 value={newImageUrl}
                 onChange={(e) => setNewImageUrl(e.target.value)}
                 className="flex-1 bg-white border border-gray-200 rounded-xl px-3 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-emerald-500"

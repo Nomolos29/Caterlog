@@ -5,6 +5,7 @@ import { nairaToKobo, parseVendorWhatsAppCommand } from "@caterlog/commerce-core
 import { CaterlogStage1Engine } from "./runtime-engine.ts";
 import { createEngineFromEnv } from "./bootstrap.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
+import { mediaStore } from "./media/media-store.ts";
 
 // Load a local `.env` when present so `npm run dev` / `npm start` pick up
 // WhatsApp & Monnify credentials without requiring a manual `export`.
@@ -307,14 +308,41 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
 
               // Extract attached product photo/media from WhatsApp payload if present
               let attachedImageUrl: string | undefined = undefined;
+              let attachedImagePhash: string | undefined = undefined;
+              const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
+
               if (msg.image) {
-                if (msg.image.url) {
-                  attachedImageUrl = msg.image.url;
-                } else if (msg.image.link) {
-                  attachedImageUrl = msg.image.link;
-                } else if (msg.image.id) {
-                  const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
-                  attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(msg.image.id)}`;
+                if (msg.image.id) {
+                  try {
+                    const downloaded = await engine.whatsapp.downloadMedia(msg.image.id);
+                    if (downloaded) {
+                      const saved = await mediaStore.saveMedia({
+                        buffer: downloaded.buffer,
+                        contentType: downloaded.contentType,
+                        mediaId: msg.image.id,
+                      });
+                      attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+                      attachedImagePhash = saved.phash;
+                    }
+                  } catch (err) {
+                    console.error("[whatsapp:media] Failed to download media from Meta:", err);
+                  }
+                  if (!attachedImageUrl) {
+                    attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(msg.image.id)}`;
+                  }
+                } else if (msg.image.url || msg.image.link) {
+                  const rawUrl = msg.image.url || msg.image.link;
+                  try {
+                    const saved = await mediaStore.saveFromUrl(rawUrl);
+                    if (saved) {
+                      attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+                      attachedImagePhash = saved.phash;
+                    } else {
+                      attachedImageUrl = rawUrl;
+                    }
+                  } catch {
+                    attachedImageUrl = rawUrl;
+                  }
                 }
               }
 
@@ -323,26 +351,45 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
                 const embeddedMatch = text.match(/https?:\/\/[^\s,]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s,]*)?/i);
                 if (embeddedMatch) {
                   attachedImageUrl = embeddedMatch[0];
+                  try {
+                    const saved = await mediaStore.saveFromUrl(attachedImageUrl);
+                    if (saved) {
+                      attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+                      attachedImagePhash = saved.phash;
+                    }
+                  } catch {}
                 }
               }
 
               if (cleanFromPhone === cleanVendorPhone) {
-                // If the message is an explicit vendor keyword command (#help, sales, stock, ship, discount, etc.),
-                // execute store owner admin CLI. Otherwise, seamlessly route as customer shopping checkout!
+                // If the message is an explicit vendor keyword command (#help, sales, stock, ship, discount, reply, resume, etc.),
+                // execute store owner admin CLI.
                 const cmd = parseVendorWhatsAppCommand(text);
                 if (cmd.type !== "UNKNOWN_COMMAND" || text.trim().startsWith("#")) {
-                  await engine.handleVendorWhatsAppKeyword(text, attachedImageUrl);
+                  await engine.handleVendorWhatsAppKeyword(text, attachedImageUrl, attachedImagePhash);
                 } else {
-                  await engine.handleBuyerWhatsAppInquiry({
-                    buyerPhone: fromPhone,
-                    text,
-                  });
+                  // Check if a customer is currently awaiting assistance or vendor is in active assistance mode
+                  const needsAssistSession = Array.from(engine.buyerSessions.values()).find(
+                    (s) => s.state === "NEEDS_ASSISTANCE" || s.state === "ASSISTING"
+                  );
+                  if (needsAssistSession) {
+                    await engine.recordVendorManualReplyInBuyerThread(text, needsAssistSession.buyerPhone);
+                  } else {
+                    await engine.handleBuyerWhatsAppInquiry({
+                      buyerPhone: fromPhone,
+                      text,
+                      quotedStatusImagePhash: attachedImagePhash,
+                      attachedImageUrl,
+                    });
+                  }
                 }
               } else {
                 // All other phone numbers are customer shoppers
                 await engine.handleBuyerWhatsAppInquiry({
                   buyerPhone: fromPhone,
                   text,
+                  quotedStatusImagePhash: attachedImagePhash,
+                  attachedImageUrl,
                 });
               }
             }
@@ -390,40 +437,75 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
-      // 6b. WhatsApp Media Proxy (`GET /api/v1/media/:mediaId`)
+      // 6b. WhatsApp & Product Media Proxy (`GET /api/v1/media/:mediaId`)
       if (req.method === "GET" && path.startsWith("/api/v1/media/")) {
         const mediaId = decodeURIComponent(path.replace("/api/v1/media/", ""));
+
+        // 1. Check local media store cache/disk
+        const cached = mediaStore.getMedia(mediaId);
+        if (cached) {
+          res.writeHead(200, {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": cached.contentType,
+            "Cache-Control": "public, max-age=86400",
+          });
+          res.end(cached.buffer);
+          return;
+        }
+
+        // 2. Try proxying / downloading original media from Meta Cloud API
         try {
-          const mediaUrl = await engine.whatsapp.getMediaUrl(mediaId);
-          if (mediaUrl) {
-            const upstreamRes = await fetch(mediaUrl, {
-              headers: {
-                Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN || ""}`,
-              },
+          const downloaded = await engine.whatsapp.downloadMedia(mediaId);
+          if (downloaded) {
+            const saved = await mediaStore.saveMedia({
+              buffer: downloaded.buffer,
+              contentType: downloaded.contentType,
+              mediaId,
             });
-            if (upstreamRes.ok) {
-              const contentType = upstreamRes.headers.get("content-type") || "image/jpeg";
-              const arrayBuf = await upstreamRes.arrayBuffer();
-              res.writeHead(200, {
-                "Access-Control-Allow-Origin": "*",
-                "Content-Type": contentType,
-                "Cache-Control": "public, max-age=86400",
-              });
-              res.end(Buffer.from(arrayBuf));
-              return;
-            }
+            res.writeHead(200, {
+              "Access-Control-Allow-Origin": "*",
+              "Content-Type": saved.contentType,
+              "Cache-Control": "public, max-age=86400",
+            });
+            res.end(saved.buffer);
+            return;
           }
         } catch (err) {
           console.error("[caterlog:media-proxy] Failed to proxy media from Meta:", err);
         }
 
-        // Fallback product photo when running in mock/sandbox mode or upstream unavailable
-        res.writeHead(302, {
+        // 3. Clean SVG placeholder when image is genuinely absent (NEVER redirect to random Unsplash)
+        res.writeHead(200, {
           "Access-Control-Allow-Origin": "*",
-          Location: "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=600&q=80",
+          "Content-Type": "image/svg+xml",
+          "Cache-Control": "public, max-age=3600",
         });
-        res.end();
+        res.end(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" fill="#f8fafc"><rect width="400" height="400" rx="16" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/><g transform="translate(140, 130)" fill="#94a3b8"><path d="M60 10a20 20 0 100 40 20 20 0 000-40zM10 110h100l-30-40-20 25-15-18-35 33z"/></g><text x="200" y="270" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="14" font-weight="600" fill="#64748b" text-anchor="middle">Original Photo Unavailable</text></svg>`
+        );
         return;
+      }
+
+      // 6c. Media Upload Endpoint (`POST /api/v1/media/upload`)
+      if (req.method === "POST" && path === "/api/v1/media/upload") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          dataUrl: string;
+          mediaId?: string;
+        };
+        if (!body.dataUrl) {
+          throw new HttpError(400, "dataUrl is required for media upload.");
+        }
+        const saved = await mediaStore.saveDataUrl(body.dataUrl, body.mediaId);
+        if (!saved) {
+          throw new HttpError(400, "Invalid base64 dataUrl format.");
+        }
+        const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
+        return sendJson(res, 201, {
+          mediaId: saved.mediaId,
+          url: `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`,
+          phash: saved.phash,
+          contentType: saved.contentType,
+        });
       }
 
       // 7. Dashboard REST API: Full Vendor State (`GET /api/v1/vendor/state`)
@@ -482,6 +564,17 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           stockReserved: 0,
         }));
 
+        let primaryImageUrl = body.primaryImageUrl;
+        let imagePhash: string | undefined = undefined;
+        if (primaryImageUrl && primaryImageUrl.startsWith("data:")) {
+          const saved = await mediaStore.saveDataUrl(primaryImageUrl);
+          if (saved) {
+            const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
+            primaryImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+            imagePhash = saved.phash;
+          }
+        }
+
         engine.addProduct({
           skuCode: body.skuCode,
           name: body.name,
@@ -489,7 +582,8 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           basePriceKobo: nairaToKobo(body.priceNaira),
           stockTotal: Number(body.stockTotal ?? 0),
           category: body.category,
-          primaryImageUrl: body.primaryImageUrl,
+          primaryImageUrl,
+          imagePhash,
           variants: mappedVariants,
         });
         return sendJson(res, 201, engine.serializeState());
@@ -516,6 +610,17 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           }>;
         };
 
+        let primaryImageUrl = body.primaryImageUrl;
+        let imagePhash: string | undefined = undefined;
+        if (primaryImageUrl && primaryImageUrl.startsWith("data:")) {
+          const saved = await mediaStore.saveDataUrl(primaryImageUrl);
+          if (saved) {
+            const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
+            primaryImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+            imagePhash = saved.phash;
+          }
+        }
+
         const mappedVariants = body.variants?.map((v) => ({
           id: v.id || `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           name: v.name,
@@ -531,7 +636,8 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           category: body.category,
           basePriceKobo: body.priceNaira !== undefined ? nairaToKobo(body.priceNaira) : undefined,
           stockTotal: body.stockTotal !== undefined ? Number(body.stockTotal) : undefined,
-          primaryImageUrl: body.primaryImageUrl,
+          primaryImageUrl,
+          imagePhash,
           variants: mappedVariants,
         });
         if (!updated) {
@@ -703,16 +809,33 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           simulateFastForwardIdleTimer?: boolean;
         };
 
+        let attachedImageUrl = body.attachedImageUrl;
+        let attachedPhash = body.quotedStatusImagePhash;
+
+        if (attachedImageUrl && attachedImageUrl.startsWith("data:")) {
+          const saved = await mediaStore.saveDataUrl(attachedImageUrl);
+          if (saved) {
+            const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
+            attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+            attachedPhash = attachedPhash || saved.phash;
+          }
+        }
+
         if (body.role === "VENDOR_KEYWORD") {
           const resData = await engine.handleVendorWhatsAppKeyword(
             body.text,
-            body.attachedImageUrl
+            attachedImageUrl,
+            attachedPhash
           );
           return sendJson(res, 200, { ...resData, state: engine.serializeState() });
         }
 
         if (body.role === "VENDOR_MANUAL_BUYER_REPLY") {
-          await engine.recordVendorManualReplyInBuyerThread(body.text);
+          if (body.text.trim().toLowerCase() === "resume" || body.text.trim().toLowerCase() === "resume copilot") {
+            await engine.handleResumeCopilot(body.buyerPhone);
+          } else {
+            await engine.recordVendorManualReplyInBuyerThread(body.text, body.buyerPhone);
+          }
           return sendJson(res, 200, { state: engine.serializeState() });
         }
 
@@ -720,7 +843,8 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           buyerPhone: body.buyerPhone ?? "+2348099887766",
           buyerName: body.buyerName ?? "Chidinma Okafor",
           text: body.text,
-          quotedStatusImagePhash: body.quotedStatusImagePhash,
+          quotedStatusImagePhash: attachedPhash,
+          attachedImageUrl,
           simulateFastForwardIdleTimer: body.simulateFastForwardIdleTimer ?? true,
         });
 

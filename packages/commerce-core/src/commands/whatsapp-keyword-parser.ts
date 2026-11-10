@@ -39,6 +39,12 @@ export type VendorWhatsAppCommand =
   | { type: "DISPATCH_ORDER"; shortCode: string; riderPhone?: string }
   | { type: "SET_COPILOT_MODE"; mode: DomainCopilotMode; idleSeconds?: number }
   | { type: "SET_RESERVATION_TTL"; minutes: number }
+  | {
+      type: "VENDOR_ASSIST_REPLY";
+      targetPhoneOrQuery?: string;
+      message: string;
+    }
+  | { type: "RESUME_COPILOT"; targetPhoneOrQuery?: string }
   | { type: "UNKNOWN_COMMAND"; rawInput: string };
 
 function normalizeOrderShortCode(raw: string): string {
@@ -282,7 +288,33 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
     }
   }
 
-  // 10. Quick Product Caption Format (Simple or Variable Products)
+  // 10. Vendor Customer Assistance & Co-Pilot Sync (`reply <msg>`, `reply <phone> <msg>`, `resume`)
+  if (
+    firstWord === "resume" ||
+    (firstWord === "copilot" && (tokens[1] === "on" || tokens[1] === "resume")) ||
+    lower.startsWith("hand back")
+  ) {
+    const target = tokens[1] && tokens[1] !== "copilot" && tokens[1] !== "on" && tokens[1] !== "resume" ? tokens[1] : undefined;
+    return { type: "RESUME_COPILOT", targetPhoneOrQuery: target };
+  }
+
+  if ((firstWord === "reply" || firstWord === "assist" || firstWord === "respond") && tokens.length > 1) {
+    const secondToken = tokens[1];
+    const isPhoneLike = /^(?:\+?\d{4,15})$/.test(secondToken);
+    if (isPhoneLike && tokens.length > 2) {
+      return {
+        type: "VENDOR_ASSIST_REPLY",
+        targetPhoneOrQuery: secondToken,
+        message: tokens.slice(2).join(" ").trim(),
+      };
+    }
+    return {
+      type: "VENDOR_ASSIST_REPLY",
+      message: tokens.slice(1).join(" ").trim(),
+    };
+  }
+
+  // 11. Quick Product Caption Format (Simple or Variable Products)
   // Examples:
   // - "Zara Heel, #25000, stock 5"
   // - "Zara Heel, 25k, 5"

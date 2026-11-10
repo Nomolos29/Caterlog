@@ -281,7 +281,8 @@ export function Dashboard() {
     text: string,
     phash?: string,
     buyerPhone?: string,
-    buyerName?: string
+    buyerName?: string,
+    attachedImageUrl?: string
   ) => {
     const res = await api.simulateWhatsApp({
       role: "BUYER_INQUIRY",
@@ -289,15 +290,17 @@ export function Dashboard() {
       buyerPhone: buyerPhone || undefined,
       buyerName: buyerName || undefined,
       quotedStatusImagePhash: phash,
+      attachedImageUrl,
       simulateFastForwardIdleTimer: true,
     });
     if (res.state) setState(res.state);
   };
 
-  const handleSendVendorManualEcho = async (text: string) => {
+  const handleSendVendorManualEcho = async (text: string, buyerPhone?: string) => {
     const res = await api.simulateWhatsApp({
       role: "VENDOR_MANUAL_BUYER_REPLY",
       text,
+      buyerPhone,
     });
     if (res.state) setState(res.state);
   };
@@ -537,6 +540,8 @@ export function Dashboard() {
               discounts={state.discounts}
               chatMessages={state.chatMessages}
               orders={state.orders}
+              activeBuyerSession={state.activeBuyerSession}
+              onSendVendorManualEcho={handleSendVendorManualEcho}
               onUpdateSettings={handleUpdateSettings}
               onAddShippingZone={handleAddShippingZone}
               onDeleteShippingZone={handleDeleteShippingZone}
@@ -562,6 +567,7 @@ export function Dashboard() {
         orders={state.orders}
         products={state.products}
         vendor={state.vendor}
+        activeBuyerSession={state.activeBuyerSession}
         onSendVendorKeyword={handleSendVendorKeyword}
         onSendBuyerInquiry={handleSendBuyerInquiry}
         onSendVendorManualEcho={handleSendVendorManualEcho}

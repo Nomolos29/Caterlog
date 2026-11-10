@@ -30,4 +30,5 @@ coverage/
 # Local Dev Persistence Store
 .caterlog-*.json
 .data/
+data/
 

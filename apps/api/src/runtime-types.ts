@@ -144,7 +144,10 @@ export interface BuyerConversationSession {
   quantity?: number;
   discountCode?: string;
   cart?: RuntimeCartItem[];
-  state: "AWAITING_VARIANT" | "AWAITING_SHIPPING_ZONE" | "CART_ACTIVE";
+  state: "AWAITING_VARIANT" | "AWAITING_SHIPPING_ZONE" | "CART_ACTIVE" | "NEEDS_ASSISTANCE" | "ASSISTING";
+  assistanceInquiry?: string;
+  assistanceRequestedAt?: Date;
+  copilotPaused?: boolean;
   updatedAt: Date;
 }
 

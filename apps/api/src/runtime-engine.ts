@@ -45,6 +45,7 @@ import type {
 import { createMemoryPersistence } from "./persistence/memory.ts";
 import type { PersistenceStore } from "./persistence/types.ts";
 import type { BackgroundJobScheduler } from "./jobs/types.ts";
+import { mediaStore } from "./media/media-store.ts";
 
 export type {
   BuyerConversationSession,
@@ -491,7 +492,7 @@ export class CaterlogStage1Engine {
     this.appendChat({
       channel: params.channel,
       sender: params.sender ?? "CATERLOG_BOT",
-      fromPhone: "CATERLOG",
+      fromPhone: params.sender === "VENDOR" ? this.vendor.whatsappPhone : "CATERLOG",
       text: params.text,
       imageUrl: params.imageUrl,
       quickReplies: params.quickReplies,
@@ -503,7 +504,8 @@ export class CaterlogStage1Engine {
    */
   public async handleVendorWhatsAppKeyword(
     rawText: string,
-    attachedImageUrl?: string
+    attachedImageUrl?: string,
+    attachedImagePhash?: string
   ): Promise<{
     replyText: string;
     commandType: string;
@@ -560,6 +562,11 @@ export class CaterlogStage1Engine {
           "• *mode off* — Manual mode (Co-Pilot paused)",
           "• *hold <minutes>* — Set transfer hold window (e.g. `hold 15`)",
           "• *dashboard* — 1-tap instant login link to Web Dashboard",
+          "",
+          "🤝 *CUSTOMER ASSISTANCE & CO-PILOT SYNC*",
+          "• *reply <message>* — Reply to customer asking for help",
+          "• *reply <phone> <message>* — Reply to specific customer (e.g. `reply 7766 Size 40 is ready`)",
+          "• *resume* — Hand customer back to AI Co-Pilot",
         ].join("\n");
 
         quickReplies = [
@@ -746,6 +753,7 @@ export class CaterlogStage1Engine {
             basePriceKobo: effectiveBasePrice,
             stockTotal: cmd.stockTotal,
             primaryImageUrl: attachedImageUrl,
+            imagePhash: attachedImagePhash,
             variants: mappedVariants,
           });
 
@@ -860,6 +868,29 @@ export class CaterlogStage1Engine {
         break;
       }
 
+      case "VENDOR_ASSIST_REPLY": {
+        const assistRes = await this.recordVendorManualReplyInBuyerThread(
+          cmd.message,
+          cmd.targetPhoneOrQuery
+        );
+        replyText = `💬 Delivered reply to *${assistRes.targetBuyerName}* (${assistRes.targetBuyerPhone}):\n"${cmd.message}"\n\n_Co-Pilot is paused for this customer so you can chat freely. Reply *resume* when done._`;
+        quickReplies = [
+          { label: "🤖 Resume Co-Pilot", replyText: "resume" },
+          { label: "📦 View Stock", replyText: "stock" },
+        ];
+        break;
+      }
+
+      case "RESUME_COPILOT": {
+        const resumed = await this.handleResumeCopilot(cmd.targetPhoneOrQuery);
+        replyText = `🤖 *Co-Pilot Resumed* for *${resumed.targetBuyerName}* (${resumed.targetBuyerPhone}). Automated checkout and product inquiries are active again.`;
+        quickReplies = [
+          { label: "📊 Sales Summary", replyText: "sales" },
+          { label: "📦 View Stock", replyText: "stock" },
+        ];
+        break;
+      }
+
       case "UNKNOWN_COMMAND": {
         replyText = `❓ Unrecognized command "${cmd.rawInput}". Type *help* to see all Caterlog commands (or send *Name, #Price, stock Qty* to add a product).`;
         break;
@@ -879,10 +910,17 @@ export class CaterlogStage1Engine {
   }
 
   /**
-   * Records that the Vendor manually sent a message inside the Buyer's WhatsApp thread
-   * (received via Meta `message_echoes` webhook). Cancels any pending Co-Pilot idle timer!
+   * Records that the Vendor manually sent a customer assistance reply in the Buyer's WhatsApp thread.
+   * Cancels any pending Co-Pilot idle timer and pauses Co-Pilot so vendor can assist freely!
    */
-  public async recordVendorManualReplyInBuyerThread(text: string): Promise<void> {
+  public async recordVendorManualReplyInBuyerThread(
+    text: string,
+    buyerPhoneOrQuery?: string
+  ): Promise<{
+    targetBuyerPhone: string;
+    targetBuyerName: string;
+    delivered: boolean;
+  }> {
     this.lastVendorReplyInBuyerThreadAt = new Date();
     const timer = this.activeCopilotTimers.get("buyer-thread");
     if (timer) {
@@ -890,21 +928,156 @@ export class CaterlogStage1Engine {
       this.activeCopilotTimers.delete("buyer-thread");
     }
 
-    this.appendChat({
-      channel: "BUYER_SHOP_WA",
-      sender: "VENDOR",
-      fromPhone: this.vendor.whatsappPhone,
+    let targetPhone = buyerPhoneOrQuery?.trim();
+    let targetSession: BuyerConversationSession | undefined;
+
+    if (targetPhone) {
+      for (const [phone, sess] of this.buyerSessions.entries()) {
+        if (phone === targetPhone || phone.endsWith(targetPhone)) {
+          targetPhone = phone;
+          targetSession = sess;
+          break;
+        }
+      }
+    }
+
+    if (!targetSession) {
+      const sessions = Array.from(this.buyerSessions.values());
+      const needsAssist = sessions.find((s) => s.state === "NEEDS_ASSISTANCE");
+      targetSession = needsAssist ?? sessions[0];
+      if (targetSession) {
+        targetPhone = targetSession.buyerPhone;
+      }
+    }
+
+    if (!targetPhone) {
+      const recentBuyerMsg = [...this.chatMessages]
+        .reverse()
+        .find((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "BUYER");
+      targetPhone = recentBuyerMsg?.fromPhone ?? "+2348099887766";
+    }
+
+    const buyerName = targetSession?.buyerName ?? "Customer";
+
+    if (targetSession) {
+      targetSession.state = "ASSISTING";
+      targetSession.copilotPaused = true;
+      targetSession.updatedAt = new Date();
+    } else {
+      this.buyerSessions.set(targetPhone, {
+        buyerPhone: targetPhone,
+        buyerName,
+        state: "ASSISTING",
+        copilotPaused: true,
+        updatedAt: new Date(),
+      });
+    }
+
+    const customerMessageText = [
+      `👤 *${this.vendor.businessName} (Store Owner):*`,
       text,
+      ``,
+      `_Reply directly to chat with the store owner, or tap below to resume automated shopping._`,
+    ].join("\n");
+
+    await this.dispatchWhatsAppAndRecordChat({
+      channel: "BUYER_SHOP_WA",
+      toPhone: targetPhone,
+      text: customerMessageText,
+      sender: "VENDOR",
+      quickReplies: [
+        { label: "🛍️ Resume Co-Pilot", replyText: "resume" },
+        { label: "🛒 View Cart", replyText: "cart" },
+      ],
+      headerText: "Store Owner Reply",
     });
 
-    this.appendChat({
+    await this.dispatchWhatsAppAndRecordChat({
       channel: "VENDOR_ADMIN_WA",
-      sender: "CATERLOG_BOT",
-      fromPhone: "CATERLOG",
-      text: `✋ Detected your manual reply in the buyer chat. Smart Co-Pilot cancelled its idle takeover timer so you can chat uninterrupted.`,
+      toPhone: this.vendor.whatsappPhone,
+      text: `💬 Delivered your reply to *${buyerName}* (${targetPhone}):\n"${text}"\n\nCo-Pilot is paused for this customer so you can chat freely. Reply *resume* when done.`,
+      quickReplies: [
+        { label: "🤖 Hand Back to Co-Pilot", replyText: "resume" },
+      ],
     });
 
     await this.broadcastStateChange();
+    return {
+      targetBuyerPhone: targetPhone,
+      targetBuyerName: buyerName,
+      delivered: true,
+    };
+  }
+
+  public async handleResumeCopilot(buyerPhoneOrQuery?: string): Promise<{
+    targetBuyerPhone: string;
+    targetBuyerName: string;
+  }> {
+    let targetPhone = buyerPhoneOrQuery?.trim();
+    let targetSession: BuyerConversationSession | undefined;
+
+    if (targetPhone) {
+      for (const [phone, sess] of this.buyerSessions.entries()) {
+        if (phone === targetPhone || phone.endsWith(targetPhone)) {
+          targetPhone = phone;
+          targetSession = sess;
+          break;
+        }
+      }
+    }
+
+    if (!targetSession) {
+      const sessions = Array.from(this.buyerSessions.values());
+      const assisting = sessions.find((s) => s.state === "ASSISTING" || s.copilotPaused);
+      targetSession = assisting ?? sessions[0];
+      if (targetSession) {
+        targetPhone = targetSession.buyerPhone;
+      }
+    }
+
+    if (!targetPhone) {
+      targetPhone = "+2348099887766";
+    }
+
+    const buyerName = targetSession?.buyerName ?? "Customer";
+
+    if (targetSession) {
+      targetSession.copilotPaused = false;
+      targetSession.state = "CART_ACTIVE";
+      targetSession.updatedAt = new Date();
+    }
+
+    const resumeMsg = [
+      `🤖 *${this.vendor.businessName} Sales Co-Pilot is back online!*`,
+      `How else can I help you today? Reply with a product name, SKU, or *cart* anytime.`,
+    ].join("\n");
+
+    await this.dispatchWhatsAppAndRecordChat({
+      channel: "BUYER_SHOP_WA",
+      toPhone: targetPhone,
+      text: resumeMsg,
+      quickReplies: [
+        { label: "🛍️ View Catalog", replyText: "catalog" },
+        { label: "🛒 View Cart", replyText: "cart" },
+      ],
+      headerText: "Sales Co-Pilot Resumed",
+    });
+
+    await this.dispatchWhatsAppAndRecordChat({
+      channel: "VENDOR_ADMIN_WA",
+      toPhone: this.vendor.whatsappPhone,
+      text: `🤖 *Co-Pilot Resumed* for *${buyerName}* (${targetPhone}). Automated checkout and product inquiries are active again.`,
+      quickReplies: [
+        { label: "📊 Sales Summary", replyText: "sales" },
+        { label: "📦 View Stock", replyText: "stock" },
+      ],
+    });
+
+    await this.broadcastStateChange();
+    return {
+      targetBuyerPhone: targetPhone,
+      targetBuyerName: buyerName,
+    };
   }
 
   /**
@@ -923,6 +1096,7 @@ export class CaterlogStage1Engine {
     buyerName?: string;
     text: string;
     quotedStatusImagePhash?: string;
+    attachedImageUrl?: string;
     simulateFastForwardIdleTimer?: boolean;
   }): Promise<{
     copilotDecision: ReturnType<typeof evaluateCopilotAction>;
@@ -936,20 +1110,58 @@ export class CaterlogStage1Engine {
         )
       : undefined;
 
+    const chatImageUrl = params.attachedImageUrl || matchedStatusProduct?.primaryImageUrl;
+
     this.appendChat({
       channel: "BUYER_SHOP_WA",
       sender: "BUYER",
       fromPhone: params.buyerPhone,
       text: params.quotedStatusImagePhash
-        ? `📸 [Replied to WhatsApp Status${matchedStatusProduct ? `: ${matchedStatusProduct.name}` : ""}] ${params.text}`
-        : params.text,
-      imageUrl: matchedStatusProduct?.primaryImageUrl,
+        ? `📸 [Replied to WhatsApp Status${matchedStatusProduct ? `: ${matchedStatusProduct.name}` : ""}] ${params.text || ""}`.trim()
+        : params.text || (params.attachedImageUrl ? "📸 [Sent an image]" : ""),
+      imageUrl: chatImageUrl,
     });
+
+    const existingSession = this.buyerSessions.get(params.buyerPhone);
+    const trimmed = params.text.trim().toLowerCase();
+
+    // If Co-Pilot is paused for this buyer (vendor is actively assisting them):
+    if (existingSession?.copilotPaused) {
+      if (/^(?:resume|copilot(?:\s+on)?|back\s+to\s+shopping|shop|menu|catalog)$/i.test(trimmed)) {
+        await this.handleResumeCopilot(params.buyerPhone);
+        return {
+          copilotDecision: {
+            action: "RESPOND_IMMEDIATELY",
+            reason: "Buyer manually resumed Sales Co-Pilot.",
+          },
+          step: "UNMATCHED",
+        };
+      }
+
+      // Forward buyer's message to vendor without automated bot interruption
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "VENDOR_ADMIN_WA",
+        toPhone: this.vendor.whatsappPhone,
+        text: `💬 *[${params.buyerName ?? "Customer"} (${params.buyerPhone})]:*\n"${params.text}"\n\n_To reply, send: \`reply ${params.text}\` or reply from Dashboard._`,
+        quickReplies: [
+          { label: `💬 Reply to ${params.buyerName?.split(" ")[0] ?? "Customer"}`, replyText: `reply ${params.buyerPhone} ` },
+          { label: "🤖 Resume Co-Pilot", replyText: "resume" },
+        ],
+      });
+
+      await this.broadcastStateChange();
+      return {
+        copilotDecision: {
+          action: "DO_NOTHING",
+          reason: "Vendor is actively assisting customer; Co-Pilot paused.",
+        },
+      };
+    }
 
     const decision = evaluateCopilotAction({
       copilotMode: this.vendor.copilotMode,
       copilotIdleSeconds: this.vendor.copilotIdleSeconds,
-      sessionCopilotPaused: false,
+      sessionCopilotPaused: Boolean(existingSession?.copilotPaused),
       lastVendorMessageAt: this.lastVendorReplyInBuyerThreadAt,
       now: buyerMessageTime,
     });
@@ -965,6 +1177,7 @@ export class CaterlogStage1Engine {
         buyerName: params.buyerName ?? "Chidinma Okafor",
         text: params.text,
         quotedStatusImagePhash: params.quotedStatusImagePhash,
+        attachedImageUrl: params.attachedImageUrl,
       });
       return {
         copilotDecision: decision,
@@ -998,6 +1211,7 @@ export class CaterlogStage1Engine {
           buyerName: params.buyerName ?? "Chidinma Okafor",
           text: params.text,
           quotedStatusImagePhash: params.quotedStatusImagePhash,
+          attachedImageUrl: params.attachedImageUrl,
         });
       }
     }, decision.delaySeconds * 1000);
@@ -1015,6 +1229,7 @@ export class CaterlogStage1Engine {
     buyerName: string;
     text: string;
     quotedStatusImagePhash?: string;
+    attachedImageUrl?: string;
   }): Promise<{
     step: "PROMPTED_FOR_SHIPPING_ZONE" | "INVOICE_CREATED" | "OUT_OF_STOCK" | "UNMATCHED";
     createdOrder?: RuntimeOrder;
@@ -1023,7 +1238,72 @@ export class CaterlogStage1Engine {
     const existingSession = this.buyerSessions.get(params.buyerPhone);
     const trimmed = params.text.trim();
 
-    // 0. Category Browse Commands (e.g. "category fashion", "more in fashion", "browse kitchen")
+    // 0. Customer Assistance / Human Vendor Request
+    const isAssistanceRequest =
+      /\b(?:(?:talk|speak|chat)\s+(?:to|with)\s+(?:the\s+)?(?:store\s+)?(?:vendor|human|owner|seller|agent|person|support)|contact\s+(?:the\s+)?(?:store\s+)?(?:vendor|owner|support)|human\s+agent|talk\s+to\s+someone|customer\s+care|customer\s+support|need\s+(?:help|assistance)|help\s+me|assistance\s+please)\b/i.test(
+        trimmed
+      ) ||
+      /^(?:help|support|agent|human|owner|vendor|assistance)$/i.test(
+        trimmed.replace(/[?.!]/g, "").trim()
+      );
+
+    if (isAssistanceRequest) {
+      this.buyerSessions.set(params.buyerPhone, {
+        buyerPhone: params.buyerPhone,
+        buyerName: params.buyerName,
+        state: "NEEDS_ASSISTANCE",
+        assistanceInquiry: trimmed,
+        assistanceRequestedAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const buyerAck = [
+        `🛎️ *Customer Assistance Request Received*`,
+        ``,
+        `I have alerted the store owner (*${this.vendor.businessName}*) to assist you directly! They will reply to you here shortly. 🕒`,
+        ``,
+        `_In the meantime, feel free to reply with any product name, SKU, or *cart* to continue shopping._`,
+      ].join("\n");
+
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: params.buyerPhone,
+        text: buyerAck,
+        quickReplies: [
+          { label: "🛍️ View Catalog", replyText: "catalog" },
+          { label: "🛒 View Cart", replyText: "cart" },
+        ],
+        headerText: "Customer Support Alerted",
+      });
+
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "VENDOR_ADMIN_WA",
+        toPhone: this.vendor.whatsappPhone,
+        text: [
+          `🔔 *Customer Assistance Request*`,
+          ``,
+          `*Customer:* ${params.buyerName} (\`${params.buyerPhone}\`)`,
+          `*Inquiry:* "${trimmed}"`,
+          ``,
+          `_To reply from WhatsApp:_`,
+          `👉 \`reply ${trimmed.length > 20 ? trimmed.slice(0, 20) + "..." : trimmed}\` or \`reply ${params.buyerPhone} <Your reply>\``,
+          ``,
+          `_You can also answer directly from your Caterlog Web Dashboard._`,
+        ].join("\n"),
+        quickReplies: [
+          {
+            label: `💬 Reply to ${params.buyerName.split(" ")[0]}`,
+            replyText: `reply ${params.buyerPhone} `,
+          },
+        ],
+        headerText: "Customer Assistance",
+      });
+
+      await this.broadcastStateChange();
+      return { step: "UNMATCHED" };
+    }
+
+    // 1. Category Browse Commands (e.g. "category fashion", "more in fashion", "browse kitchen")
     const catMatch = trimmed.match(/^(?:category|cat|browse|more\s+in)\s+(.+)$/i);
     if (catMatch) {
       const targetCat = catMatch[1].trim().toLowerCase();
@@ -1129,10 +1409,19 @@ export class CaterlogStage1Engine {
       ].join("\n");
 
       const quickReplies: QuickReplyOption[] = [
-        ...activeZones.map((z) => ({
+        ...(activeZones.length > 0
+          ? [
+              {
+                label: `⚡ Checkout Now (${activeZones[0].name})`,
+                replyText: activeZones[0].name,
+              },
+            ]
+          : [{ label: "⚡ Checkout Now", replyText: "checkout" }]),
+        ...activeZones.slice(1, 3).map((z) => ({
           label: `🚚 ${z.code}. ${z.name} (${formatNaira(z.feeKobo)})`,
           replyText: z.name,
         })),
+        { label: "🛍️ More Items", replyText: "catalog" },
         { label: "🗑️ Clear Cart", replyText: "clear cart" },
       ];
 
@@ -1172,10 +1461,11 @@ export class CaterlogStage1Engine {
       if (activeProd && activeProd.variants && activeProd.variants.length > 0) {
         const { variant } = this.findProductAndVariantInBuyerMessage(params.text, undefined, activeProd);
         if (variant) {
+          const parsedQty = this.extractQuantityFromText(params.text);
+          const reqQty = parsedQty ?? existingSession.quantity ?? 1;
           const vAvail = variant.stockTotal - variant.stockReserved;
-          const reqQty = existingSession.quantity ?? 1;
           if (vAvail < reqQty) {
-            const outMsg = `⚠️ Sorry, *${activeProd.name} — ${variant.name}* is currently sold out! Please select another option:`;
+            const outMsg = `⚠️ Sorry, *${activeProd.name} — ${variant.name}* only has ${Math.max(0, vAvail)} unit(s) available (you requested ${reqQty}). Please select another option:`;
             await this.dispatchWhatsAppAndRecordChat({
               channel: "BUYER_SHOP_WA",
               toPhone: params.buyerPhone,
@@ -1302,6 +1592,77 @@ export class CaterlogStage1Engine {
       }
     }
 
+    // 3. Direct Checkout / Payment Command (e.g. "checkout", "pay", "pay now", "order now", "make payment")
+    const isDirectCheckout =
+      /^(?:checkout|pay|pay\s+now|make\s+payment|order\s+now|transfer|proceed\s+to\s+(?:checkout|payment)|buy\s+now)$/i.test(
+        trimmed
+      ) ||
+      /^checkout\s+/i.test(trimmed);
+
+    if (isDirectCheckout && !explicitlyMentionedProduct) {
+      let cartToCheckout = this.getBuyerCart(params.buyerPhone);
+      if (cartToCheckout.length === 0 && existingSession?.activeProductId) {
+        const prod = this.products.find((p) => p.id === existingSession.activeProductId);
+        if (prod) {
+          const vr = prod.variants?.find((v) => v.id === existingSession.activeVariantId);
+          cartToCheckout = [
+            {
+              productId: prod.id,
+              productSku: prod.skuCode,
+              productName: prod.name,
+              variantId: vr?.id,
+              variantSku: vr?.skuCode,
+              variantName: vr?.name,
+              quantity: existingSession.quantity ?? 1,
+              unitPriceKobo: vr?.priceKobo ?? prod.basePriceKobo,
+            },
+          ];
+        }
+      }
+
+      if (cartToCheckout.length > 0) {
+        const effectiveZone =
+          matchedZone ??
+          (activeZones.length > 0 ? activeZones[0] : undefined);
+
+        if (!effectiveZone) {
+          const noZoneMsg = "⚠️ Please set up at least one delivery zone in Settings before checking out.";
+          await this.dispatchWhatsAppAndRecordChat({
+            channel: "BUYER_SHOP_WA",
+            toPhone: params.buyerPhone,
+            text: noZoneMsg,
+          });
+          await this.broadcastStateChange();
+          return { step: "UNMATCHED" };
+        }
+
+        this.buyerSessions.delete(params.buyerPhone);
+        const discountCode = mentionedDiscount?.code ?? existingSession?.discountCode;
+        const order = await this.finalizeOrderAndSendVirtualAccount({
+          buyerPhone: params.buyerPhone,
+          buyerName: params.buyerName,
+          cartItems: cartToCheckout,
+          shippingZone: effectiveZone,
+          discountCode,
+        });
+        this.clearBuyerCart(params.buyerPhone);
+        return {
+          step: order ? "INVOICE_CREATED" : "OUT_OF_STOCK",
+          createdOrder: order,
+        };
+      } else {
+        const emptyMsg =
+          "🛒 Your shopping cart is empty!\nReply with an item name or SKU (e.g. *SHOE-01*) to browse items.";
+        await this.dispatchWhatsAppAndRecordChat({
+          channel: "BUYER_SHOP_WA",
+          toPhone: params.buyerPhone,
+          text: emptyMsg,
+        });
+        await this.broadcastStateChange();
+        return { step: "UNMATCHED" };
+      }
+    }
+
     // Resolve target product & variant
     const product = explicitlyMentionedProduct;
     const variant = explicitlyMentionedVariant;
@@ -1322,12 +1683,16 @@ export class CaterlogStage1Engine {
         `_Reply with the item name or SKU (e.g. *SHOE-01*) or tap an item below to order:_`,
       ].join("\n");
 
-      const quickReplies: QuickReplyOption[] = this.products
-        .filter((p) => p.stockTotal - p.stockReserved > 0)
-        .map((p) => ({
-          label: `🛍️ ${p.skuCode}: ${p.name} (${formatNaira(p.basePriceKobo)})`,
-          replyText: `I want ${p.skuCode}`,
-        }));
+      const quickReplies: QuickReplyOption[] = [
+        ...this.products
+          .filter((p) => p.stockTotal - p.stockReserved > 0)
+          .slice(0, 4)
+          .map((p) => ({
+            label: `🛍️ ${p.skuCode}: ${p.name} (${formatNaira(p.basePriceKobo)})`,
+            replyText: `I want ${p.skuCode}`,
+          })),
+        { label: "💬 Chat with Vendor", replyText: "talk to vendor" },
+      ];
 
       await this.dispatchWhatsAppAndRecordChat({
         channel: "BUYER_SHOP_WA",
@@ -1346,7 +1711,8 @@ export class CaterlogStage1Engine {
     // (e.g. mentions a delivery zone or begins with "add", "buy", "order", "i want to buy", etc.)
     const isDirectPurchaseIntent =
       Boolean(matchedZone) ||
-      /^(?:add(?:\s+to\s+cart)?|buy|order|purchase|i\s+(?:want|need)\s+(?:to\s+buy|this)|checkout|send\s+me|i'll\s+take)\b/i.test(trimmed);
+      quantity > 1 ||
+      /^(?:add(?:\s+to\s+cart)?|buy|order|purchase|i\s+(?:want|need)|checkout|send\s+me|i'll\s+take)\b/i.test(trimmed);
 
     // USER'S STRICT BUSINESS REQUIREMENT:
     // "lastly when a product is requested, it should display the image of the product with the details and there are variations it should show the different variations with their prices and stock info.
@@ -1427,6 +1793,23 @@ export class CaterlogStage1Engine {
         quickReplies.push({
           label: `🛒 View Cart (${currentCart.length})`,
           replyText: "cart",
+        });
+      }
+
+      quickReplies.push({
+        label: "💬 Chat with Vendor",
+        replyText: "talk to vendor",
+      });
+
+      if (product.variants && product.variants.length > 0) {
+        this.buyerSessions.set(params.buyerPhone, {
+          buyerPhone: params.buyerPhone,
+          buyerName: params.buyerName,
+          activeProductId: product.id,
+          quantity,
+          discountCode: mentionedDiscount?.code,
+          state: "AWAITING_VARIANT",
+          updatedAt: new Date(),
         });
       }
 
@@ -2026,12 +2409,37 @@ export class CaterlogStage1Engine {
   }
 
   private extractQuantityFromText(text: string): number | undefined {
-    const match =
-      text.match(/(?:x|qty|quantity)\s*(\d+)/i) ??
-      text.match(/(\d+)\s*(?:pcs|pieces|pairs|units|bags|shoes|of\b)/i);
+    const trimmed = text.trim();
+    // 1. Matches like "x 2", "qty 3", "quantity: 4", "qty: 2"
+    let match = trimmed.match(/(?:x|qty|quantity)\s*[:=]?\s*(\d+)/i);
+    // 2. Matches like "2 pcs", "3 pairs", "4 units", "2 of ...", "3 shoes", "2 items"
+    if (!match) {
+      match = trimmed.match(/(\d+)\s*(?:pcs|pieces|pairs|units|items|bags|shoes|of\b)/i);
+    }
+    // 3. Matches like "I want 3", "need 2", "order 3", "buy 2", "send 4", "add 2"
+    if (!match) {
+      match = trimmed.match(/\b(?:want|need|order|buy|send|add|take|gimme)\s+(\d+)\b/i);
+    }
+    // 4. Matches like "2 size 39", "3 size 40"
+    if (!match) {
+      match = trimmed.match(/(\d+)\s+(?:size|variant|color|colour)\b/i);
+    }
+    // 5. Matches like "size 39 (2)", "size 39 x2", "size 39 - 2 units"
+    if (!match) {
+      match = trimmed.match(/(?:size|variant)\s+[a-zA-Z0-9_-]+\s*[\(\-x]\s*(\d+)/i);
+    }
+    // 6. Direct prefix like "3x" or "2*"
+    if (!match) {
+      match = trimmed.match(/\b(\d+)\s*(?:x|\*)\b/i);
+    }
+    // 7. If message begins with number followed by product/variant name, e.g. "2 SHOE-01" or "3 Zara"
+    if (!match) {
+      match = trimmed.match(/^(\d+)\s+[a-zA-Z]/i);
+    }
+
     if (match?.[1]) {
       const parsed = Number.parseInt(match[1], 10);
-      if (parsed >= 1 && parsed <= 50) return parsed;
+      if (parsed >= 1 && parsed <= 999) return parsed;
     }
     return undefined;
   }
@@ -2525,11 +2933,22 @@ export class CaterlogStage1Engine {
     const resolvedImageUrl =
       input.primaryImageUrl && input.primaryImageUrl.trim() !== ""
         ? input.primaryImageUrl.trim()
-        : getSmartFallbackImage(name, input.category);
+        : "";
 
-    const resolvedPhash =
-      input.imagePhash ??
-      computeDeterministicImagePhash(`${skuCode}:${name}:${resolvedImageUrl.slice(0, 256)}`);
+    let resolvedPhash = input.imagePhash;
+    if (!resolvedPhash && resolvedImageUrl) {
+      const mediaMatch = resolvedImageUrl.match(/\/api\/v1\/media\/([^/?#]+)/);
+      if (mediaMatch?.[1]) {
+        const cached = mediaStore.getMedia(decodeURIComponent(mediaMatch[1]));
+        if (cached) resolvedPhash = cached.phash;
+      }
+      if (!resolvedPhash) {
+        resolvedPhash = computeDeterministicImagePhash(`${skuCode}:${name}:${resolvedImageUrl.slice(0, 256)}`);
+      }
+    }
+    if (!resolvedPhash) {
+      resolvedPhash = computeDeterministicImagePhash(`${skuCode}:${name}`);
+    }
 
     const existing = this.products.find((p) => p.skuCode === skuCode);
     if (existing) {
@@ -2543,7 +2962,7 @@ export class CaterlogStage1Engine {
       existing.stockTotal = calculatedStock;
       if (input.description) existing.description = input.description.trim();
       if (input.category) existing.category = input.category.trim();
-      if (input.primaryImageUrl) {
+      if (input.primaryImageUrl !== undefined) {
         existing.primaryImageUrl = resolvedImageUrl;
         existing.imagePhash = resolvedPhash;
       }
@@ -2560,7 +2979,7 @@ export class CaterlogStage1Engine {
       skuCode,
       name,
       description: input.description?.trim() || `${name} — available via WhatsApp & Caterlog`,
-      category: input.category?.trim() || "fashion",
+      category: input.category?.trim() || "General",
       basePriceKobo: input.basePriceKobo,
       primaryImageUrl: resolvedImageUrl,
       imagePhash: resolvedPhash,
@@ -2581,6 +3000,7 @@ export class CaterlogStage1Engine {
     basePriceKobo?: bigint;
     stockTotal?: number;
     primaryImageUrl?: string;
+    imagePhash?: string;
     variants?: RuntimeProductVariant[];
   }): RuntimeProduct | undefined {
     const clean = skuCode.trim().toUpperCase();
@@ -2591,7 +3011,18 @@ export class CaterlogStage1Engine {
     if (input.description !== undefined) existing.description = input.description.trim();
     if (input.category) existing.category = input.category.trim();
     if (input.basePriceKobo !== undefined && input.basePriceKobo > 0n) existing.basePriceKobo = input.basePriceKobo;
-    if (input.primaryImageUrl) existing.primaryImageUrl = input.primaryImageUrl.trim();
+    if (input.primaryImageUrl !== undefined) {
+      existing.primaryImageUrl = input.primaryImageUrl.trim();
+      if (input.imagePhash) {
+        existing.imagePhash = input.imagePhash;
+      } else if (existing.primaryImageUrl) {
+        const mediaMatch = existing.primaryImageUrl.match(/\/api\/v1\/media\/([^/?#]+)/);
+        if (mediaMatch?.[1]) {
+          const cached = mediaStore.getMedia(decodeURIComponent(mediaMatch[1]));
+          if (cached) existing.imagePhash = cached.phash;
+        }
+      }
+    }
 
     if (input.variants) {
       existing.variants = input.variants;

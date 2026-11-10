@@ -400,6 +400,20 @@ export class VendorCommandDispatcher {
         };
       }
 
+      case "VENDOR_ASSIST_REPLY": {
+        return {
+          parsedCommand: cmd,
+          whatsappReplyText: `💬 *Customer Assistance Delivered:* Sent to customer. Co-Pilot paused.`,
+        };
+      }
+
+      case "RESUME_COPILOT": {
+        return {
+          parsedCommand: cmd,
+          whatsappReplyText: `🤖 *Co-Pilot Resumed:* Automated customer shopping is active again.`,
+        };
+      }
+
       case "UNKNOWN_COMMAND": {
         return {
           parsedCommand: cmd,

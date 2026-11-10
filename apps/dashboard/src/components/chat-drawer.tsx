@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef } from "react";
-import type { ChatMessage, Order, Product, Vendor } from "@/lib/types";
+import type { BuyerSession, ChatMessage, Order, Product, Vendor } from "@/lib/types";
 import { CloseIcon, WhatsAppBadgeIcon } from "./icons";
 import { resolveImageUrl } from "@/lib/api";
 
@@ -12,14 +12,16 @@ interface ChatDrawerProps {
   orders?: Order[];
   products?: Product[];
   vendor?: Vendor;
+  activeBuyerSession?: BuyerSession | null;
   onSendVendorKeyword: (text: string, attachedImage?: string) => Promise<void>;
   onSendBuyerInquiry: (
     text: string,
     phash?: string,
     buyerPhone?: string,
-    buyerName?: string
+    buyerName?: string,
+    attachedImageUrl?: string
   ) => Promise<void>;
-  onSendVendorManualEcho: (text: string) => Promise<void>;
+  onSendVendorManualEcho: (text: string, buyerPhone?: string) => Promise<void>;
   onSimulateTransfer?: (orderCode: string, amountNaira: number) => Promise<void>;
 }
 
@@ -35,6 +37,7 @@ export function ChatDrawer({
   orders = [],
   products = [],
   vendor,
+  activeBuyerSession,
   onSendVendorKeyword,
   onSendBuyerInquiry,
   onSendVendorManualEcho,
@@ -42,6 +45,8 @@ export function ChatDrawer({
 }: ChatDrawerProps) {
   // Mode: "BUYER_SHOP_WA" = Customer Shopping Mode | "VENDOR_ADMIN_WA" = Store Owner Mode
   const [activeChannel, setActiveChannel] = useState<"BUYER_SHOP_WA" | "VENDOR_ADMIN_WA">("BUYER_SHOP_WA");
+  // Sender role when in customer mode: simulate the customer or reply as the vendor store owner
+  const [senderRole, setSenderRole] = useState<"CUSTOMER" | "VENDOR_ASSIST">("CUSTOMER");
   const [inputText, setInputText] = useState("");
   const [attachedImage, setAttachedImage] = useState("");
   const [sending, setSending] = useState(false);
@@ -90,12 +95,15 @@ export function ChatDrawer({
     try {
       if (activeChannel === "VENDOR_ADMIN_WA") {
         await onSendVendorKeyword(inputText.trim(), attachedImage.trim() || undefined);
+      } else if (senderRole === "VENDOR_ASSIST") {
+        await onSendVendorManualEcho(inputText.trim(), currentBuyerPhone);
       } else {
         await onSendBuyerInquiry(
           inputText.trim(),
           undefined,
           currentBuyerPhone,
-          currentBuyerName
+          currentBuyerName,
+          attachedImage.trim() || undefined
         );
       }
       setInputText("");
@@ -253,6 +261,65 @@ export function ChatDrawer({
           )}
         </div>
 
+        {/* Co-Pilot & Vendor Assistance Sync Status Bar */}
+        {activeChannel === "BUYER_SHOP_WA" && (
+          <div className="px-3 py-2 border-b text-xs flex items-center justify-between gap-2 transition-all duration-200">
+            {activeBuyerSession?.state === "NEEDS_ASSISTANCE" ? (
+              <div className="w-full bg-amber-50 border border-amber-200 rounded-xl p-2.5 flex items-center justify-between gap-2 animate-in fade-in">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
+                    <span className="truncate">Customer Assistance Requested!</span>
+                  </div>
+                  <div className="text-[10px] text-amber-700 truncate mt-0.5">
+                    &ldquo;{activeBuyerSession.assistanceInquiry || "Buyer requested store owner"}&rdquo;
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSenderRole("VENDOR_ASSIST")}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] px-2.5 py-1 rounded-lg shrink-0 cursor-pointer shadow-2xs"
+                >
+                  💬 Assist Now
+                </button>
+              </div>
+            ) : activeBuyerSession?.state === "ASSISTING" || activeBuyerSession?.copilotPaused ? (
+              <div className="w-full bg-blue-50 border border-blue-200 rounded-xl p-2.5 flex items-center justify-between gap-2 animate-in fade-in">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-blue-900 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
+                    <span className="truncate">Store Owner Assisting · Co-Pilot Paused</span>
+                  </div>
+                  <div className="text-[10px] text-blue-700 truncate mt-0.5">
+                    Live 1-on-1 human support with {currentBuyerName}
+                  </div>
+                </div>
+                <button
+                  onClick={() => onSendVendorManualEcho("resume", currentBuyerPhone)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-2.5 py-1 rounded-lg shrink-0 cursor-pointer shadow-2xs"
+                >
+                  🤖 Hand Back
+                </button>
+              </div>
+            ) : (
+              <div className="w-full bg-emerald-50/70 border border-emerald-100 rounded-xl p-2 flex items-center justify-between text-[11px] text-emerald-900">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                  <span className="font-semibold truncate">Sales Co-Pilot Active</span>
+                  <span className="text-[10px] text-emerald-700 font-normal hidden sm:inline truncate">
+                    (Automated orders &amp; catalog)
+                  </span>
+                </div>
+                <button
+                  onClick={() => setSenderRole((r) => (r === "CUSTOMER" ? "VENDOR_ASSIST" : "CUSTOMER"))}
+                  className="text-[10px] font-bold text-emerald-800 hover:text-emerald-950 underline cursor-pointer shrink-0 ml-2"
+                >
+                  {senderRole === "VENDOR_ASSIST" ? "Switch to Customer" : "Step in as Vendor"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 1-Click Monnify Bank Transfer Simulation Card */}
         {pendingPaymentOrder && onSimulateTransfer && (
           <div className="p-3 bg-emerald-50 border-b border-emerald-100 space-y-1.5 animate-in fade-in">
@@ -349,6 +416,19 @@ export function ChatDrawer({
               <button
                 onClick={() =>
                   onSendBuyerInquiry(
+                    "Order 2 SHOE-01",
+                    undefined,
+                    currentBuyerPhone,
+                    currentBuyerName
+                  )
+                }
+                className="px-2 py-1 bg-white border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-50 cursor-pointer font-medium"
+              >
+                Order 2 Units
+              </button>
+              <button
+                onClick={() =>
+                  onSendBuyerInquiry(
                     "view cart",
                     undefined,
                     currentBuyerPhone,
@@ -362,23 +442,47 @@ export function ChatDrawer({
               <button
                 onClick={() =>
                   onSendBuyerInquiry(
-                    "Lekki",
+                    "checkout Lekki",
                     undefined,
                     currentBuyerPhone,
                     currentBuyerName
                   )
                 }
-                className="px-2 py-1 bg-white border border-gray-200 rounded text-emerald-700 hover:bg-emerald-50 cursor-pointer"
+                className="px-2 py-1 bg-emerald-50 border border-emerald-400 rounded text-emerald-900 hover:bg-emerald-100 cursor-pointer font-bold"
               >
-                Select Lekki
+                ⚡ Checkout Now
               </button>
               <button
                 onClick={() =>
-                  onSendVendorManualEcho("Hold on, let me check the physical store!")
+                  onSendBuyerInquiry(
+                    "Can I talk to the store owner? I need custom sizing",
+                    undefined,
+                    currentBuyerPhone,
+                    currentBuyerName
+                  )
                 }
-                className="px-2 py-1 bg-white border border-gray-200 rounded text-amber-700 hover:bg-amber-50 cursor-pointer"
+                className="px-2 py-1 bg-amber-50 border border-amber-300 rounded text-amber-800 hover:bg-amber-100 font-medium cursor-pointer"
               >
-                Simulate Vendor Phone Reply
+                🔔 Ask for Vendor Assistance
+              </button>
+              <button
+                onClick={() =>
+                  onSendVendorManualEcho(
+                    "Hello! I am the store owner, I can definitely assist you with that.",
+                    currentBuyerPhone
+                  )
+                }
+                className="px-2 py-1 bg-blue-50 border border-blue-300 rounded text-blue-800 hover:bg-blue-100 font-medium cursor-pointer"
+              >
+                👤 Vendor Reply
+              </button>
+              <button
+                onClick={() =>
+                  onSendVendorManualEcho("resume", currentBuyerPhone)
+                }
+                className="px-2 py-1 bg-emerald-50 border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-100 font-medium cursor-pointer"
+              >
+                🤖 Resume Co-Pilot
               </button>
             </>
           ) : (
@@ -463,19 +567,31 @@ export function ChatDrawer({
             </div>
           ) : (
             filteredMessages.map((m) => {
+              const isVendor = m.sender === "VENDOR";
+              const isBuyer = m.sender === "BUYER";
               const isBot = m.sender === "CATERLOG_BOT";
-              const isUser = !isBot;
+              const isRight = activeChannel === "BUYER_SHOP_WA" ? isBuyer : isVendor;
+
+              let bubbleBg = "bg-white text-gray-800 border border-gray-100 rounded-bl-xs";
+              if (activeChannel === "BUYER_SHOP_WA") {
+                if (isBuyer) {
+                  bubbleBg = "bg-emerald-600 text-white rounded-br-xs";
+                } else if (isVendor) {
+                  bubbleBg = "bg-blue-50 text-blue-950 border border-blue-200 rounded-bl-xs shadow-xs";
+                }
+              } else {
+                if (isVendor) {
+                  bubbleBg = "bg-emerald-600 text-white rounded-br-xs";
+                }
+              }
+
               return (
                 <div
                   key={m.id}
-                  className={`flex flex-col ${isUser ? "items-end" : "items-start"} max-w-[88%] ${isUser ? "ml-auto" : ""}`}
+                  className={`flex flex-col ${isRight ? "items-end" : "items-start"} max-w-[88%] ${isRight ? "ml-auto" : ""}`}
                 >
                   <div
-                    className={`p-3 rounded-2xl text-xs leading-relaxed shadow-xs ${
-                      isUser
-                        ? "bg-emerald-600 text-white rounded-br-xs"
-                        : "bg-white text-gray-800 border border-gray-100 rounded-bl-xs"
-                    }`}
+                    className={`p-3 rounded-2xl text-xs leading-relaxed shadow-xs ${bubbleBg}`}
                   >
                     {m.imageUrl && (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -521,8 +637,15 @@ export function ChatDrawer({
                       </div>
                     )}
                   </div>
-                  <span className="text-[10px] text-gray-400 mt-0.5 px-1 font-medium">
-                    {m.sender} {m.fromPhone ? `· ${m.fromPhone}` : ""}
+                  <span className="text-[10px] text-gray-400 mt-0.5 px-1 font-medium flex items-center gap-1">
+                    {isVendor && activeChannel === "BUYER_SHOP_WA" ? (
+                      <span className="bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded text-[9px]">👑 Store Owner (Vendor)</span>
+                    ) : isBot ? (
+                      <span className="text-emerald-700 font-semibold">🤖 Sales Co-Pilot</span>
+                    ) : (
+                      <span>{m.sender}</span>
+                    )}
+                    {m.fromPhone ? `· ${m.fromPhone}` : ""}
                   </span>
                 </div>
               );
@@ -532,6 +655,35 @@ export function ChatDrawer({
 
         {/* Input Form */}
         <form onSubmit={handleSend} className="p-3 bg-white border-t border-gray-200 space-y-2">
+          {activeChannel === "BUYER_SHOP_WA" && (
+            <div className="flex items-center justify-between text-[11px] pb-1 border-b border-gray-100">
+              <span className="text-gray-500 font-medium">Type as:</span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSenderRole("CUSTOMER")}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                    senderRole === "CUSTOMER"
+                      ? "bg-emerald-600 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  🛍️ Customer ({currentBuyerName.split(" ")[0]})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSenderRole("VENDOR_ASSIST")}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer ${
+                    senderRole === "VENDOR_ASSIST"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  👑 Store Owner (Assist)
+                </button>
+              </div>
+            </div>
+          )}
           {attachedImage && (
             <div className="flex items-center gap-2 p-1.5 bg-emerald-50 border border-emerald-200 rounded-xl">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -565,11 +717,15 @@ export function ChatDrawer({
             onChange={handleFileChange}
           />
 
-          {activeChannel === "VENDOR_ADMIN_WA" && !attachedImage && (
+          {!attachedImage && (
             <div className="flex gap-1.5 items-center">
               <input
                 type="url"
-                placeholder="Optional attached image URL (or tap 📷 to attach file)..."
+                placeholder={
+                  activeChannel === "VENDOR_ADMIN_WA"
+                    ? "Attach photo URL (or click 📷 to pick file)..."
+                    : "Attach status photo/screenshot (or click 📷)..."
+                }
                 value={attachedImage}
                 onChange={(e) => setAttachedImage(e.target.value)}
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1 text-[11px] text-gray-900 focus:outline-none focus:border-emerald-500"
@@ -586,34 +742,42 @@ export function ChatDrawer({
           )}
 
           <div className="flex gap-2">
-            {activeChannel === "VENDOR_ADMIN_WA" && (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="p-2 text-gray-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl cursor-pointer transition-colors"
-                title="Attach image from disk"
-              >
-                📎
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2 text-gray-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl cursor-pointer transition-colors"
+              title="Attach photo from disk"
+            >
+              📎
+            </button>
             <input
               type="text"
               required
               placeholder={
                 activeChannel === "VENDOR_ADMIN_WA"
                   ? "Send command (e.g. Zara Heel, #25000, sizes: 38 (2), 39 (3))..."
+                  : senderRole === "VENDOR_ASSIST"
+                  ? `Reply as Store Owner to ${currentBuyerName}... (Pauses Co-Pilot)`
                   : `Send message as ${currentBuyerName}...`
               }
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500"
+              className={`flex-1 bg-gray-50 border rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none ${
+                senderRole === "VENDOR_ASSIST" && activeChannel === "BUYER_SHOP_WA"
+                  ? "border-blue-300 focus:border-blue-500 bg-blue-50/20"
+                  : "border-gray-200 focus:border-emerald-500"
+              }`}
             />
             <button
               type="submit"
               disabled={sending}
-              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold text-xs px-4 py-2 rounded-xl cursor-pointer active:scale-95 transition-all"
+              className={`font-bold text-xs px-4 py-2 rounded-xl cursor-pointer active:scale-95 transition-all text-white ${
+                senderRole === "VENDOR_ASSIST" && activeChannel === "BUYER_SHOP_WA"
+                  ? "bg-blue-600 hover:bg-blue-700"
+                  : "bg-[#0d5c3a] hover:bg-[#0b4b2f]"
+              }`}
             >
-              {sending ? "..." : "Send"}
+              {sending ? "..." : senderRole === "VENDOR_ASSIST" && activeChannel === "BUYER_SHOP_WA" ? "Assist" : "Send"}
             </button>
           </div>
         </form>

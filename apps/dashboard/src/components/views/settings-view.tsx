@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import type { VendorProfile, ShippingZoneItem, DiscountItem, ChatMessageItem, OrderItem } from "@/lib/types";
+import type { VendorProfile, ShippingZoneItem, DiscountItem, ChatMessageItem, OrderItem, BuyerSession } from "@/lib/types";
 
 interface SettingsViewProps {
   vendor: VendorProfile;
@@ -10,6 +10,8 @@ interface SettingsViewProps {
   chatMessages?: ChatMessageItem[];
   orders?: OrderItem[];
   initialTab?: "setup" | "conversations" | "detail" | "shipping" | "general";
+  activeBuyerSession?: BuyerSession | null;
+  onSendVendorManualEcho?: (text: string, buyerPhone?: string) => Promise<void>;
   onUpdateSettings: (settings: {
     copilotMode?: "COPILOT" | "FULL_AUTO" | "MANUAL";
     copilotIdleSeconds?: number;
@@ -39,6 +41,8 @@ export function SettingsView({
   chatMessages = [],
   orders = [],
   initialTab = "setup",
+  activeBuyerSession,
+  onSendVendorManualEcho,
   onUpdateSettings,
   onAddShippingZone,
   onDeleteShippingZone,
@@ -227,20 +231,24 @@ export function SettingsView({
     }
   };
 
-  const handleSendReply = (e: React.FormEvent) => {
+  const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!merchantReplyText.trim()) return;
+    const text = merchantReplyText.trim();
     const newMsg: MessageItem = {
       id: `m-${Date.now()}`,
-      sender: "Nia · Shop owner",
+      sender: vendor.businessName || "Store Owner",
       type: "merchant",
       time: "Just now",
-      text: merchantReplyText.trim(),
+      text,
     };
     setMessages((prev) => [...prev, newMsg]);
     setMerchantReplyText("");
     setThreadTakenOver(true);
     setReplySuccess(true);
+    if (onSendVendorManualEcho) {
+      await onSendVendorManualEcho(text, activeBuyerSession?.buyerPhone);
+    }
     setTimeout(() => setReplySuccess(false), 3000);
   };
 
@@ -657,14 +665,25 @@ export function SettingsView({
           </div>
           <div className="flex items-center gap-3 self-start sm:self-center">
             <button
-              onClick={() => setThreadTakenOver(!threadTakenOver)}
-              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all shadow-xs ${
+              onClick={async () => {
+                if (threadTakenOver) {
+                  await onSendVendorManualEcho?.("resume", activeBuyerSession?.buyerPhone);
+                  setThreadTakenOver(false);
+                } else {
+                  await onSendVendorManualEcho?.(
+                    "Hello, I have stepped in as the store owner to assist you directly.",
+                    activeBuyerSession?.buyerPhone
+                  );
+                  setThreadTakenOver(true);
+                }
+              }}
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all shadow-xs cursor-pointer ${
                 threadTakenOver
-                  ? "bg-emerald-50 border border-emerald-300 text-emerald-800"
+                  ? "bg-blue-50 border border-blue-300 text-blue-800 hover:bg-blue-100"
                   : "bg-[#0d5c3a] text-white hover:bg-[#0b4b2f]"
               }`}
             >
-              {threadTakenOver ? "✓ Thread Active (Human Replying)" : "Take over conversation"}
+              {threadTakenOver ? "🤖 Hand Back to Co-Pilot" : "💬 Take over conversation"}
             </button>
           </div>
         </div>
@@ -825,12 +844,23 @@ export function SettingsView({
               </div>
 
               <button
-                onClick={() => setThreadTakenOver(true)}
-                className={`w-full py-2 text-white text-xs font-semibold rounded-lg transition-colors ${
-                  threadTakenOver ? "bg-emerald-700 hover:bg-emerald-800" : "bg-[#0d5c3a] hover:bg-[#0b4b2f]"
+                onClick={async () => {
+                  if (threadTakenOver) {
+                    await onSendVendorManualEcho?.("resume", activeBuyerSession?.buyerPhone);
+                    setThreadTakenOver(false);
+                  } else {
+                    await onSendVendorManualEcho?.(
+                      "Hello, I have stepped in as the store owner to assist you directly.",
+                      activeBuyerSession?.buyerPhone
+                    );
+                    setThreadTakenOver(true);
+                  }
+                }}
+                className={`w-full py-2 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                  threadTakenOver ? "bg-blue-600 hover:bg-blue-700" : "bg-[#0d5c3a] hover:bg-[#0b4b2f]"
                 }`}
               >
-                {threadTakenOver ? "Thread Taken Over" : "Take over conversation"}
+                {threadTakenOver ? "🤖 Hand Back to Co-Pilot" : "💬 Take over conversation"}
               </button>
             </div>
 
