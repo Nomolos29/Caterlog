@@ -234,8 +234,8 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
     const formattedButtons = params.buttons.slice(0, 3).map((b) => ({
       type: "reply",
       reply: {
-        id: b.id.slice(0, 200),
-        title: b.title.slice(0, 20),
+        id: String(b.id || "").slice(0, 200),
+        title: String(b.title || "").slice(0, 20),
       },
     }));
 

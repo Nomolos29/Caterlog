@@ -31,7 +31,7 @@ export function CustomersView({
 }: CustomersViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState<"ALL" | "VIP" | "Repeat" | "New">("ALL");
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerProfile | null>(null);
+  const [selectedCustomerPhone, setSelectedCustomerPhone] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "orders" | "notes">("overview");
   const [customerNotes, setCustomerNotes] = useState<Record<string, string>>({});
   const [newNoteInput, setNewNoteInput] = useState("");
@@ -87,6 +87,11 @@ export function CustomersView({
 
     return Array.from(customerMap.values());
   }, [orders]);
+
+  // Dynamically derive selectedCustomer so updates to orders/totals instantly reflect
+  const selectedCustomer = selectedCustomerPhone
+    ? customers.find((c) => c.phone === selectedCustomerPhone) ?? null
+    : null;
 
   // Filtered list
   const filteredCustomers = useMemo(() => {
@@ -300,7 +305,7 @@ export function CustomersView({
                               <span>WA</span>
                             </a>
                             <button
-                              onClick={() => setSelectedCustomer(c)}
+                              onClick={() => setSelectedCustomerPhone(c.phone)}
                               className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
                             >
                               Profile
@@ -350,7 +355,7 @@ export function CustomersView({
                 </div>
               </div>
               <button
-                onClick={() => setSelectedCustomer(null)}
+                onClick={() => setSelectedCustomerPhone(null)}
                 className="text-gray-400 hover:text-gray-600 p-1 rounded-lg text-lg"
               >
                 ✕
@@ -371,7 +376,7 @@ export function CustomersView({
                 <button
                   onClick={() => {
                     onNavigateToPaymentLinks(selectedCustomer.name);
-                    setSelectedCustomer(null);
+                    setSelectedCustomerPhone(null);
                   }}
                   className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors"
                 >
@@ -493,7 +498,7 @@ export function CustomersView({
                             <button
                               onClick={() => {
                                 onSelectOrder(ord);
-                                setSelectedCustomer(null);
+                                setSelectedCustomerPhone(null);
                               }}
                               className="text-[11px] text-emerald-600 hover:text-emerald-800 font-semibold"
                             >

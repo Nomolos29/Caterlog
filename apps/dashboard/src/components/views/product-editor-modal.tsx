@@ -217,7 +217,7 @@ export function ProductEditorModal({
                 {images.length > 1 && (
                   <button
                     onClick={() => setImages(images.filter((_, i) => i !== idx))}
-                    className="absolute top-2 right-2 w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-xs"
+                    className="absolute top-2 right-2 w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center text-xs opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer shadow-xs"
                     title="Remove image"
                   >
                     ✕

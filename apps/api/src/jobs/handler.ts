@@ -19,7 +19,14 @@ export function createJobHandler(engine: CaterlogStage1Engine): BackgroundJobHan
         return;
       }
       case "payment-reminder": {
-        await engine.sendPaymentReminder(job.payload.orderShortCode);
+        await engine.sendPaymentReminder(
+          job.payload.orderShortCode,
+          job.payload.minutesRemaining ?? 5
+        );
+        return;
+      }
+      case "payment-reminder-2min": {
+        await engine.sendPaymentReminder(job.payload.orderShortCode, 2);
         return;
       }
       case "order-expiry-sweep": {

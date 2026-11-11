@@ -213,6 +213,13 @@ export function SettingsView({
   const [holdMinutes, setHoldMinutes] = useState(vendor.reservationTtlMinutes);
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // Sync settings when vendor profile is updated externally (e.g. via WhatsApp keywords or SSE)
+  useEffect(() => {
+    setCopilotMode(vendor.copilotMode);
+    setIdleSeconds(vendor.copilotIdleSeconds);
+    setHoldMinutes(vendor.reservationTtlMinutes);
+  }, [vendor.copilotMode, vendor.copilotIdleSeconds, vendor.reservationTtlMinutes]);
+
   const handleSaveSetup = () => {
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 3000);

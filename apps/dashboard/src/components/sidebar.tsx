@@ -40,6 +40,7 @@ interface SidebarProps {
   onToggleWorkspace?: () => void;
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
+  vendorName?: string;
 }
 
 export function Sidebar({
@@ -51,6 +52,7 @@ export function Sidebar({
   onToggleWorkspace,
   mobileOpen = false,
   onCloseMobile,
+  vendorName,
 }: SidebarProps) {
   const navItems: Array<{ id: NavView; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: "overview", label: "Overview", icon: <OverviewIcon className="w-5 h-5" /> },
@@ -131,8 +133,8 @@ export function Sidebar({
         {/* Merchant Store Card */}
         <div className="bg-[#f3f4f8] rounded-xl p-3 border border-transparent">
           <div className="font-semibold text-xs text-gray-900 flex items-center justify-between">
-            <span>Nia Stores</span>
-            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-full">
+            <span className="truncate pr-2">{vendorName || "Store Owner"}</span>
+            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-full shrink-0">
               ✓ Verified
             </span>
           </div>

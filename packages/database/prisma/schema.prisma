@@ -65,7 +65,7 @@ model Vendor {
   metaCatalogId          String?
 
   // Configurable Co-Pilot & Stock Reservation Settings
-  copilotMode            CopilotMode        @default(COPILOT)
+  copilotMode            CopilotMode        @default(FULL_AUTO)
   copilotIdleSeconds     Int                @default(60)
   reservationTtlMinutes  Int                @default(15)
 

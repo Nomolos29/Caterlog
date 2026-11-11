@@ -50,6 +50,7 @@ interface ProductsViewProps {
     deleted: number;
     mode: string;
     catalogId: string | null;
+    failed?: Array<{ skuCode: string; error?: string }>;
   } | null>;
 }
 
@@ -91,13 +92,20 @@ export function ProductsView({
     try {
       const res = await onSyncWhatsAppCatalog();
       if (res) {
-        const parts = [`${res.upserted} product(s) synced`];
+        const parts = [`${res.upserted}/${res.attempted} product(s) synced`];
         if (res.deleted > 0) parts.push(`${res.deleted} deleted`);
+        const failMsg =
+          res.failed && res.failed.length > 0
+            ? ` ⚠️ ${res.failed.length} item(s) failed (${res.failed.map((f) => f.skuCode).join(", ")})`
+            : "";
         setSyncToast(
-          `✓ WhatsApp Catalog in Sync! ${parts.join(", ")} with Meta (${res.mode} mode).`
+          `${res.failed && res.failed.length > 0 ? "⚠️" : "✓"} WhatsApp Catalog Sync: ${parts.join(", ")} (${res.mode} mode).${failMsg}`
         );
-        setTimeout(() => setSyncToast(null), 4000);
+        setTimeout(() => setSyncToast(null), 5000);
       }
+    } catch (err) {
+      setSyncToast(`⚠️ Catalog sync failed: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(() => setSyncToast(null), 5000);
     } finally {
       setSyncingCatalog(false);
     }
@@ -799,7 +807,7 @@ export function ProductsView({
                             void onDeleteProduct(p.skuCode);
                           }
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-50 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
+                        className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1 hover:bg-rose-50 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
                       >
                         🗑️
                       </button>

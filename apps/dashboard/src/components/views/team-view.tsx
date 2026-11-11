@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { FilterIcon, ExportIcon, PlusIcon } from "../icons";
 
 interface TeamMember {
@@ -76,6 +76,15 @@ export function TeamView({ vendorName }: TeamViewProps) {
     },
   ]);
 
+  // Keep owner name in sync with vendor name
+  useEffect(() => {
+    if (vendorName) {
+      setMembers((prev) =>
+        prev.map((m) => (m.id === "mem-owner" ? { ...m, name: vendorName } : m))
+      );
+    }
+  }, [vendorName]);
+
   // Audit Trail (starts clean; filled as live operations occur)
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
 
@@ -96,7 +105,7 @@ export function TeamView({ vendorName }: TeamViewProps) {
     // Record in Audit Log
     const logEvent: AuditEvent = {
       id: `aud-${Date.now()}`,
-      actor: "Nia Adewale",
+      actor: vendorName || "Store Owner",
       actorType: "OWNER",
       action: `Invited New Team Member (${inviteRole})`,
       target: inviteEmail,

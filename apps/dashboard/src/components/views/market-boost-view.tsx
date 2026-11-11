@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 interface MarketBoostViewProps {
   initialTab?: "visibility" | "setup" | "subscription";
@@ -18,6 +18,12 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
 
   // Listing setup form states
   const [businessName, setBusinessName] = useState(vendorName || "My Store");
+
+  useEffect(() => {
+    if (vendorName) {
+      setBusinessName(vendorName);
+    }
+  }, [vendorName]);
   const [category, setCategory] = useState("Home & living");
   const [location, setLocation] = useState("Lagos, Nigeria");
   const [description, setDescription] = useState(

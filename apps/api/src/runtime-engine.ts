@@ -96,6 +96,47 @@ export function computeDeterministicImagePhash(imageSource: string): string {
   return crypto.createHash("sha256").update(imageSource.trim()).digest("hex").slice(0, 16);
 }
 
+/**
+ * Generates a clean, consistent, sequential SKU (Content ID) for a product
+ * based on category/name prefix (e.g. SHOE-03, BAG-02, FLASK-01, WEAR-01)
+ * avoiding duplicates and inconsistent fallback codes.
+ */
+export function generateConsistentSku(
+  name: string,
+  category?: string,
+  existingProducts: Array<{ skuCode: string }> = []
+): string {
+  const combined = `${name} ${category ?? ""}`.toUpperCase();
+  let prefix = "ITEM";
+  if (/HEEL|SHOE|BOOT|SNEAKER|SLIDE|SANDAL|FOOTWEAR/.test(combined)) {
+    prefix = "SHOE";
+  } else if (/BAG|TOTE|HANDBAG|PURSE|BACKPACK|CLUTCH/.test(combined)) {
+    prefix = "BAG";
+  } else if (/FLASK|BOTTLE|CUP|TUMBLER|MUG/.test(combined)) {
+    prefix = "FLASK";
+  } else if (/DRESS|SHIRT|GOWN|HOODIE|TOP|PANTS|SUIT|JACKET|WEAR|CLOTH/.test(combined)) {
+    prefix = "WEAR";
+  } else if (/FOOD|LUNCH|CAKE|SNACK|RICE|MEAL|KITCHEN/.test(combined)) {
+    prefix = "FOOD";
+  } else if (/COSMETIC|CREAM|LOTION|PERFUME|BEAUTY|SKIN/.test(combined)) {
+    prefix = "GLOW";
+  } else {
+    const firstWord = name.trim().split(/\s+/)[0]?.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if (firstWord && firstWord.length >= 3) {
+      prefix = firstWord.slice(0, 6);
+    }
+  }
+
+  const existingUpper = new Set(existingProducts.map((p) => p.skuCode.toUpperCase()));
+  let index = 1;
+  let candidate = `${prefix}-${String(index).padStart(2, "0")}`;
+  while (existingUpper.has(candidate)) {
+    index++;
+    candidate = `${prefix}-${String(index).padStart(2, "0")}`;
+  }
+  return candidate;
+}
+
 export class CaterlogStage1Engine {
   public readonly eventBus = new InMemoryDomainEventBus();
   public readonly monnify: MonnifyPaymentAdapter;
@@ -110,7 +151,7 @@ export class CaterlogStage1Engine {
     whatsappPhone: process.env.VENDOR_WHATSAPP_PHONE ?? "+2348031234567",
     whatsappPhoneId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "105992837465001",
     verificationStatus: "VERIFIED",
-    copilotMode: "COPILOT" as DomainCopilotMode,
+    copilotMode: ((process.env.COPILOT_MODE as DomainCopilotMode) || "FULL_AUTO") as DomainCopilotMode,
     copilotIdleSeconds: 60,
     reservationTtlMinutes: 15,
   };
@@ -388,18 +429,29 @@ export class CaterlogStage1Engine {
 
   private applySnapshot(snapshot: RuntimeSnapshot): void {
     this.vendor = { ...snapshot.vendor };
-    const seedMap = new Map(this.products.map((p) => [p.skuCode.toUpperCase(), p]));
-    this.products = snapshot.products.map((product) => {
-      const seed = seedMap.get(product.skuCode.toUpperCase());
-      const variants =
-        product.variants && product.variants.length > 0 ? product.variants : seed?.variants;
-      return {
-        ...product,
-        variants,
-      };
-    });
-    this.shippingZones = snapshot.shippingZones.map((zone) => ({ ...zone }));
-    this.discounts = snapshot.discounts.map((discount) => ({ ...discount }));
+    if (process.env.COPILOT_MODE) {
+      this.vendor.copilotMode = process.env.COPILOT_MODE as DomainCopilotMode;
+    } else if (!snapshot.vendor.copilotMode || snapshot.vendor.copilotMode === "COPILOT") {
+      this.vendor.copilotMode = "FULL_AUTO";
+    }
+    if (snapshot.products && snapshot.products.length > 0) {
+      const seedMap = new Map(this.products.map((p) => [p.skuCode.toUpperCase(), p]));
+      this.products = snapshot.products.map((product) => {
+        const seed = seedMap.get(product.skuCode.toUpperCase());
+        const variants =
+          product.variants && product.variants.length > 0 ? product.variants : seed?.variants;
+        return {
+          ...product,
+          variants,
+        };
+      });
+    }
+    if (snapshot.shippingZones && snapshot.shippingZones.length > 0) {
+      this.shippingZones = snapshot.shippingZones.map((zone) => ({ ...zone }));
+    }
+    if (snapshot.discounts && snapshot.discounts.length > 0) {
+      this.discounts = snapshot.discounts.map((discount) => ({ ...discount }));
+    }
     this.orders = snapshot.orders.map((order) => ({ ...order }));
     this.processedTxRefs.clear();
     for (const ref of snapshot.processedTransactionRefs) {
@@ -536,6 +588,7 @@ export class CaterlogStage1Engine {
           "━━━━━━━━━━━━━━━━━━━━━━",
           "📦 *CATALOG & INVENTORY*",
           "• *products* — View all products & live stock",
+          "• *sync* or *catalog sync* — Publish all items to WhatsApp Business Catalog",
           "• *stock <SKU> <Qty>* — Update stock count (e.g. `stock SHOE-01 10`)",
           "• *Photo + Name, #Price, stock Qty* — Add single product",
           "• *Photo + Name, 38: #20000 (5), 39: #25000 (3)* — Add variable product with individual prices",
@@ -571,6 +624,7 @@ export class CaterlogStage1Engine {
 
         quickReplies = [
           { label: "📦 Products", replyText: "products" },
+          { label: "🛍️ Sync Catalog", replyText: "sync catalog" },
           { label: "📊 Sales", replyText: "sales" },
           { label: "🚚 Shipping", replyText: "shipping" },
           { label: "🏷️ Discounts", replyText: "discount" },
@@ -715,14 +769,10 @@ export class CaterlogStage1Engine {
 
       case "QUICK_ADD_PRODUCT": {
         try {
-          const namePrefix = (cmd.name || "ITEM")
-            .trim()
-            .split(/\s+/)
-            .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
-            .filter(Boolean)
-            .slice(0, 2)
-            .join("-")
-            .toUpperCase() || "ITEM";
+          const skuCode = (
+            cmd.skuCode ||
+            generateConsistentSku(cmd.name, undefined, this.products)
+          ).toUpperCase();
 
           const mappedVariants: RuntimeProductVariant[] | undefined = cmd.variants?.map((v, i) => {
             const cleanName = v.name.trim();
@@ -734,7 +784,7 @@ export class CaterlogStage1Engine {
             return {
               id: `var-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`,
               name: cleanName,
-              skuCode: `${namePrefix}-${suffix}`,
+              skuCode: `${skuCode}-${suffix}`,
               priceKobo: v.priceKobo,
               stockTotal: v.stockTotal,
               stockReserved: 0,
@@ -749,6 +799,7 @@ export class CaterlogStage1Engine {
           }
 
           const prod = this.addProduct({
+            skuCode,
             name: cmd.name,
             basePriceKobo: effectiveBasePrice,
             stockTotal: cmd.stockTotal,
@@ -887,6 +938,39 @@ export class CaterlogStage1Engine {
         quickReplies = [
           { label: "📊 Sales Summary", replyText: "sales" },
           { label: "📦 View Stock", replyText: "stock" },
+        ];
+        break;
+      }
+
+      case "SYNC_CATALOG": {
+        try {
+          const syncResult = await this.syncWhatsAppCatalog({
+            deleteMissing: cmd.deleteMissing ?? true,
+          });
+          const failCount = syncResult.failed.length;
+          const failDetail =
+            failCount > 0
+              ? `\n⚠️ ${failCount} product(s) failed:\n${syncResult.failed.map((f) => `• ${f.skuCode}: ${f.error}`).join("\n")}`
+              : "";
+          replyText = [
+            `🛍️ *WhatsApp Business Catalog Synced!*`,
+            `━━━━━━━━━━━━━━━━━━━━━━`,
+            `• Mode: *${syncResult.mode.toUpperCase()}*`,
+            `• Catalog ID: *${syncResult.catalogId ?? "N/A"}*`,
+            `• Total Attempted: *${syncResult.attempted}*`,
+            `• Successfully Upserted: *${syncResult.upserted}*`,
+            `• Deleted Out-of-Stock/Missing: *${syncResult.deleted}*`,
+            failDetail,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        } catch (err) {
+          replyText = `⚠️ Failed to sync catalog: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        quickReplies = [
+          { label: "📦 View Products", replyText: "products" },
+          { label: "📊 Sales", replyText: "sales" },
+          { label: "🛠️ Help Menu", replyText: "help" },
         ];
         break;
       }
@@ -1100,7 +1184,7 @@ export class CaterlogStage1Engine {
     simulateFastForwardIdleTimer?: boolean;
   }): Promise<{
     copilotDecision: ReturnType<typeof evaluateCopilotAction>;
-    step?: "PROMPTED_FOR_SHIPPING_ZONE" | "INVOICE_CREATED" | "OUT_OF_STOCK" | "UNMATCHED";
+    step?: "PROMPTED_FOR_QUANTITY" | "PROMPTED_FOR_SHIPPING_ZONE" | "INVOICE_CREATED" | "OUT_OF_STOCK" | "UNMATCHED";
     createdOrder?: RuntimeOrder;
   }> {
     const buyerMessageTime = new Date();
@@ -1231,7 +1315,7 @@ export class CaterlogStage1Engine {
     quotedStatusImagePhash?: string;
     attachedImageUrl?: string;
   }): Promise<{
-    step: "PROMPTED_FOR_SHIPPING_ZONE" | "INVOICE_CREATED" | "OUT_OF_STOCK" | "UNMATCHED";
+    step: "PROMPTED_FOR_QUANTITY" | "PROMPTED_FOR_SHIPPING_ZONE" | "INVOICE_CREATED" | "OUT_OF_STOCK" | "ORDER_TRACKED" | "UNMATCHED";
     createdOrder?: RuntimeOrder;
   }> {
     const activeZones = this.shippingZones.filter((z) => z.isActive);
@@ -1301,6 +1385,172 @@ export class CaterlogStage1Engine {
 
       await this.broadcastStateChange();
       return { step: "UNMATCHED" };
+    }
+
+    // 0b. Self-Service Order Status & Tracking (e.g. "track", "status", "track ORD-882", "where is my order")
+    const isTrackingQuery =
+      /^(?:track(?:_|\s+)?([A-Za-z0-9_-]+)?|status(?:\s+([A-Za-z0-9_-]+))?|order\s+status(?:\s+([A-Za-z0-9_-]+))?|where\s+is\s+my\s+order|my\s+orders?|check\s+order)$/i.test(
+        trimmed
+      );
+
+    if (isTrackingQuery) {
+      const codeMatch = trimmed.match(
+        /^(?:track(?:_|\s+)?|status\s+|order\s+status\s+)([A-Za-z0-9_-]+)$/i
+      );
+      const rawCode = codeMatch ? codeMatch[1].trim() : "";
+      const cleanCode = rawCode.toUpperCase().replace(/^#/, "");
+      const searchCode = cleanCode ? (cleanCode.startsWith("ORD-") ? cleanCode : `ORD-${cleanCode}`) : "";
+
+      const buyerOrders = this.orders
+        .filter((o) => o.customerPhone === params.buyerPhone)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+      const matchingOrder =
+        (searchCode ? this.orders.find((o) => o.shortCode.toUpperCase() === searchCode || o.id === rawCode) : undefined) ||
+        buyerOrders[0];
+
+      if (!matchingOrder) {
+        const notFoundText = [
+          `🔍 *Order Not Found*`,
+          ``,
+          rawCode
+            ? `We couldn't find an order matching *"${rawCode}"*. Please double check your order number.`
+            : `We couldn't find any recent orders linked to your phone number (\`${params.buyerPhone}\`).`,
+          ``,
+          `💡 Reply with *track <orderCode>* (e.g. \`track ORD-123\`) or reply *catalog* to browse our store!`,
+        ].join("\n");
+
+        await this.dispatchWhatsAppAndRecordChat({
+          channel: "BUYER_SHOP_WA",
+          toPhone: params.buyerPhone,
+          text: notFoundText,
+          quickReplies: [
+            { label: "🛍️ View Catalog", replyText: "catalog" },
+            { label: "💬 Talk to Support", replyText: "talk to vendor" },
+          ],
+          headerText: "Order Tracking",
+        });
+        await this.broadcastStateChange();
+        return { step: "UNMATCHED" };
+      }
+
+      let statusHeadline = "";
+      let statusExplanation = "";
+
+      switch (matchingOrder.status) {
+        case "PENDING_PAYMENT": {
+          const balance = matchingOrder.totalAmountKobo - matchingOrder.amountPaidKobo;
+          statusHeadline = "🟡 *AWAITING BANK TRANSFER*";
+          statusExplanation = [
+            `Your items are reserved! Please complete your transfer to finalize:`,
+            `🏦 Bank: *${matchingOrder.bankName}*`,
+            `🔢 Account: *${matchingOrder.accountNumber}*`,
+            `👤 Name: *${matchingOrder.accountName}*`,
+            `💰 Amount Due: *${formatNaira(balance)}*`,
+          ].join("\n");
+          break;
+        }
+        case "PARTIALLY_PAID": {
+          const balance = matchingOrder.totalAmountKobo - matchingOrder.amountPaidKobo;
+          statusHeadline = "🟠 *PARTIALLY PAID*";
+          statusExplanation = [
+            `We received *${formatNaira(matchingOrder.amountPaidKobo)}*.`,
+            `Remaining balance: *${formatNaira(balance)}*`,
+            `🔢 Account: *${matchingOrder.accountNumber}* (${matchingOrder.bankName})`,
+          ].join("\n");
+          break;
+        }
+        case "PAID":
+        case "PROCESSING": {
+          statusHeadline = "🟢 *PAYMENT VERIFIED & PREPARING*";
+          statusExplanation = [
+            `Your payment was received in full! We are packaging your items for dispatch.`,
+            matchingOrder.deliveryAddress
+              ? `🏠 Delivery Address: *${matchingOrder.deliveryAddress}*`
+              : matchingOrder.shippingZoneName
+                ? `🚚 Shipping Zone: *${matchingOrder.shippingZoneName}*`
+                : "",
+            `_You will receive another message as soon as your dispatch rider is on the way!_`,
+          ].filter(Boolean).join("\n");
+          break;
+        }
+        case "OUT_FOR_DELIVERY": {
+          statusHeadline = "🚚 *OUT FOR DELIVERY*";
+          statusExplanation = [
+            `Your package is on the way!`,
+            matchingOrder.riderPhone
+              ? `📞 Dispatch Rider: *${matchingOrder.riderPhone}*`
+              : `🛵 Couriered via local dispatch.`,
+            matchingOrder.deliveryAddress
+              ? `🏠 Delivering to: *${matchingOrder.deliveryAddress}*`
+              : `🚚 Zone: *${matchingOrder.shippingZoneName}*`,
+            `_Please keep your phone reachable so the rider can connect upon arrival._`,
+          ].join("\n");
+          break;
+        }
+        case "FULFILLED": {
+          statusHeadline = "✅ *DELIVERED & COMPLETED*";
+          statusExplanation = `This order was successfully delivered! Thank you for shopping with ${this.vendor.businessName}.`;
+          break;
+        }
+        case "EXPIRED": {
+          statusHeadline = "🛑 *ORDER EXPIRED*";
+          statusExplanation = `The reservation window for this order has expired. Reply *catalog* to browse items and place a fresh order.`;
+          break;
+        }
+        case "CANCELLED": {
+          statusHeadline = "❌ *ORDER CANCELLED*";
+          statusExplanation = `This order has been cancelled.`;
+          break;
+        }
+        case "REFUNDED": {
+          statusHeadline = "💸 *ORDER REFUNDED*";
+          statusExplanation = `This order has been refunded.`;
+          break;
+        }
+      }
+
+      const itemSummary =
+        matchingOrder.items && matchingOrder.items.length > 0
+          ? matchingOrder.items.map((i) => `• ${i.productName} ×${i.quantity}`).join("\n")
+          : `• ${matchingOrder.productName} ×${matchingOrder.quantity || 1}`;
+
+      const trackingText = [
+        `📦 *ORDER STATUS: #${matchingOrder.shortCode}*`,
+        ``,
+        statusHeadline,
+        statusExplanation,
+        ``,
+        `🛍️ *Order Items:*`,
+        itemSummary,
+        ``,
+        `💰 *Total:* *${formatNaira(matchingOrder.totalAmountKobo)}*`,
+      ].join("\n");
+
+      const quickReplies: QuickReplyOption[] = [];
+      if (matchingOrder.status === "PENDING_PAYMENT" || matchingOrder.status === "PARTIALLY_PAID") {
+        quickReplies.push({
+          label: "💳 View Bank Account",
+          replyText: matchingOrder.accountNumber,
+        });
+      } else if (matchingOrder.status === "PAID" && !matchingOrder.deliveryAddress) {
+        quickReplies.push({
+          label: "📍 Send Address",
+          replyText: "send address",
+        });
+      }
+      quickReplies.push({ label: "🛍️ View Catalog", replyText: "catalog" });
+      quickReplies.push({ label: "💬 Talk to Support", replyText: "talk to vendor" });
+
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: params.buyerPhone,
+        text: trackingText,
+        quickReplies: quickReplies.slice(0, 3),
+        headerText: `Order #${matchingOrder.shortCode}`,
+      });
+      await this.broadcastStateChange();
+      return { step: "ORDER_TRACKED", createdOrder: matchingOrder };
     }
 
     // 1. Category Browse Commands (e.g. "category fashion", "more in fashion", "browse kitchen")
@@ -1455,15 +1705,97 @@ export class CaterlogStage1Engine {
       .filter((d) => this.isDiscountUsable(d))
       .find((d) => params.text.toUpperCase().includes(d.code));
 
+    // CASE A0: Buyer is in `AWAITING_DELIVERY_ADDRESS` and sending their delivery address!
+    if (existingSession && existingSession.state === "AWAITING_DELIVERY_ADDRESS" && !explicitlyMentionedProduct) {
+      const order =
+        (existingSession.activeOrderId ? this.orders.find((o) => o.id === existingSession.activeOrderId) : undefined) ||
+        this.orders.slice().reverse().find((o) => o.customerPhone === params.buyerPhone && o.status === "PAID");
+
+      if (order) {
+        order.deliveryAddress = params.text.trim();
+        await this.persistNow("saveDeliveryAddress", () => this.persistence.saveOrder(order));
+
+        existingSession.state = "CART_ACTIVE";
+        existingSession.updatedAt = new Date();
+
+        const itemDisplay = order.variantName
+          ? `${order.productName} (${order.variantName})`
+          : order.productName;
+
+        const confirmMsg = [
+          `✅ *Delivery Address Saved!*`,
+          `🧾 Order: *${order.shortCode}*`,
+          `📦 Item: *${itemDisplay}*`,
+          `🏠 Address: *${order.deliveryAddress}*`,
+          `🚚 Delivery Zone: *${order.shippingZoneName}*`,
+          ``,
+          `🏪 We are preparing your package! You will receive another notification once your dispatch rider is on the way.`,
+        ].join("\n");
+
+        const quickReplies: QuickReplyOption[] = [
+          { label: "🛒 Keep Shopping", replyText: "catalog" },
+          { label: "💬 Chat with Vendor", replyText: "talk to vendor" },
+        ];
+
+        await this.dispatchWhatsAppAndRecordChat({
+          channel: "BUYER_SHOP_WA",
+          toPhone: params.buyerPhone,
+          text: confirmMsg,
+          quickReplies,
+          headerText: "Address Confirmed",
+        });
+
+        this.appendChat({
+          channel: "VENDOR_ADMIN_WA",
+          sender: "CATERLOG_BOT",
+          fromPhone: "CATERLOG",
+          text: `📍 *Delivery Address Provided for ${order.shortCode}:*\n👤 ${order.customerName} (${order.customerPhone})\n🏠 *${order.deliveryAddress}* (${order.shippingZoneName})\n\n_Reply \`dispatch ${order.shortCode} <riderPhone>\` when handed to rider._`,
+        });
+
+        await this.broadcastStateChange();
+        return { step: "INVOICE_CREATED", createdOrder: order };
+      }
+    }
+
     // CASE A1: Buyer is in `AWAITING_VARIANT` and just replied to choose a variant!
     if (existingSession && existingSession.state === "AWAITING_VARIANT" && !explicitlyMentionedProduct) {
       const activeProd = this.products.find((p) => p.id === existingSession.activeProductId);
       if (activeProd && activeProd.variants && activeProd.variants.length > 0) {
         const { variant } = this.findProductAndVariantInBuyerMessage(params.text, undefined, activeProd);
         if (variant) {
-          const parsedQty = this.extractQuantityFromText(params.text);
-          const reqQty = parsedQty ?? existingSession.quantity ?? 1;
           const vAvail = variant.stockTotal - variant.stockReserved;
+          if (vAvail <= 0) {
+            const outMsg = `⚠️ Sorry, *${activeProd.name} — ${variant.name}* is currently Sold Out. Please select another option:`;
+            await this.dispatchWhatsAppAndRecordChat({
+              channel: "BUYER_SHOP_WA",
+              toPhone: params.buyerPhone,
+              text: outMsg,
+            });
+            await this.broadcastStateChange();
+            return { step: "OUT_OF_STOCK" };
+          }
+
+          const parsedQty = this.extractQuantityFromText(params.text, false);
+          // If buyer did NOT specify an explicit quantity in this reply nor earlier in session:
+          if (parsedQty === undefined && existingSession.quantity === undefined) {
+            existingSession.activeVariantId = variant.id;
+            existingSession.state = "AWAITING_QUANTITY";
+            existingSession.updatedAt = new Date();
+
+            const { text: promptText, quickReplies } = this.buildQuantityPrompt(activeProd, variant, vAvail);
+            await this.dispatchWhatsAppAndRecordChat({
+              channel: "BUYER_SHOP_WA",
+              toPhone: params.buyerPhone,
+              text: promptText,
+              imageUrl: activeProd.primaryImageUrl,
+              quickReplies,
+              headerText: "Select Quantity",
+            });
+            await this.broadcastStateChange();
+            return { step: "PROMPTED_FOR_QUANTITY" };
+          }
+
+          const reqQty = parsedQty ?? existingSession.quantity ?? 1;
           if (vAvail < reqQty) {
             const outMsg = `⚠️ Sorry, *${activeProd.name} — ${variant.name}* only has ${Math.max(0, vAvail)} unit(s) available (you requested ${reqQty}). Please select another option:`;
             await this.dispatchWhatsAppAndRecordChat({
@@ -1491,6 +1823,7 @@ export class CaterlogStage1Engine {
           const cartTotalKobo = updatedCart.reduce((sum, item) => sum + item.unitPriceKobo * BigInt(item.quantity), 0n);
 
           existingSession.activeVariantId = variant.id;
+          existingSession.quantity = reqQty;
           existingSession.state = "AWAITING_SHIPPING_ZONE";
           existingSession.updatedAt = new Date();
 
@@ -1550,6 +1883,126 @@ export class CaterlogStage1Engine {
           });
           await this.broadcastStateChange();
           return { step: "PROMPTED_FOR_SHIPPING_ZONE" };
+        }
+      }
+    }
+
+    // CASE A1.5: Buyer is in `AWAITING_QUANTITY` and just replied with unit quantity!
+    if (existingSession && existingSession.state === "AWAITING_QUANTITY" && !explicitlyMentionedProduct) {
+      const activeProd = this.products.find((p) => p.id === existingSession.activeProductId);
+      if (activeProd) {
+        const activeVariant = activeProd.variants?.find((v) => v.id === existingSession.activeVariantId);
+        const available = activeVariant
+          ? activeVariant.stockTotal - activeVariant.stockReserved
+          : activeProd.stockTotal - activeProd.stockReserved;
+        const itemLabel = activeVariant ? `${activeProd.name} — ${activeVariant.name}` : activeProd.name;
+
+        const parsedQty = this.extractQuantityFromText(params.text, true);
+        if (parsedQty !== undefined) {
+          if (available < parsedQty) {
+            const outMsg = `⚠️ Sorry, *${itemLabel}* only has ${Math.max(0, available)} unit(s) available (you requested ${parsedQty}). Please select a lower quantity:`;
+            const { quickReplies } = this.buildQuantityPrompt(activeProd, activeVariant, Math.max(0, available));
+            await this.dispatchWhatsAppAndRecordChat({
+              channel: "BUYER_SHOP_WA",
+              toPhone: params.buyerPhone,
+              text: outMsg,
+              quickReplies,
+            });
+            await this.broadcastStateChange();
+            return { step: "OUT_OF_STOCK" };
+          }
+
+          // Add to buyer's cart!
+          this.addToBuyerCart(params.buyerPhone, {
+            productId: activeProd.id,
+            productSku: activeProd.skuCode,
+            productName: activeProd.name,
+            variantId: activeVariant?.id,
+            variantSku: activeVariant?.skuCode,
+            variantName: activeVariant?.name,
+            quantity: parsedQty,
+            unitPriceKobo: activeVariant?.priceKobo ?? activeProd.basePriceKobo,
+          });
+
+          const updatedCart = this.getBuyerCart(params.buyerPhone);
+          const cartTotalKobo = updatedCart.reduce((sum, item) => sum + item.unitPriceKobo * BigInt(item.quantity), 0n);
+
+          existingSession.quantity = parsedQty;
+          existingSession.state = "AWAITING_SHIPPING_ZONE";
+          existingSession.updatedAt = new Date();
+
+          if (matchedZone) {
+            this.buyerSessions.delete(params.buyerPhone);
+            const discountCode = mentionedDiscount?.code ?? existingSession.discountCode;
+            const order = await this.finalizeOrderAndSendVirtualAccount({
+              buyerPhone: params.buyerPhone,
+              buyerName: params.buyerName,
+              cartItems: updatedCart,
+              shippingZone: matchedZone,
+              discountCode,
+            });
+            this.clearBuyerCart(params.buyerPhone);
+            return { step: order ? "INVOICE_CREATED" : "OUT_OF_STOCK", createdOrder: order };
+          }
+
+          const cartSummaryLines = updatedCart.map((it) => {
+            const lineTotal = it.unitPriceKobo * BigInt(it.quantity);
+            const vLabel = it.variantName ? ` (${it.variantName})` : "";
+            return `• *${it.productName}${vLabel}* ×${it.quantity} — *${formatNaira(lineTotal)}*`;
+          }).join("\n");
+
+          const zoneOptionsText = activeZones
+            .map((z) => `*${z.code}.* ${z.name} — *${formatNaira(z.feeKobo)}*`)
+            .join("\n");
+
+          const promptText = [
+            `✅ Added: *${itemLabel}* (×${parsedQty})`,
+            ``,
+            `🛒 *Your Order (${updatedCart.length} item${updatedCart.length > 1 ? "s" : ""}):*`,
+            cartSummaryLines,
+            `💰 *Items Subtotal:* *${formatNaira(cartTotalKobo)}*`,
+            ``,
+            `📍 *Where should we deliver your order?*`,
+            `Reply with the delivery number or location to checkout (or reply with another item to keep shopping):`,
+            zoneOptionsText,
+            ``,
+            `_💡 Have a promo code? Include it with your reply (e.g. "${activeZones[0]?.name ?? "Lekki"} PAYDAY")_`,
+          ].join("\n");
+
+          const quickReplies: QuickReplyOption[] = [
+            ...activeZones.map((z) => ({
+              label: `🚚 ${z.code}. ${z.name} (${formatNaira(z.feeKobo)})`,
+              replyText: z.name,
+            })),
+            ...(activeProd.category
+              ? [{ label: `📂 More in ${activeProd.category}`, replyText: `category ${activeProd.category}` }]
+              : []),
+            { label: "🛒 View Cart", replyText: "cart" },
+          ];
+
+          await this.dispatchWhatsAppAndRecordChat({
+            channel: "BUYER_SHOP_WA",
+            toPhone: params.buyerPhone,
+            text: promptText,
+            imageUrl: activeProd.primaryImageUrl,
+            quickReplies,
+            headerText: "Delivery Zone",
+          });
+          await this.broadcastStateChange();
+          return { step: "PROMPTED_FOR_SHIPPING_ZONE" };
+        } else {
+          // Buyer sent unrecognized input while awaiting quantity
+          const rePrompt = `🔢 Please enter how many units of *${itemLabel}* you'd like (e.g. 1, 2, 3), or tap an option below:`;
+          const { quickReplies } = this.buildQuantityPrompt(activeProd, activeVariant, Math.max(0, available));
+          await this.dispatchWhatsAppAndRecordChat({
+            channel: "BUYER_SHOP_WA",
+            toPhone: params.buyerPhone,
+            text: rePrompt,
+            quickReplies,
+            headerText: "Select Quantity",
+          });
+          await this.broadcastStateChange();
+          return { step: "PROMPTED_FOR_QUANTITY" };
         }
       }
     }
@@ -1705,13 +2158,13 @@ export class CaterlogStage1Engine {
       return { step: "UNMATCHED" };
     }
 
-    const quantity = this.extractQuantityFromText(params.text) ?? 1;
+    const explicitQty = this.extractQuantityFromText(params.text, false);
 
     // Check if the buyer message expresses direct checkout or add-to-cart intent
     // (e.g. mentions a delivery zone or begins with "add", "buy", "order", "i want to buy", etc.)
     const isDirectPurchaseIntent =
       Boolean(matchedZone) ||
-      quantity > 1 ||
+      (explicitQty !== undefined && explicitQty > 1) ||
       /^(?:add(?:\s+to\s+cart)?|buy|order|purchase|i\s+(?:want|need)|checkout|send\s+me|i'll\s+take)\b/i.test(trimmed);
 
     // USER'S STRICT BUSINESS REQUIREMENT:
@@ -1806,7 +2259,7 @@ export class CaterlogStage1Engine {
           buyerPhone: params.buyerPhone,
           buyerName: params.buyerName,
           activeProductId: product.id,
-          quantity,
+          quantity: explicitQty,
           discountCode: mentionedDiscount?.code,
           state: "AWAITING_VARIANT",
           updatedAt: new Date(),
@@ -1834,7 +2287,7 @@ export class CaterlogStage1Engine {
         buyerPhone: params.buyerPhone,
         buyerName: params.buyerName,
         activeProductId: product.id,
-        quantity,
+        quantity: explicitQty,
         discountCode: mentionedDiscount?.code,
         state: "AWAITING_VARIANT",
         updatedAt: new Date(),
@@ -1881,11 +2334,48 @@ export class CaterlogStage1Engine {
 
     const itemLabel = variant ? `${product.name} (${variant.name})` : product.name;
 
+    if (available <= 0) {
+      const soldOutMsg = `😔 Sorry, *${itemLabel}* is currently *Sold Out* (0 available).`;
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: params.buyerPhone,
+        text: soldOutMsg,
+      });
+      await this.broadcastStateChange();
+      return { step: "OUT_OF_STOCK" };
+    }
+
+    const hasKnownQty = explicitQty !== undefined || existingSession?.quantity !== undefined;
+
+    // Prompt for quantity if buyer has not specified units and hasn't given an instant delivery zone checkout
+    if (!hasKnownQty && !matchedZone) {
+      this.buyerSessions.set(params.buyerPhone, {
+        buyerPhone: params.buyerPhone,
+        buyerName: params.buyerName,
+        activeProductId: product.id,
+        activeVariantId: variant?.id,
+        discountCode: mentionedDiscount?.code ?? existingSession?.discountCode,
+        state: "AWAITING_QUANTITY",
+        updatedAt: new Date(),
+      });
+
+      const { text: promptText, quickReplies } = this.buildQuantityPrompt(product, variant, available);
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: params.buyerPhone,
+        text: promptText,
+        imageUrl: product.primaryImageUrl,
+        quickReplies,
+        headerText: "Select Quantity",
+      });
+      await this.broadcastStateChange();
+      return { step: "PROMPTED_FOR_QUANTITY" };
+    }
+
+    const quantity = explicitQty ?? existingSession?.quantity ?? 1;
+
     if (available < quantity) {
-      const soldOutMsg =
-        available <= 0
-          ? `😔 Sorry, *${itemLabel}* is currently *Sold Out* (0 available).`
-          : `⚠️ Only *${available}* unit(s) of *${itemLabel}* left in stock (you requested ${quantity}).`;
+      const soldOutMsg = `⚠️ Only *${available}* unit(s) of *${itemLabel}* left in stock (you requested ${quantity}).`;
       await this.dispatchWhatsAppAndRecordChat({
         channel: "BUYER_SHOP_WA",
         toPhone: params.buyerPhone,
@@ -2226,12 +2716,28 @@ export class CaterlogStage1Engine {
         const reminderDelayMs = Math.max(0, delayMs - 5 * 60_000);
         void this.jobScheduler
           .schedule(
-            { name: "payment-reminder", payload: { orderShortCode: newOrder.shortCode } },
+            { name: "payment-reminder", payload: { orderShortCode: newOrder.shortCode, minutesRemaining: 5 } },
             { jobId: `reminder-${newOrder.shortCode}`, delayMs: reminderDelayMs }
           )
           .catch((err) =>
             console.error(
               `[caterlog:jobs] Failed to schedule payment reminder for ${newOrder.shortCode}:`,
+              err
+            )
+          );
+      }
+
+      // 2-Minute Final Urgent Warning
+      if (delayMs > 2 * 60_000) {
+        const reminder2MinDelayMs = Math.max(0, delayMs - 2 * 60_000);
+        void this.jobScheduler
+          .schedule(
+            { name: "payment-reminder-2min", payload: { orderShortCode: newOrder.shortCode } },
+            { jobId: `reminder-2min-${newOrder.shortCode}`, delayMs: reminder2MinDelayMs }
+          )
+          .catch((err) =>
+            console.error(
+              `[caterlog:jobs] Failed to schedule 2-minute payment reminder for ${newOrder.shortCode}:`,
               err
             )
           );
@@ -2408,31 +2914,77 @@ export class CaterlogStage1Engine {
     return undefined;
   }
 
-  private extractQuantityFromText(text: string): number | undefined {
-    const trimmed = text.trim();
-    // 1. Matches like "x 2", "qty 3", "quantity: 4", "qty: 2"
-    let match = trimmed.match(/(?:x|qty|quantity)\s*[:=]?\s*(\d+)/i);
-    // 2. Matches like "2 pcs", "3 pairs", "4 units", "2 of ...", "3 shoes", "2 items"
-    if (!match) {
-      match = trimmed.match(/(\d+)\s*(?:pcs|pieces|pairs|units|items|bags|shoes|of\b)/i);
+  private buildQuantityPrompt(
+    product: RuntimeProduct,
+    variant: RuntimeVariant | undefined,
+    availableStock: number
+  ): { text: string; quickReplies: QuickReplyOption[] } {
+    const itemLabel = variant ? `${product.name} — ${variant.name}` : product.name;
+    const itemSku = variant ? variant.skuCode : product.skuCode;
+    const unitPrice = variant?.priceKobo !== undefined ? variant.priceKobo : product.basePriceKobo;
+
+    const promptText = [
+      `🔢 *How many units of ${itemLabel} would you like?*`,
+      `📦 Item: *${itemLabel}* (\`${itemSku}\`)`,
+      `💰 Price per unit: *${formatNaira(unitPrice)}*`,
+      `🟢 In Stock: *${availableStock} unit(s) available*`,
+      ``,
+      `_Reply with the number of units (e.g. *1*, *2*, *3*) or tap an option below:_`,
+    ].join("\n");
+
+    const candidates = [1, 2, 3, 5].filter((q) => q <= availableStock);
+    if (candidates.length === 0 && availableStock > 0) {
+      candidates.push(availableStock);
     }
-    // 3. Matches like "I want 3", "need 2", "order 3", "buy 2", "send 4", "add 2"
+    const uniqueQtys = Array.from(new Set(candidates)).slice(0, 4);
+    const quickReplies: QuickReplyOption[] = uniqueQtys.map((q) => ({
+      label: `${q} unit${q > 1 ? "s" : ""}`,
+      replyText: `${q} unit${q > 1 ? "s" : ""}`,
+    }));
+
+    return { text: promptText, quickReplies };
+  }
+
+  private extractQuantityFromText(text: string, allowBareNumber = false): number | undefined {
+    const trimmed = text.trim();
+
+    // 0. Bare number or number + unit when allowBareNumber is true (e.g. in AWAITING_QUANTITY: "2", "3", "2 units")
+    if (allowBareNumber) {
+      const bareMatch = trimmed.match(/^(\d+)(?:\s*(?:units?|pcs?|pieces?|items?|pairs?|x|please|pls)?)?$/i);
+      if (bareMatch?.[1]) {
+        const parsed = Number.parseInt(bareMatch[1], 10);
+        if (parsed >= 1 && parsed <= 999) return parsed;
+      }
+    }
+
+    // 1. Direct unit matches: "2 units", "3 pcs", "1 piece", "4 items", "2 pairs"
+    let match = trimmed.match(/(?<![\w-])(\d+)\s*(?:units?|pcs?|pieces?|items?|pairs?|x)\b/i);
+
+    // 2. Matches like "x 2", "qty 3", "quantity: 4", "qty: 2"
+    if (!match) {
+      match = trimmed.match(/(?:x|qty|quantity)\s*[:=]?\s*(\d+)/i);
+    }
+    // 3. Matches like "2 pcs", "3 pairs", "4 units", "2 of ...", "3 shoes", "2 items"
+    if (!match) {
+      match = trimmed.match(/(?<![\w-])(\d+)\s*(?:pcs|pieces|pairs|units|items|bags|shoes|of\b)/i);
+    }
+    // 4. Matches like "I want 3", "need 2", "order 3", "buy 2", "send 4", "add 2"
     if (!match) {
       match = trimmed.match(/\b(?:want|need|order|buy|send|add|take|gimme)\s+(\d+)\b/i);
     }
-    // 4. Matches like "2 size 39", "3 size 40"
+    // 5. Matches like "2 size 39", "3 size 40"
     if (!match) {
-      match = trimmed.match(/(\d+)\s+(?:size|variant|color|colour)\b/i);
+      match = trimmed.match(/(?<![\w-])(\d+)\s+(?:size|variant|color|colour)\b/i);
     }
-    // 5. Matches like "size 39 (2)", "size 39 x2", "size 39 - 2 units"
+    // 6. Matches like "size 39 (2)", "size 39 x2", "size 39 - 2 units"
     if (!match) {
       match = trimmed.match(/(?:size|variant)\s+[a-zA-Z0-9_-]+\s*[\(\-x]\s*(\d+)/i);
     }
-    // 6. Direct prefix like "3x" or "2*"
+    // 7. Direct prefix like "3x" or "2*"
     if (!match) {
-      match = trimmed.match(/\b(\d+)\s*(?:x|\*)\b/i);
+      match = trimmed.match(/(?<![\w-])(\d+)\s*(?:x|\*)\b/i);
     }
-    // 7. If message begins with number followed by product/variant name, e.g. "2 SHOE-01" or "3 Zara"
+    // 8. If message begins with number followed by product/variant name, e.g. "2 SHOE-01" or "3 Zara"
     if (!match) {
       match = trimmed.match(/^(\d+)\s+[a-zA-Z]/i);
     }
@@ -2560,81 +3112,194 @@ export class CaterlogStage1Engine {
 
     const product = this.products.find((p) => p.id === order.productId);
 
-    if (decision.nextStatus === "PAID") {
-      order.paidAt = new Date();
+    const wasExpired = order.status === "EXPIRED" || Boolean(order.reservationReleased);
+
+    // If order was expired, verify whether physical stock is still available before reviving!
+    let isOversoldOnLatePayment = false;
+    if (wasExpired && decision.nextStatus === "PAID") {
       if (order.items && order.items.length > 0) {
         for (const item of order.items) {
           const prod = this.products.find((p) => p.id === item.productId);
           if (prod) {
-            const reservedQty = order.reservationReleased ? 0 : item.quantity;
-            prod.stockTotal = Math.max(0, prod.stockTotal - item.quantity);
-            prod.stockReserved = Math.max(0, prod.stockReserved - reservedQty);
-
-            if (item.variantId && prod.variants) {
-              const variant = prod.variants.find((v) => v.id === item.variantId);
-              if (variant) {
-                variant.stockTotal = Math.max(0, variant.stockTotal - item.quantity);
-                variant.stockReserved = Math.max(0, variant.stockReserved - reservedQty);
-              }
+            const avail = item.variantId && prod.variants
+              ? (prod.variants.find((v) => v.id === item.variantId)?.stockTotal ?? 0)
+              : prod.stockTotal;
+            if (avail < item.quantity) {
+              isOversoldOnLatePayment = true;
+              break;
             }
-
-            if (prod.variants && prod.variants.length > 0) {
-              prod.stockTotal = prod.variants.reduce((sum, v) => sum + v.stockTotal, 0);
-              prod.stockReserved = prod.variants.reduce((sum, v) => sum + v.stockReserved, 0);
-            }
-            this.persistInBackground("updateStockOnPayment", () => this.persistence.saveProduct(prod));
+          } else {
+            isOversoldOnLatePayment = true;
+            break;
           }
         }
-      } else if (product) {
-        product.stockTotal = Math.max(0, product.stockTotal - order.quantity);
-        const reservedQuantity = order.reservationReleased ? 0 : order.quantity;
-        product.stockReserved = Math.max(0, product.stockReserved - reservedQuantity);
-
-        if (order.variantId || order.variantSku) {
-          const variant = product.variants?.find(
-            (v) => v.id === order.variantId || v.skuCode === order.variantSku
-          );
-          if (variant) {
-            variant.stockTotal = Math.max(0, variant.stockTotal - order.quantity);
-            variant.stockReserved = Math.max(0, variant.stockReserved - reservedQuantity);
+      } else {
+        const prod = this.products.find((p) => p.id === order.productId);
+        if (prod) {
+          const avail = (order.variantId || order.variantSku) && prod.variants
+            ? (prod.variants.find((v) => v.id === order.variantId || v.skuCode === order.variantSku)?.stockTotal ?? 0)
+            : prod.stockTotal;
+          if (avail < order.quantity) {
+            isOversoldOnLatePayment = true;
           }
+        } else {
+          isOversoldOnLatePayment = true;
         }
-
-        if (product.variants && product.variants.length > 0) {
-          product.stockTotal = product.variants.reduce((sum, v) => sum + v.stockTotal, 0);
-          product.stockReserved = product.variants.reduce((sum, v) => sum + v.stockReserved, 0);
-        }
-        this.persistInBackground("updateStockOnPayment", () => this.persistence.saveProduct(product));
       }
+    }
 
-      const overpayNote =
-        decision.overpaidAmountKobo > 0n
-          ? `\n💚 *Overpayment:* ${formatNaira(decision.overpaidAmountKobo)} extra was received. The vendor will refund or credit it.`
-          : "";
+    if (decision.nextStatus === "PAID") {
+      order.paidAt = new Date();
 
-      const itemDisplay = order.variantName
-        ? `${order.productName} (${order.variantName})`
-        : order.productName;
+      if (isOversoldOnLatePayment) {
+        order.reservationReleased = true; // stock could not be secured
+        const itemDisplay = order.variantName
+          ? `${order.productName} (${order.variantName})`
+          : order.productName;
 
-      const buyerReceipt = `✅ *Payment Confirmed!* (${formatNaira(decision.newAmountPaidKobo)})\n🧾 Receipt: *${order.shortCode}*\n📦 Item: *${itemDisplay}* ×${order.quantity}\n🚚 Delivery: *${order.shippingZoneName}*\n🏪 Vendor: *${this.vendor.businessName}*\n\nYour order is now being packed for dispatch!${overpayNote}`;
-      const vendorAlert = `🔔 *PAID ORDER ${order.shortCode}!*\n💰 Verified Transfer: *${formatNaira(decision.newAmountPaidKobo)}* from ${verified.payerName ?? order.customerName}\n📦 Item: *${itemDisplay}* ×${order.quantity} (Remaining available stock: ${product ? product.stockTotal - product.stockReserved : 0})\n\nReply *dispatch ${order.shortCode} <riderPhone>* when handed to rider.${overpayNote}`;
+        const oversoldBuyerMsg = [
+          `⚠️ *PAYMENT RECEIVED FOR EXPIRED ORDER (${order.shortCode})*`,
+          ``,
+          `We received your transfer of *${formatNaira(decision.newAmountPaidKobo)}*, but this reservation had already expired and *${itemDisplay}* is now *Sold Out*.`,
+          ``,
+          `🏪 *What happens next:*`,
+          `Our store team has been alerted immediately. The vendor will contact you shortly to either provide an alternative or issue an instant refund to your bank account.`,
+          ``,
+          `_Reply *talk to vendor* if you'd like to chat with the store owner right away._`,
+        ].join("\n");
 
-      this.appendChat({
-        channel: "BUYER_SHOP_WA",
-        sender: "CATERLOG_BOT",
-        fromPhone: "CATERLOG",
-        text: buyerReceipt,
-      });
-      this.appendChat({
-        channel: "VENDOR_ADMIN_WA",
-        sender: "CATERLOG_BOT",
-        fromPhone: "CATERLOG",
-        text: vendorAlert,
-      });
+        const oversoldVendorAlert = [
+          `🚨 *ACTION REQUIRED: Late Transfer on Expired Order (${order.shortCode})*`,
+          `Buyer *${order.customerName}* (${order.customerPhone}) transferred *${formatNaira(decision.newAmountPaidKobo)}*, but this reservation had already expired and the item is now *SOLD OUT*!`,
+          ``,
+          `⚠️ *Action Needed:* Please contact customer at ${order.customerPhone} to arrange an alternative product or issue a refund.`,
+        ].join("\n");
+
+        await this.dispatchWhatsAppAndRecordChat({
+          channel: "BUYER_SHOP_WA",
+          toPhone: order.customerPhone,
+          text: oversoldBuyerMsg,
+          quickReplies: [
+            { label: "💬 Chat with Vendor", replyText: "talk to vendor" },
+            { label: "🛒 View Catalog", replyText: "catalog" },
+          ],
+          headerText: "Order Expired — Item Sold Out",
+        });
+
+        this.appendChat({
+          channel: "VENDOR_ADMIN_WA",
+          sender: "CATERLOG_BOT",
+          fromPhone: "CATERLOG",
+          text: oversoldVendorAlert,
+        });
+      } else {
+        if (order.items && order.items.length > 0) {
+          for (const item of order.items) {
+            const prod = this.products.find((p) => p.id === item.productId);
+            if (prod) {
+              const reservedQty = order.reservationReleased ? 0 : item.quantity;
+              prod.stockTotal = Math.max(0, prod.stockTotal - item.quantity);
+              prod.stockReserved = Math.max(0, prod.stockReserved - reservedQty);
+
+              if (item.variantId && prod.variants) {
+                const variant = prod.variants.find((v) => v.id === item.variantId);
+                if (variant) {
+                  variant.stockTotal = Math.max(0, variant.stockTotal - item.quantity);
+                  variant.stockReserved = Math.max(0, variant.stockReserved - reservedQty);
+                }
+              }
+
+              if (prod.variants && prod.variants.length > 0) {
+                prod.stockTotal = prod.variants.reduce((sum, v) => sum + v.stockTotal, 0);
+                prod.stockReserved = prod.variants.reduce((sum, v) => sum + v.stockReserved, 0);
+              }
+              this.persistInBackground("updateStockOnPayment", () => this.persistence.saveProduct(prod));
+            }
+          }
+        } else if (product) {
+          product.stockTotal = Math.max(0, product.stockTotal - order.quantity);
+          const reservedQuantity = order.reservationReleased ? 0 : order.quantity;
+          product.stockReserved = Math.max(0, product.stockReserved - reservedQuantity);
+
+          if (order.variantId || order.variantSku) {
+            const variant = product.variants?.find(
+              (v) => v.id === order.variantId || v.skuCode === order.variantSku
+            );
+            if (variant) {
+              variant.stockTotal = Math.max(0, variant.stockTotal - order.quantity);
+              variant.stockReserved = Math.max(0, variant.stockReserved - reservedQuantity);
+            }
+          }
+
+          if (product.variants && product.variants.length > 0) {
+            product.stockTotal = product.variants.reduce((sum, v) => sum + v.stockTotal, 0);
+            product.stockReserved = product.variants.reduce((sum, v) => sum + v.stockReserved, 0);
+          }
+          this.persistInBackground("updateStockOnPayment", () => this.persistence.saveProduct(product));
+        }
+
+        order.reservationReleased = false;
+
+        const overpayNote =
+          decision.overpaidAmountKobo > 0n
+            ? `\n💚 *Overpayment:* ${formatNaira(decision.overpaidAmountKobo)} extra was received. The vendor will refund or credit it.`
+            : "";
+
+        const itemDisplay = order.variantName
+          ? `${order.productName} (${order.variantName})`
+          : order.productName;
+
+        const buyerReceipt = [
+          `✅ *Payment Confirmed!* (${formatNaira(decision.newAmountPaidKobo)})`,
+          `🧾 Receipt: *${order.shortCode}*`,
+          `📦 Item: *${itemDisplay}* ×${order.quantity}`,
+          `🚚 Delivery Zone: *${order.shippingZoneName}*`,
+          `🏪 Vendor: *${this.vendor.businessName}*`,
+          overpayNote,
+          wasExpired ? "\n💚 *Late Payment Accepted:* Your transfer was received after expiry, but we had stock available and have secured your order!" : "",
+          ``,
+          `📍 *Where should the rider deliver your package?*`,
+          `Please reply with your full street address, nearest landmark, and contact phone number (e.g. *14 Admiralty Way, Lekki Phase 1*):`,
+        ].filter(Boolean).join("\n");
+
+        const vendorAlert = [
+          `🔔 *PAID ORDER ${order.shortCode}!*`,
+          `💰 Verified Transfer: *${formatNaira(decision.newAmountPaidKobo)}* from ${verified.payerName ?? order.customerName}`,
+          `📦 Item: *${itemDisplay}* ×${order.quantity} (Remaining available stock: ${product ? product.stockTotal - product.stockReserved : 0})`,
+          wasExpired ? "💚 *Late Payment Revived:* Stock was available and order was restored!" : "",
+          overpayNote,
+          ``,
+          `_Reply \`dispatch ${order.shortCode} <riderPhone>\` when handed to rider._`,
+        ].filter(Boolean).join("\n");
+
+        await this.dispatchWhatsAppAndRecordChat({
+          channel: "BUYER_SHOP_WA",
+          toPhone: order.customerPhone,
+          text: buyerReceipt,
+          headerText: "Payment Confirmed",
+        });
+
+        this.appendChat({
+          channel: "VENDOR_ADMIN_WA",
+          sender: "CATERLOG_BOT",
+          fromPhone: "CATERLOG",
+          text: vendorAlert,
+        });
+
+        // Set buyer session awaiting delivery address
+        this.buyerSessions.set(order.customerPhone, {
+          buyerPhone: order.customerPhone,
+          buyerName: order.customerName,
+          activeOrderId: order.id,
+          state: "AWAITING_DELIVERY_ADDRESS",
+          updatedAt: new Date(),
+        });
+      }
 
       if (this.jobScheduler) {
         void this.jobScheduler.cancel(`expiry-${order.shortCode}`).catch(console.error);
         void this.jobScheduler.cancel(`reminder-${order.shortCode}`).catch(console.error);
+        void this.jobScheduler.cancel(`reminder-2min-${order.shortCode}`).catch(console.error);
       }
     } else {
       order.paymentExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -2652,6 +3317,26 @@ export class CaterlogStage1Engine {
         fromPhone: "CATERLOG",
         text: `⚠️ *Partial Payment on ${order.shortCode}:* Buyer transferred ${formatNaira(verified.amountPaidKobo)} of ${formatNaira(order.totalAmountKobo)}. Caterlog automatically prompted them for the remaining ${formatNaira(decision.remainingBalanceKobo)} balance.`,
       });
+
+      if (this.jobScheduler) {
+        const extDelayMs = 30 * 60 * 1000;
+        void this.jobScheduler.cancel(`expiry-${order.shortCode}`).catch(console.error);
+        void this.jobScheduler.cancel(`reminder-${order.shortCode}`).catch(console.error);
+        void this.jobScheduler.cancel(`reminder-2min-${order.shortCode}`).catch(console.error);
+
+        void this.jobScheduler.schedule(
+          { name: "order-expiry", payload: { orderShortCode: order.shortCode } },
+          { jobId: `expiry-${order.shortCode}`, delayMs: extDelayMs }
+        );
+        void this.jobScheduler.schedule(
+          { name: "payment-reminder", payload: { orderShortCode: order.shortCode, minutesRemaining: 5 } },
+          { jobId: `reminder-${order.shortCode}`, delayMs: extDelayMs - 5 * 60_000 }
+        );
+        void this.jobScheduler.schedule(
+          { name: "payment-reminder-2min", payload: { orderShortCode: order.shortCode } },
+          { jobId: `reminder-2min-${order.shortCode}`, delayMs: extDelayMs - 2 * 60_000 }
+        );
+      }
     }
 
     await this.persistNow("applyPayment", async () => {
@@ -2676,22 +3361,77 @@ export class CaterlogStage1Engine {
   public async syncWhatsAppCatalog(options: {
     deleteMissing?: boolean;
   } = {}): Promise<CatalogSyncResult> {
-    const result = await this.catalog.syncProducts(
-      this.products.map((product) => ({
+    const apiBase = (process.env.API_BASE_URL || "http://localhost:4000").replace(/\/+$/, "");
+    const isLocalApi = /localhost|127\.0\.0\.1/i.test(apiBase);
+
+    const catalogInputs: CatalogProductInput[] = [];
+    const allSkusToKeep: string[] = [];
+
+    for (const product of this.products) {
+      let resolvedImageUrl = product.primaryImageUrl?.trim() || "";
+
+      // 1. If image is stored in MediaStore (relative /api/v1/media/... or localhost URL), resolve its public URL!
+      const mediaMatch = resolvedImageUrl.match(/\/api\/v1\/media\/([^/?#]+)/);
+      if (mediaMatch?.[1]) {
+        try {
+          const publicMediaUrl = await mediaStore.getPublicUrl(decodeURIComponent(mediaMatch[1]));
+          if (publicMediaUrl) {
+            resolvedImageUrl = publicMediaUrl;
+          }
+        } catch {
+          // If public resolution fails, continue below
+        }
+      }
+
+      // 2. If it is a relative path and apiBase is public, prefix it
+      if (resolvedImageUrl.startsWith("/") && !isLocalApi) {
+        resolvedImageUrl = `${apiBase}${resolvedImageUrl}`;
+      }
+
+      // 3. Only if missing, not http(s), or unresolvable localhost, fall back to smart contextual photo
+      if (
+        !resolvedImageUrl ||
+        !/^https?:\/\//i.test(resolvedImageUrl) ||
+        (isLocalApi && /localhost|127\.0\.0\.1/i.test(resolvedImageUrl))
+      ) {
+        resolvedImageUrl = getSmartFallbackImage(product.name, product.category);
+      }
+
+      catalogInputs.push({
         skuCode: product.skuCode,
         name: product.name,
         description: product.description,
         basePriceKobo: product.basePriceKobo,
         stockAvailable: Math.max(0, product.stockTotal - product.stockReserved),
-        primaryImageUrl: product.primaryImageUrl,
+        primaryImageUrl: resolvedImageUrl,
         category: product.category,
         brand: this.vendor.businessName,
-      })),
-      {
-        deleteMissing: options.deleteMissing ?? true,
-        existingSkus: this.products.map((product) => product.skuCode),
+      });
+      allSkusToKeep.push(product.skuCode);
+
+      // If product has variants, also sync each variant with item_group_id so Content IDs match
+      if (product.variants && product.variants.length > 0) {
+        for (const variant of product.variants) {
+          catalogInputs.push({
+            skuCode: variant.skuCode,
+            name: `${product.name} - ${variant.name}`,
+            description: `${product.name} (${variant.name}) — ${product.description}`,
+            basePriceKobo: variant.priceKobo ?? product.basePriceKobo,
+            stockAvailable: Math.max(0, variant.stockTotal - variant.stockReserved),
+            primaryImageUrl: resolvedImageUrl,
+            category: product.category,
+            brand: this.vendor.businessName,
+            itemGroupId: product.skuCode,
+          });
+          allSkusToKeep.push(variant.skuCode);
+        }
       }
-    );
+    }
+
+    const result = await this.catalog.syncProducts(catalogInputs, {
+      deleteMissing: options.deleteMissing ?? true,
+      existingSkus: allSkusToKeep,
+    });
 
     const failureNote =
       result.failed.length > 0
@@ -2763,16 +3503,49 @@ export class CaterlogStage1Engine {
       }
     }
 
-    this.appendChat({
+    const itemDisplay = ord.variantName
+      ? `${ord.productName} (${ord.variantName})`
+      : ord.productName;
+
+    const expiryNotice = [
+      `🛑 *ORDER EXPIRED — DO NOT PAY (Order ${ord.shortCode})*`,
+      ``,
+      `The payment hold for *${itemDisplay}* has expired and the reserved stock has been released.`,
+      ``,
+      `⚠️ *PLEASE DO NOT TRANSFER FUNDS TO THIS ACCOUNT:*`,
+      `🏦 *Bank:* ${ord.bankName}`,
+      `🔢 *Account Number:* *${ord.accountNumber}*`,
+      ``,
+      `This virtual account is now deactivated for Order ${ord.shortCode}. Transfers sent to an expired account may fail or require manual reversal.`,
+      ``,
+      `_Want to re-order? Reply with the item name (e.g. *${ord.productSku}*) or tap an option below to start a fresh checkout:_`,
+    ].join("\n");
+
+    const quickReplies: QuickReplyOption[] = [
+      { label: `🛍️ Re-order ${ord.productSku}`, replyText: `I want ${ord.productSku}` },
+      { label: "🛒 View Catalog", replyText: "catalog" },
+      { label: "💬 Chat with Vendor", replyText: "talk to vendor" },
+    ];
+
+    await this.dispatchWhatsAppAndRecordChat({
       channel: "BUYER_SHOP_WA",
+      toPhone: ord.customerPhone,
+      text: expiryNotice,
+      quickReplies,
+      headerText: "Order Expired — Do Not Pay",
+    });
+
+    this.appendChat({
+      channel: "VENDOR_ADMIN_WA",
       sender: "CATERLOG_BOT",
       fromPhone: "CATERLOG",
-      text: `⌛ *Reservation Expired (${ord.shortCode}):* The ${this.vendor.reservationTtlMinutes}-minute payment hold for *${ord.productName}* has expired and the reserved stock has been released.`,
+      text: `⌛ *Reservation Expired (${ord.shortCode}):* Stock hold for *${itemDisplay}* expired without payment. Expiry notice sent to buyer (${ord.customerPhone}).`,
     });
 
     if (this.jobScheduler) {
       void this.jobScheduler.cancel(`expiry-${ord.shortCode}`).catch(console.error);
       void this.jobScheduler.cancel(`reminder-${ord.shortCode}`).catch(console.error);
+      void this.jobScheduler.cancel(`reminder-2min-${ord.shortCode}`).catch(console.error);
     }
 
     await this.persistNow("expireOrder", () => this.persistence.saveOrder(ord));
@@ -2802,8 +3575,12 @@ export class CaterlogStage1Engine {
 
   /**
    * Sends an automated payment reminder to the buyer for an active pending or partially-paid order.
+   * Supports standard reminder (e.g. 5 mins left) and urgent countdown (2 mins left).
    */
-  public async sendPaymentReminder(shortCode: string): Promise<RuntimeOrder | undefined> {
+  public async sendPaymentReminder(
+    shortCode: string,
+    minutesRemaining = 5
+  ): Promise<RuntimeOrder | undefined> {
     const ord = this.orders.find(
       (o) => o.shortCode.toUpperCase() === shortCode.trim().toUpperCase()
     );
@@ -2815,32 +3592,48 @@ export class CaterlogStage1Engine {
       ord.totalAmountKobo > ord.amountPaidKobo ? ord.totalAmountKobo - ord.amountPaidKobo : 0n;
     if (remainingKobo <= 0n) return undefined;
 
-    const reminderText = [
-      `⏰ *Payment Reminder — Order ${ord.shortCode}*`,
-      `Your reserved items are currently being held, but your reservation is expiring soon.`,
-      `💰 *Amount Remaining:* *${formatNaira(remainingKobo)}*`,
-      `🏦 *Bank:* ${ord.bankName}`,
-      `🔢 *Account No:* *${ord.accountNumber}*`,
-      `_Transfer directly to this dedicated account to complete your order._`,
-    ].join("\n");
+    const isUrgent2Min = minutesRemaining <= 2;
+    const itemDisplay = ord.variantName
+      ? `${ord.productName} (${ord.variantName})`
+      : ord.productName;
 
-    await this.whatsapp.sendTextMessage({
+    const reminderText = isUrgent2Min
+      ? [
+          `⚠️ *URGENT: 2 MINUTES LEFT — Order ${ord.shortCode}*`,
+          `Your reservation for *${itemDisplay}* will expire in *2 minutes*!`,
+          ``,
+          `💰 *Amount Due:* *${formatNaira(remainingKobo)}*`,
+          `🏦 *Bank:* ${ord.bankName}`,
+          `🔢 *Account No:* *${ord.accountNumber}*`,
+          ``,
+          `⏰ *Please complete your bank transfer now.* Once the 2-minute countdown ends, your stock reservation will be released and this payment account will close.`,
+        ].join("\n")
+      : [
+          `⏰ *Payment Reminder — Order ${ord.shortCode}*`,
+          `Your reserved items are currently being held, but your reservation is expiring soon.`,
+          `💰 *Amount Remaining:* *${formatNaira(remainingKobo)}*`,
+          `🏦 *Bank:* ${ord.bankName}`,
+          `🔢 *Account No:* *${ord.accountNumber}*`,
+          `_Transfer directly to this dedicated account to complete your order._`,
+        ].join("\n");
+
+    const quickReplies: QuickReplyOption[] = [
+      { label: "💳 Copy Account Number", replyText: ord.accountNumber },
+      { label: "🛒 View Cart", replyText: "cart" },
+      { label: "💬 Chat with Vendor", replyText: "talk to vendor" },
+    ];
+
+    await this.dispatchWhatsAppAndRecordChat({
+      channel: "BUYER_SHOP_WA",
       toPhone: ord.customerPhone,
       text: reminderText,
-      vendorPhoneId: this.vendor.whatsappPhoneId,
+      quickReplies,
+      headerText: isUrgent2Min ? "⚠️ 2-Min Expiry Warning" : "Payment Reminder",
     });
 
-    this.appendChat({
+    await this.dispatchWhatsAppAndRecordChat({
       channel: "BUYER_SHOP_WA",
-      sender: "CATERLOG_BOT",
-      fromPhone: "CATERLOG",
-      text: reminderText,
-    });
-
-    this.appendChat({
-      channel: "BUYER_SHOP_WA",
-      sender: "CATERLOG_BOT",
-      fromPhone: "CATERLOG",
+      toPhone: ord.customerPhone,
       text: ord.accountNumber,
     });
 
@@ -2922,13 +3715,25 @@ export class CaterlogStage1Engine {
     const skuCode = (
       input.skuCode && input.skuCode.trim() !== ""
         ? input.skuCode.trim()
-        : `ITEM-0${this.products.length + 1}`
+        : generateConsistentSku(name, input.category, this.products)
     ).toUpperCase();
     if (!/^[A-Z0-9][A-Z0-9_-]{1,31}$/.test(skuCode)) {
       throw new Error(
         "SKU must be 2-32 characters using letters, numbers, hyphens or underscores."
       );
     }
+
+    const normalizedVariants = input.variants?.map((v, i) => {
+      const cleanVariantSku = v.skuCode?.toUpperCase() || "";
+      const expectedPrefix = `${skuCode}-`;
+      const finalVariantSku = cleanVariantSku.startsWith(expectedPrefix)
+        ? cleanVariantSku
+        : `${skuCode}-${(cleanVariantSku || v.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 6) || String(i + 1)).toUpperCase()}`;
+      return {
+        ...v,
+        skuCode: finalVariantSku,
+      };
+    });
 
     const resolvedImageUrl =
       input.primaryImageUrl && input.primaryImageUrl.trim() !== ""
@@ -2967,7 +3772,7 @@ export class CaterlogStage1Engine {
         existing.imagePhash = resolvedPhash;
       }
       if (input.variants) {
-        existing.variants = input.variants;
+        existing.variants = normalizedVariants;
       }
       this.persistInBackground("addProduct", () => this.persistence.saveProduct(existing));
       void this.broadcastStateChange();
@@ -2985,7 +3790,7 @@ export class CaterlogStage1Engine {
       imagePhash: resolvedPhash,
       stockTotal: calculatedStock,
       stockReserved: 0,
-      variants: input.variants,
+      variants: normalizedVariants,
     };
     this.products.unshift(created);
     this.persistInBackground("addProduct", () => this.persistence.saveProduct(created));
@@ -3173,19 +3978,60 @@ export class CaterlogStage1Engine {
       return undefined;
     }
 
-    assertValidOrderTransition(ord.status, "OUT_FOR_DELIVERY");
+    if (ord.status !== "OUT_FOR_DELIVERY") {
+      assertValidOrderTransition(ord.status, "OUT_FOR_DELIVERY");
+      ord.status = "OUT_FOR_DELIVERY";
+    }
 
-    ord.status = "OUT_FOR_DELIVERY";
-    ord.riderPhone = riderPhone;
-    ord.dispatchedAt = new Date();
+    if (riderPhone) {
+      ord.riderPhone = riderPhone.trim();
+    }
+    ord.dispatchedAt = ord.dispatchedAt || new Date();
+
+    const itemSummary =
+      ord.items && ord.items.length > 0
+        ? ord.items.map((i) => `• ${i.productName} ×${i.quantity}`).join("\n")
+        : `• ${ord.productName} ×${ord.quantity || 1}`;
+
+    const addressNotice = ord.deliveryAddress
+      ? `\n📍 *Delivery Address:* ${ord.deliveryAddress}`
+      : ord.shippingZoneName
+        ? `\n📍 *Delivery Zone:* ${ord.shippingZoneName}`
+        : "";
+
+    const riderNotice = ord.riderPhone
+      ? `\n🛵 *Dispatch Rider:* *${ord.riderPhone}*\n_The rider will call you upon arrival._`
+      : `\n🛵 *Your package has been handed to our dispatch courier.*`;
+
+    const dispatchNotice = [
+      `🚚 *ORDER OUT FOR DELIVERY!*`,
+      ``,
+      `Hello *${ord.customerName}*, your order *#${ord.shortCode}* is on its way to you!`,
+      ``,
+      `📦 *Package Contents:*`,
+      itemSummary,
+      addressNotice,
+      riderNotice,
+      ``,
+      `💬 Reply *status* or *track* at any time to monitor your delivery.`,
+    ].join("\n");
+
+    await this.dispatchWhatsAppAndRecordChat({
+      channel: "BUYER_SHOP_WA",
+      toPhone: ord.customerPhone,
+      text: dispatchNotice,
+      quickReplies: [
+        { label: "📍 Track Order", replyText: `track ${ord.shortCode}` },
+        { label: "🛍️ View Catalog", replyText: "catalog" },
+      ],
+      headerText: "Order Dispatched",
+    });
 
     this.appendChat({
-      channel: "BUYER_SHOP_WA",
+      channel: "VENDOR_ADMIN_WA",
       sender: "CATERLOG_BOT",
       fromPhone: "CATERLOG",
-      text: `🚚 *Order ${ord.shortCode} is Out for Delivery!*\n📦 Item: *${ord.productName}*${
-        riderPhone ? `\n📞 Dispatch Rider: *${riderPhone}*` : ""
-      }`,
+      text: `🚚 Order *#${ord.shortCode}* marked Out for Delivery!${ord.riderPhone ? ` (Rider: ${ord.riderPhone})` : ""} Customer (${ord.customerPhone}) notified on WhatsApp.`,
     });
 
     await this.persistNow("dispatchOrder", () => this.persistence.saveOrder(ord));

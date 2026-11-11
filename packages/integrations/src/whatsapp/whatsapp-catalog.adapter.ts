@@ -15,11 +15,13 @@ export interface CatalogProductInput {
   primaryImageUrl?: string;
   category?: string;
   brand?: string;
+  itemGroupId?: string;
 }
 
 /** Meta Graph `POST /{catalog_id}/products` request body. */
 export interface MetaCatalogProductItem {
   retailer_id: string;
+  item_group_id?: string;
   name: string;
   description: string;
   price: number;
@@ -154,11 +156,18 @@ export class WhatsAppCatalogAdapter {
       condition: "new",
     };
 
-    if (product.primaryImageUrl) item.image_url = product.primaryImageUrl;
+    let imageUrl = product.primaryImageUrl?.trim();
+    if (!imageUrl || !/^https?:\/\//i.test(imageUrl) || /localhost|127\.0\.0\.1/i.test(imageUrl)) {
+      imageUrl = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&q=80";
+    }
+    item.image_url = imageUrl;
     if (this.config.productUrlBase) {
       item.url = `${this.config.productUrlBase.replace(/\/+$/, "")}/${encodeURIComponent(
         product.skuCode.toUpperCase()
       )}`;
+    }
+    if (product.itemGroupId) {
+      item.item_group_id = product.itemGroupId.toUpperCase();
     }
     const brand = product.brand ?? this.config.brand;
     if (brand) item.brand = brand;

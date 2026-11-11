@@ -30,6 +30,7 @@ export type VendorWhatsAppCommand =
   | {
       type: "QUICK_ADD_PRODUCT";
       name: string;
+      skuCode?: string;
       priceKobo: bigint;
       stockTotal: number;
       variants?: ParsedProductVariant[];
@@ -45,6 +46,7 @@ export type VendorWhatsAppCommand =
       message: string;
     }
   | { type: "RESUME_COPILOT"; targetPhoneOrQuery?: string }
+  | { type: "SYNC_CATALOG"; deleteMissing?: boolean }
   | { type: "UNKNOWN_COMMAND"; rawInput: string };
 
 function normalizeOrderShortCode(raw: string): string {
@@ -98,6 +100,34 @@ const SALES_ALIASES = new Set([
  * - Keyword shorthands & typos: `ship Ibadan #6000`, `shiping Lekki 3500`, `delivery add Mainland N2500`
  * - Optional verbs (`add`, `set`, `create` can be omitted)
  */
+/**
+ * Detects and extracts an explicit SKU from product addition text
+ * (e.g. "SKU: SHOE-01", "SHOE-03: Nike Air", "Nike Air (SHOE-03)", or "[SHOE-03]").
+ */
+export function extractExplicitSku(text: string): { skuCode?: string; cleanText: string } {
+  // 1. Explicit "SKU: SHOE-01" or "SKU SHOE-01"
+  const skuLabelMatch = text.match(/\bSKU\s*[:#-]?\s*([A-Za-z0-9_-]{2,32})\b/i);
+  if (skuLabelMatch && skuLabelMatch[1]) {
+    const cleanText = text.replace(skuLabelMatch[0], "").replace(/^[,\s:-]+|[,\s:-]+$/g, "").trim();
+    return { skuCode: skuLabelMatch[1].toUpperCase(), cleanText };
+  }
+  // 2. Leading SKU code like "SHOE-03: Name" or "HEEL01: Name"
+  const leadingSkuMatch = text.match(/^([A-Za-z0-9]{2,10}(?:-[A-Za-z0-9]{1,10})?)\s*[:]\s*(.+)$/);
+  if (leadingSkuMatch && leadingSkuMatch[1] && leadingSkuMatch[2] && !isNigerianPriceToken(leadingSkuMatch[1])) {
+    return { skuCode: leadingSkuMatch[1].toUpperCase(), cleanText: leadingSkuMatch[2].trim() };
+  }
+  // 3. Parenthesized or bracketed SKU: "Name (SHOE-03)" or "[SHOE-03] Name"
+  const bracketMatch = text.match(/\[([A-Za-z0-9_-]{2,20})\]|\(([A-Za-z0-9_-]{2,20})\)/);
+  if (bracketMatch) {
+    const candidate = (bracketMatch[1] || bracketMatch[2] || "").trim();
+    if (!/^\d+$/.test(candidate) && !isNigerianPriceToken(candidate)) {
+      const cleanText = text.replace(bracketMatch[0], "").replace(/\s{2,}/g, " ").trim();
+      return { skuCode: candidate.toUpperCase(), cleanText };
+    }
+  }
+  return { cleanText: text };
+}
+
 export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppCommand {
   const trimmed = rawText.trim();
   const lower = trimmed.toLowerCase();
@@ -112,6 +142,21 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
   // 2. Help / Menu
   if (firstWord === "help" || firstWord === "menu" || firstWord === "commands") {
     return { type: "HELP_MENU" };
+  }
+
+  // 2a. Sync Catalog to WhatsApp Business (`sync`, `sync catalog`, `catalog sync`, `sync whatsapp catalog`)
+  if (
+    lower === "sync" ||
+    lower === "sync catalog" ||
+    lower === "catalog sync" ||
+    lower === "sync whatsapp catalog" ||
+    lower === "sync products" ||
+    lower === "sync inventory" ||
+    (firstWord === "sync" && (tokens[1]?.toLowerCase() === "catalog" || tokens[1]?.toLowerCase() === "whatsapp" || tokens[1]?.toLowerCase() === "products" || tokens.length === 1)) ||
+    (firstWord === "catalog" && (tokens[1]?.toLowerCase() === "sync" || tokens[1]?.toLowerCase() === "publish"))
+  ) {
+    const deleteMissing = !tokens.some((t) => t.toLowerCase() === "keep" || t.toLowerCase() === "nodelete");
+    return { type: "SYNC_CATALOG", deleteMissing };
   }
 
   // 2b. List Catalog / Products (`products`, `catalog`, `items`, `stock` with no args)
@@ -325,6 +370,13 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
   // - "Flask, #10000, variants: 750ml #8000 (5), 1000ml #12000 (3)"
   // - Optional verb prefixes: "add product ...", "new product ...", "prod add ..."
   let textToParse = trimmed;
+  let explicitSku: string | undefined = undefined;
+  const skuInfo = extractExplicitSku(textToParse);
+  if (skuInfo.skuCode) {
+    explicitSku = skuInfo.skuCode;
+    textToParse = skuInfo.cleanText;
+  }
+
   const prefixMatch =
     textToParse.match(/^(?:add|new|create)\s+product\s+/i) ||
     textToParse.match(/^(?:product|prod)\s+(?:add|new|create)\s+/i);
@@ -366,6 +418,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
         return {
           type: "QUICK_ADD_PRODUCT",
           name,
+          ...(explicitSku ? { skuCode: explicitSku } : {}),
           priceKobo: basePriceKobo,
           stockTotal,
           variants: varLinesOnly,
@@ -381,6 +434,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
           return {
             type: "QUICK_ADD_PRODUCT",
             name,
+            ...(explicitSku ? { skuCode: explicitSku } : {}),
             priceKobo,
             stockTotal,
             variants,
@@ -392,10 +446,17 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
 
   // 10b. Comma-separated caption format
   if (textToParse.includes(",")) {
-    const parts = textToParse.split(",").map((p) => p.trim());
+    const parts = textToParse.split(/[,;\n]+(?![^(]*\))/).map((p) => p.trim()).filter(Boolean);
     if (parts.length >= 2) {
-      const name = parts[0] ?? "";
-      const priceStr = parts[1] ?? "";
+      let name = parts[0] ?? "";
+      let priceStr = parts[1] ?? "";
+
+      // Check if name has an explicit SKU in it
+      const nameSkuInfo = extractExplicitSku(name);
+      if (nameSkuInfo.skuCode && !explicitSku) {
+        explicitSku = nameSkuInfo.skuCode;
+        name = nameSkuInfo.cleanText;
+      }
 
       // Case 1: First part after name is an explicit base price (e.g. "Zara Heel, #25000, ...")
       if (name && isNigerianPriceToken(priceStr)) {
@@ -406,6 +467,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
           return {
             type: "QUICK_ADD_PRODUCT",
             name,
+            ...(explicitSku ? { skuCode: explicitSku } : {}),
             priceKobo,
             stockTotal: 1,
           };
@@ -414,8 +476,8 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
         const singleToken = remainderParts[0] ?? "";
         const isSimpleStock =
           remainderParts.length === 1 &&
-          /^(?:stock|qty|total|count)?\s*\d+\s*(?:units?|pcs?|pieces?|items?)?$/i.test(singleToken) &&
-          !/(?:variations?|variants?|sizes?|colors?|options?|:|\(|@)/i.test(singleToken);
+          /^(?:stock|qty|total|count)?\s*[:=-]?\s*\d+\s*(?:units?|pcs?|pieces?|items?)?$/i.test(singleToken) &&
+          !/(?:variations?|variants?|sizes?|colors?|options?|flavors?|:.*[a-zA-Z]|\(|@)/i.test(singleToken);
 
         if (isSimpleStock) {
           const stockMatch = singleToken.match(/(\d+)/);
@@ -423,6 +485,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
           return {
             type: "QUICK_ADD_PRODUCT",
             name,
+            ...(explicitSku ? { skuCode: explicitSku } : {}),
             priceKobo,
             stockTotal,
           };
@@ -434,6 +497,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
           return {
             type: "QUICK_ADD_PRODUCT",
             name,
+            ...(explicitSku ? { skuCode: explicitSku } : {}),
             priceKobo,
             stockTotal,
             variants,
@@ -445,6 +509,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
         return {
           type: "QUICK_ADD_PRODUCT",
           name,
+          ...(explicitSku ? { skuCode: explicitSku } : {}),
           priceKobo,
           stockTotal,
         };
@@ -454,13 +519,14 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
       // (e.g. "Zara Heel, 38: #20000 (5), 39: #25000 (3)" or "Zara Heel, sizes: 38 @ 20k (5), 39 @ 25k (3)")
       if (name) {
         const candidateVariants = parseProductVariants(parts.slice(1));
-        if (candidateVariants.length > 0) {
+        if (candidateVariants.length > 0 && candidateVariants.some((v) => v.priceKobo !== undefined)) {
           const stockTotal = candidateVariants.reduce((sum, v) => sum + v.stockTotal, 0);
           const basePriceKobo =
             candidateVariants.find((v) => v.priceKobo !== undefined)?.priceKobo ?? 0n;
           return {
             type: "QUICK_ADD_PRODUCT",
             name,
+            ...(explicitSku ? { skuCode: explicitSku } : {}),
             priceKobo: basePriceKobo,
             stockTotal,
             variants: candidateVariants,
@@ -493,7 +559,7 @@ export function parseProductVariants(
     const clean = raw.replace(/^(?:variations?|variants?|sizes?|colors?|options?|flavors?)\s*[:=-]?\s*/i, "").trim();
     if (!clean) continue;
 
-    const subTokens = clean.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
+    const subTokens = clean.split(/[,;\n]+(?![^(]*\))/).map((s) => s.trim()).filter(Boolean);
     for (let token of subTokens) {
       token = token.replace(/^[•\-\*]\s*/, "").trim();
       if (!token) continue;
@@ -502,9 +568,12 @@ export function parseProductVariants(
       let variantPriceKobo: bigint | undefined = undefined;
       const priceRegex = /(?:@|at\s+|[:\-]\s*)?((?:#|₦|NGN|N)\s*[\d,]+|\b\d+k\b|(?<=[:@\s\-])\d{4,7}\b)/i;
       const priceMatch = token.match(priceRegex);
-      if (priceMatch && isNigerianPriceToken(priceMatch[1])) {
-        variantPriceKobo = nairaToKobo(priceMatch[1]);
-        token = token.replace(priceMatch[0], " ").trim();
+      if (priceMatch) {
+        const candidatePrice = priceMatch[1].replace(/[,:;\s]+$/, "");
+        if (isNigerianPriceToken(candidatePrice)) {
+          variantPriceKobo = nairaToKobo(candidatePrice);
+          token = token.replace(priceMatch[0], " ").trim();
+        }
       }
 
       // 2. Extract stock count

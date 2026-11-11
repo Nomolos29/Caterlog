@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type { BuyerSession, ChatMessage, Order, Product, Vendor } from "@/lib/types";
 import { CloseIcon, WhatsAppBadgeIcon } from "./icons";
 import { resolveImageUrl } from "@/lib/api";
@@ -52,6 +52,7 @@ export function ChatDrawer({
   const [sending, setSending] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -71,8 +72,6 @@ export function ChatDrawer({
   const [customPhone, setCustomPhone] = useState("+2348011223344");
   const [customName, setCustomName] = useState("New Buyer");
 
-  if (!isOpen) return null;
-
   const currentBuyerPhone =
     selectedBuyerIndex < BUYER_PRESETS.length
       ? BUYER_PRESETS[selectedBuyerIndex].phone
@@ -85,8 +84,19 @@ export function ChatDrawer({
 
   const filteredMessages = chatMessages.filter((m) => m.channel === activeChannel);
 
-  // Check if there is an order awaiting payment
-  const pendingPaymentOrder = orders.find((o) => o.status === "PENDING_PAYMENT");
+  // Auto-scroll chat history smoothly to bottom on message receipt
+  useEffect(() => {
+    if (isOpen) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [filteredMessages.length, isOpen]);
+
+  // Check if there is an order awaiting payment (prioritize currently selected buyer)
+  const pendingPaymentOrder =
+    orders.find((o) => o.status === "PENDING_PAYMENT" && o.customerPhone === currentBuyerPhone) ||
+    orders.find((o) => o.status === "PENDING_PAYMENT");
+
+  if (!isOpen) return null;
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -455,6 +465,32 @@ export function ChatDrawer({
               <button
                 onClick={() =>
                   onSendBuyerInquiry(
+                    "track",
+                    undefined,
+                    currentBuyerPhone,
+                    currentBuyerName
+                  )
+                }
+                className="px-2 py-1 bg-purple-50 border border-purple-300 rounded text-purple-800 hover:bg-purple-100 font-medium cursor-pointer"
+              >
+                📍 Track Order
+              </button>
+              <button
+                onClick={() =>
+                  onSendBuyerInquiry(
+                    "15 Admiralty Way, Lekki Phase 1, Lagos",
+                    undefined,
+                    currentBuyerPhone,
+                    currentBuyerName
+                  )
+                }
+                className="px-2 py-1 bg-emerald-50 border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-100 font-medium cursor-pointer"
+              >
+                🏠 Send Delivery Address
+              </button>
+              <button
+                onClick={() =>
+                  onSendBuyerInquiry(
                     "Can I talk to the store owner? I need custom sizing",
                     undefined,
                     currentBuyerPhone,
@@ -498,6 +534,12 @@ export function ChatDrawer({
                 className="px-2 py-1 bg-white border border-gray-200 rounded text-emerald-700 hover:bg-emerald-50 font-mono cursor-pointer"
               >
                 sales
+              </button>
+              <button
+                onClick={() => onSendVendorKeyword("sync catalog")}
+                className="px-2 py-1 bg-emerald-50 border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-100 font-medium cursor-pointer"
+              >
+                🛍️ sync catalog
               </button>
               <button
                 onClick={() => onSendVendorKeyword("stock")}
@@ -651,6 +693,7 @@ export function ChatDrawer({
               );
             })
           )}
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Input Form */}

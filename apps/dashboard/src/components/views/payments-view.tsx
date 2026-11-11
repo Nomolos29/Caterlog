@@ -224,7 +224,7 @@ export function PaymentsView({
       // update transaction status in memory
       setTransactions((prev) =>
         prev.map((tx) =>
-          tx.orderCode === "CT-1042"
+          tx.orderCode === (currentOrder?.shortCode || "CT-1042")
             ? { ...tx, repSettlement: "Settled" }
             : tx
         )

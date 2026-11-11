@@ -1,14 +1,26 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import type { ProductItem, OrderItem } from "@/lib/types";
 
 interface PaymentLinksViewProps {
   products: ProductItem[];
   orders: OrderItem[];
   vendorName: string;
+  initialCustomerName?: string;
 }
 
-export function PaymentLinksView({ products, orders, vendorName }: PaymentLinksViewProps) {
-  const [customerName, setCustomerName] = useState("");
+export function PaymentLinksView({
+  products,
+  orders,
+  vendorName,
+  initialCustomerName = "",
+}: PaymentLinksViewProps) {
+  const [customerName, setCustomerName] = useState(initialCustomerName);
+
+  useEffect(() => {
+    if (initialCustomerName) {
+      setCustomerName(initialCustomerName);
+    }
+  }, [initialCustomerName]);
   const [amount, setAmount] = useState("");
   const [selectedProduct, setSelectedProduct] = useState("");
   const [description, setDescription] = useState("");

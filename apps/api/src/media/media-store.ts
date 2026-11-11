@@ -9,6 +9,7 @@ export interface StoredMediaItem {
   buffer: Buffer;
   phash: string;
   createdAt: Date;
+  publicUrl?: string;
 }
 
 export class MediaStore {
@@ -60,6 +61,7 @@ export class MediaStore {
     buffer: Buffer;
     contentType?: string;
     mediaId?: string;
+    publicUrl?: string;
   }): Promise<StoredMediaItem> {
     const contentType = params.contentType || "image/jpeg";
     const mediaId = params.mediaId || `med_${crypto.randomBytes(8).toString("hex")}`;
@@ -71,6 +73,7 @@ export class MediaStore {
       buffer: params.buffer,
       phash,
       createdAt: new Date(),
+      publicUrl: params.publicUrl,
     };
 
     this.cache.set(mediaId, item);
@@ -84,6 +87,52 @@ export class MediaStore {
     }
 
     return item;
+  }
+
+  /**
+   * Resolves a public, globally fetchable HTTPS URL for a media item so Meta's
+   * Commerce Catalog crawler can ingest the vendor's actual photo.
+   */
+  public async getPublicUrl(mediaId: string): Promise<string | null> {
+    const item = this.getMedia(mediaId);
+    if (!item) return null;
+    if (item.publicUrl) return item.publicUrl;
+
+    // 1. Check if public tunnel or domain is configured
+    const tunnelUrl = process.env.PUBLIC_API_URL || process.env.TUNNEL_URL || process.env.API_BASE_URL;
+    if (tunnelUrl && /^https?:\/\//i.test(tunnelUrl) && !/localhost|127\.0\.0\.1/i.test(tunnelUrl)) {
+      const publicBase = tunnelUrl.replace(/\/+$/, "");
+      item.publicUrl = `${publicBase}/api/v1/media/${encodeURIComponent(mediaId)}`;
+      return item.publicUrl;
+    }
+
+    // 2. Local development fallback: upload real image buffer to Catbox for permanent HTTPS direct URL
+    try {
+      const form = new FormData();
+      form.append("reqtype", "fileupload");
+      const ext = item.contentType.includes("png") ? "png" : item.contentType.includes("webp") ? "webp" : "jpg";
+      form.append(
+        "fileToUpload",
+        new Blob([item.buffer], { type: item.contentType }),
+        `${mediaId}.${ext}`
+      );
+      const res = await fetch("https://catbox.moe/user/api.php", {
+        method: "POST",
+        body: form,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        const url = (await res.text()).trim();
+        if (/^https?:\/\//i.test(url)) {
+          item.publicUrl = url;
+          return url;
+        }
+      }
+    } catch (err) {
+      console.warn(`[caterlog:media-store] Could not upload media ${mediaId} to public host:`, err);
+    }
+
+    return null;
   }
 
   /**

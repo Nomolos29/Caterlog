@@ -193,9 +193,9 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
 ];
 
 export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: NetworkViewProps) {
-  // Connected suppliers list (starts empty; populated as suppliers are connected)
-  const [connectedSuppliers, setConnectedSuppliers] = useState<SupplierProfile[]>([]);
-  const [directorySuppliers, setDirectorySuppliers] = useState<SupplierProfile[]>([]);
+  // Connected suppliers list & wholesale directory
+  const [connectedSuppliers, setConnectedSuppliers] = useState<SupplierProfile[]>([SUPPLIERS_DATA[0]]);
+  const [directorySuppliers, setDirectorySuppliers] = useState<SupplierProfile[]>(SUPPLIERS_DATA);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierProfile | null>(null);
 
   // Default to my-suppliers

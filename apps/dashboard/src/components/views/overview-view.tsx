@@ -1,25 +1,33 @@
 import React, { useState } from "react";
-import type { VendorAnalytics, OrderItem, VendorProfile } from "@/lib/types";
+import type { VendorAnalytics, OrderItem, VendorProfile, ProductItem } from "@/lib/types";
 import { ClockIcon, CheckIcon, WhatsAppBadgeIcon } from "../icons";
 
 interface OverviewViewProps {
   analytics: VendorAnalytics;
   vendor: VendorProfile;
   orders: OrderItem[];
+  products?: ProductItem[];
   onSelectOrder?: (order: OrderItem) => void;
   onViewAllOrders?: () => void;
   onNavigateToPayments?: () => void;
   onFilterOrdersByStatus?: (status: "PENDING" | "PAID" | "PROCESSING") => void;
+  onNavigateToProducts?: () => void;
+  onNavigateToSettings?: (tab?: "setup" | "conversations" | "detail" | "shipping" | "general") => void;
+  onOpenSimulator?: () => void;
 }
 
 export function OverviewView({
   analytics,
   vendor,
   orders,
+  products = [],
   onSelectOrder,
   onViewAllOrders,
   onNavigateToPayments,
   onFilterOrdersByStatus,
+  onNavigateToProducts,
+  onNavigateToSettings,
+  onOpenSimulator,
 }: OverviewViewProps) {
   const [period, setPeriod] = useState<"7D" | "30D" | "1Y">("30D");
 
@@ -27,6 +35,11 @@ export function OverviewView({
   const pendingOrders = orders.filter((o) => o.status === "PENDING_PAYMENT" || o.status === "PARTIALLY_PAID");
   const paidOrders = orders.filter((o) => o.status === "PAID");
   const processingOrders = orders.filter((o) => o.status === "PROCESSING" || o.status === "OUT_FOR_DELIVERY");
+
+  // Onboarding Checklist progress
+  const hasProducts = products.length > 0;
+  const hasOrders = orders.length > 0 || analytics.paidOrdersCount > 0;
+  const completedSteps = 1 + (hasProducts ? 1 : 0) + (hasOrders ? 1 : 0);
 
   // Needs Attention: Unpaid or recently active pending orders
   const needsAttention = pendingOrders.slice(0, 5);
@@ -60,7 +73,7 @@ export function OverviewView({
       </div>
 
       {/* Onboarding Checklist for newly connected WhatsApp Business account */}
-      {orders.length === 0 && (
+      {completedSteps < 3 && (
         <div className="bg-gradient-to-r from-emerald-950 via-[#0d5c3a] to-emerald-900 text-white rounded-3xl p-6 sm:p-8 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
@@ -74,45 +87,82 @@ export function OverviewView({
               </p>
             </div>
             <div className="text-left sm:text-right">
-              <span className="text-3xl font-black text-emerald-300">1/3</span>
+              <span className="text-3xl font-black text-emerald-300">{completedSteps}/3</span>
               <div className="text-[11px] text-emerald-200 uppercase tracking-wider font-bold">Setup Completed</div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-            {/* Step 1: WhatsApp Connected */}
-            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2">
+            {/* Step 1: WhatsApp Connected -> Links to Co-Pilot Setup */}
+            <div
+              onClick={() => onNavigateToSettings?.("setup")}
+              className="bg-white/10 hover:bg-white/15 active:scale-[0.99] transition-all cursor-pointer backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2 group shadow-xs hover:border-emerald-300/50"
+              title="Configure Sales Co-Pilot & WhatsApp settings"
+            >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">Step 1 · Ready</span>
-                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold">✓</span>
+                <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold shadow-xs">✓</span>
               </div>
-              <div className="font-bold text-sm text-white">WhatsApp Connected</div>
+              <div className="font-bold text-sm text-white group-hover:text-emerald-200 transition-colors flex items-center justify-between">
+                <span>WhatsApp Connected</span>
+                <span className="text-xs text-emerald-300 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all">→</span>
+              </div>
               <p className="text-xs text-emerald-100/80">
-                Coexistence engine connected. Co-Pilot is listening for buyer inquiries.
+                Coexistence engine connected. Tap to manage Co-Pilot auto-pilot rules and away hours.
               </p>
             </div>
 
-            {/* Step 2: Add Products */}
-            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2">
+            {/* Step 2: Add Products -> Links to Products View */}
+            <div
+              onClick={onNavigateToProducts}
+              className="bg-white/10 hover:bg-white/15 active:scale-[0.99] transition-all cursor-pointer backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2 group shadow-xs hover:border-amber-300/50"
+              title="Manage and add store products"
+            >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">Step 2 · Action Required</span>
-                <span className="w-5 h-5 rounded-full bg-amber-400 text-gray-900 flex items-center justify-center text-xs font-bold">2</span>
+                <span className={`text-xs font-bold uppercase tracking-wider ${hasProducts ? "text-emerald-300" : "text-amber-300"}`}>
+                  {hasProducts ? "Step 2 · Done" : "Step 2 · Action Required"}
+                </span>
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-xs ${
+                  hasProducts ? "bg-emerald-500 text-white" : "bg-amber-400 text-gray-900"
+                }`}>
+                  {hasProducts ? "✓" : "2"}
+                </span>
               </div>
-              <div className="font-bold text-sm text-white">Add Store Products</div>
+              <div className="font-bold text-sm text-white group-hover:text-amber-200 transition-colors flex items-center justify-between">
+                <span>Add Store Products</span>
+                <span className="text-xs text-amber-300 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all">→</span>
+              </div>
               <p className="text-xs text-emerald-100/80">
-                Add items with prices and stock so Co-Pilot knows what to sell.
+                {hasProducts
+                  ? `${products.length} products published. Tap to add more items, edit prices, or sync catalog.`
+                  : "Add items with prices and stock so Co-Pilot knows what to sell."}
               </p>
             </div>
 
-            {/* Step 3: Test Co-Pilot */}
-            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2">
+            {/* Step 3: Test Co-Pilot -> Opens Live WhatsApp Simulator */}
+            <div
+              onClick={onOpenSimulator}
+              className="bg-white/10 hover:bg-white/15 active:scale-[0.99] transition-all cursor-pointer backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2 group shadow-xs hover:border-emerald-300/50"
+              title="Open WhatsApp Chat Simulator"
+            >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-200/70 uppercase tracking-wider">Step 3 · Verification</span>
-                <span className="w-5 h-5 rounded-full bg-white/20 text-white flex items-center justify-center text-xs font-bold">3</span>
+                <span className={`text-xs font-bold uppercase tracking-wider ${hasOrders ? "text-emerald-300" : "text-emerald-200/70"}`}>
+                  {hasOrders ? "Step 3 · Verified" : "Step 3 · Verification"}
+                </span>
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shadow-xs ${
+                  hasOrders ? "bg-emerald-500 text-white" : "bg-white/20 text-white"
+                }`}>
+                  {hasOrders ? "✓" : "3"}
+                </span>
               </div>
-              <div className="font-bold text-sm text-white">Test WhatsApp Checkout</div>
+              <div className="font-bold text-sm text-white group-hover:text-emerald-200 transition-colors flex items-center justify-between">
+                <span>Test WhatsApp Checkout</span>
+                <span className="text-xs text-emerald-300 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all">→</span>
+              </div>
               <p className="text-xs text-emerald-100/80">
-                Message your WhatsApp number to test instant stock check &amp; NUBAN invoice.
+                {hasOrders
+                  ? "Checkout flow verified! Tap to launch simulator and test more customer turns."
+                  : "Tap to open the live WhatsApp simulator and test instant stock check & Monnify NUBAN."}
               </p>
             </div>
           </div>

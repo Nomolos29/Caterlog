@@ -113,6 +113,7 @@ export interface RuntimeOrder {
   bankName: string;
   accountName: string;
   riderPhone?: string;
+  deliveryAddress?: string;
   reservationReleased?: boolean;
   paymentExpiresAt: Date;
   createdAt: Date;
@@ -141,10 +142,11 @@ export interface BuyerConversationSession {
   buyerName: string;
   activeProductId?: string;
   activeVariantId?: string;
+  activeOrderId?: string;
   quantity?: number;
   discountCode?: string;
   cart?: RuntimeCartItem[];
-  state: "AWAITING_VARIANT" | "AWAITING_SHIPPING_ZONE" | "CART_ACTIVE" | "NEEDS_ASSISTANCE" | "ASSISTING";
+  state: "AWAITING_VARIANT" | "AWAITING_QUANTITY" | "AWAITING_SHIPPING_ZONE" | "AWAITING_DELIVERY_ADDRESS" | "CART_ACTIVE" | "NEEDS_ASSISTANCE" | "ASSISTING";
   assistanceInquiry?: string;
   assistanceRequestedAt?: Date;
   copilotPaused?: boolean;

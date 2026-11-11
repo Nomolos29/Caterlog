@@ -34,12 +34,21 @@ export function Dashboard() {
   const [currentView, setCurrentView] = useState<NavView>("overview");
   const [settingsTab, setSettingsTab] = useState<"setup" | "conversations" | "detail" | "shipping" | "general">("setup");
   const [activeWorkspace, setActiveWorkspace] = useState<"reseller" | "supplier">("reseller");
-  const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
+  const [ordersFilter, setOrdersFilter] = useState<string>("ALL");
+  const [paymentLinkCustomer, setPaymentLinkCustomer] = useState<string>("");
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const selectedOrder = selectedOrderId && state?.orders
+    ? state.orders.find((o) => o.id === selectedOrderId || o.shortCode === selectedOrderId) ?? null
+    : null;
   const [connected, setConnected] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const handleSelectOrder = (order: OrderItem | null) => {
+    setSelectedOrderId(order ? order.id : null);
+  };
 
   const loadState = useCallback(async () => {
     try {
@@ -76,14 +85,6 @@ export function Dashboard() {
 
     return () => source.close();
   }, []);
-
-  // Update selected order reference if orders list changes
-  useEffect(() => {
-    if (selectedOrder && state?.orders) {
-      const fresh = state.orders.find((o) => o.id === selectedOrder.id);
-      if (fresh) setSelectedOrder(fresh);
-    }
-  }, [state?.orders, selectedOrder]);
 
   if (!authSession) {
     return (
@@ -188,9 +189,9 @@ export function Dashboard() {
     }
   };
 
-  const handleMarkDispatched = async (orderCode: string) => {
+  const handleMarkDispatched = async (orderCode: string, riderPhone?: string) => {
     try {
-      const next = await api.dispatchOrder(orderCode);
+      const next = await api.dispatchOrder(orderCode, riderPhone);
       setState(next);
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
@@ -347,7 +348,10 @@ export function Dashboard() {
         currentView={currentView}
         onSelectView={(v) => {
           setCurrentView(v);
-          setSelectedOrder(null);
+          handleSelectOrder(null);
+          if (v === "orders") {
+            setOrdersFilter("ALL");
+          }
           if (v === "settings") {
             setSettingsTab("setup");
           }
@@ -360,6 +364,7 @@ export function Dashboard() {
         }
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
+        vendorName={state.vendor.businessName}
       />
 
       {/* Main Content Area */}
@@ -379,7 +384,7 @@ export function Dashboard() {
           orders={state.orders}
           products={state.products}
           onSelectOrder={(ord) => {
-            setSelectedOrder(ord);
+            handleSelectOrder(ord);
             setCurrentView("orders");
           }}
           onSelectProduct={() => {
@@ -413,13 +418,34 @@ export function Dashboard() {
               analytics={state.analytics}
               vendor={state.vendor}
               orders={state.orders}
+              products={state.products}
               onSelectOrder={(ord) => {
-                setSelectedOrder(ord);
+                handleSelectOrder(ord);
                 setCurrentView("orders");
               }}
-              onViewAllOrders={() => setCurrentView("orders")}
+              onViewAllOrders={() => {
+                setOrdersFilter("ALL");
+                handleSelectOrder(null);
+                setCurrentView("orders");
+              }}
               onNavigateToPayments={() => setCurrentView("payments")}
-              onFilterOrdersByStatus={() => setCurrentView("orders")}
+              onFilterOrdersByStatus={(status) => {
+                const target =
+                  status === "PENDING"
+                    ? "PENDING_PAYMENT"
+                    : status === "PROCESSING"
+                    ? "OUT_FOR_DELIVERY"
+                    : status;
+                setOrdersFilter(target);
+                handleSelectOrder(null);
+                setCurrentView("orders");
+              }}
+              onNavigateToProducts={() => setCurrentView("products")}
+              onNavigateToSettings={(tab) => {
+                if (tab) setSettingsTab(tab);
+                setCurrentView("settings");
+              }}
+              onOpenSimulator={() => setSimulatorOpen(true)}
             />
           )}
 
@@ -427,7 +453,8 @@ export function Dashboard() {
             <OrdersView
               orders={state.orders}
               selectedOrder={selectedOrder}
-              onSelectOrder={setSelectedOrder}
+              initialStatusFilter={ordersFilter}
+              onSelectOrder={handleSelectOrder}
               onSimulateTransfer={handleSimulateTransfer}
               onMarkDispatched={handleMarkDispatched}
               onNavigateToPayments={() => setCurrentView("payments")}
@@ -458,10 +485,11 @@ export function Dashboard() {
             <CustomersView
               orders={state.orders}
               onSelectOrder={(ord) => {
-                setSelectedOrder(ord);
+                handleSelectOrder(ord);
                 setCurrentView("orders");
               }}
               onNavigateToPaymentLinks={(customerName) => {
+                setPaymentLinkCustomer(customerName);
                 setCurrentView("payment-links");
               }}
             />
@@ -474,7 +502,7 @@ export function Dashboard() {
               onNavigateToOrder={(code) => {
                 const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
                 if (target) {
-                  setSelectedOrder(target);
+                  handleSelectOrder(target);
                   setCurrentView("orders");
                 }
               }}
@@ -500,6 +528,7 @@ export function Dashboard() {
               products={state.products}
               orders={state.orders}
               vendorName={state.vendor.businessName}
+              initialCustomerName={paymentLinkCustomer}
             />
           )}
 
@@ -522,7 +551,7 @@ export function Dashboard() {
               onNavigateToOrder={(code) => {
                 const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
                 if (target) {
-                  setSelectedOrder(target);
+                  handleSelectOrder(target);
                   setCurrentView("orders");
                 }
               }}
@@ -550,7 +579,7 @@ export function Dashboard() {
               onNavigateToOrder={(code) => {
                 const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
                 if (target) {
-                  setSelectedOrder(target);
+                  handleSelectOrder(target);
                   setCurrentView("orders");
                 }
               }}

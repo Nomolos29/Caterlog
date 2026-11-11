@@ -240,6 +240,7 @@ export class VendorCommandDispatcher {
           params.vendorId,
           {
             name: cmd.name,
+            skuCode: cmd.skuCode,
             basePriceKobo: cmd.priceKobo,
             stockTotal: cmd.stockTotal,
             primaryImageUrl: params.attachedImageUrl,
@@ -411,6 +412,13 @@ export class VendorCommandDispatcher {
         return {
           parsedCommand: cmd,
           whatsappReplyText: `🤖 *Co-Pilot Resumed:* Automated customer shopping is active again.`,
+        };
+      }
+
+      case "SYNC_CATALOG": {
+        return {
+          parsedCommand: cmd,
+          whatsappReplyText: `🛍️ *WhatsApp Catalog Sync Initiated:* Publishing inventory to Meta Catalog.`,
         };
       }
 

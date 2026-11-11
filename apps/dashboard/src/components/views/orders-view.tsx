@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import type { OrderItem } from "@/lib/types";
 import { FilterIcon, ExportIcon } from "../icons";
 import { EmptyState } from "../ui/empty-state";
@@ -8,9 +8,10 @@ import { EmptyState } from "../ui/empty-state";
 interface OrdersViewProps {
   orders: OrderItem[];
   selectedOrder: OrderItem | null;
+  initialStatusFilter?: string;
   onSelectOrder: (order: OrderItem | null) => void;
   onSimulateTransfer?: (orderCode: string, amountNaira: number) => Promise<void>;
-  onMarkDispatched?: (orderCode: string) => Promise<void>;
+  onMarkDispatched?: (orderCode: string, riderPhone?: string) => Promise<void>;
   onNavigateToPayments?: (tab?: string, subId?: string) => void;
   onNavigateToSettings?: (tab?: string, subId?: string) => void;
 }
@@ -18,27 +19,41 @@ interface OrdersViewProps {
 export function OrdersView({
   orders,
   selectedOrder,
+  initialStatusFilter = "ALL",
   onSelectOrder,
   onSimulateTransfer,
   onMarkDispatched,
   onNavigateToPayments,
   onNavigateToSettings,
 }: OrdersViewProps) {
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
+
+  useEffect(() => {
+    if (initialStatusFilter) {
+      setStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter]);
   const [search, setSearch] = useState("");
   const [supplierStatus, setSupplierStatus] = useState("Preparing · Not yet dispatched");
   const [supplierRequested, setSupplierRequested] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [riderPhoneInput, setRiderPhoneInput] = useState("");
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [showDispatchModal, setShowDispatchModal] = useState(false);
 
   const filteredOrders = orders.filter((o) => {
-    if (statusFilter !== "ALL" && o.status !== statusFilter) return false;
+    if (statusFilter === "PENDING_PAYMENT" && o.status !== "PENDING_PAYMENT" && o.status !== "PARTIALLY_PAID") return false;
+    if (statusFilter === "OUT_FOR_DELIVERY" && o.status !== "OUT_FOR_DELIVERY" && o.status !== "FULFILLED") return false;
+    if (statusFilter !== "ALL" && statusFilter !== "PENDING_PAYMENT" && statusFilter !== "OUT_FOR_DELIVERY" && o.status !== statusFilter) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       return (
         o.shortCode.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q) ||
+        o.customerPhone.includes(q) ||
         o.productName.toLowerCase().includes(q) ||
+        (o.deliveryAddress && o.deliveryAddress.toLowerCase().includes(q)) ||
         o.accountNumber.includes(q)
       );
     }
@@ -50,7 +65,20 @@ export function OrdersView({
     PENDING_PAYMENT: orders.filter((o) => o.status === "PENDING_PAYMENT" || o.status === "PARTIALLY_PAID").length,
     PAID: orders.filter((o) => o.status === "PAID").length,
     PROCESSING: orders.filter((o) => o.status === "PROCESSING").length,
-    OUT_FOR_DELIVERY: orders.filter((o) => o.status === "OUT_FOR_DELIVERY").length,
+    OUT_FOR_DELIVERY: orders.filter((o) => o.status === "OUT_FOR_DELIVERY" || o.status === "FULFILLED").length,
+  };
+
+  const handleDispatchSubmit = async () => {
+    if (!selectedOrder || !onMarkDispatched) return;
+    setIsDispatching(true);
+    try {
+      await onMarkDispatched(selectedOrder.shortCode, riderPhoneInput.trim() || undefined);
+      setShowDispatchModal(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDispatching(false);
+    }
   };
 
   const handleExportOrders = () => {
@@ -101,20 +129,45 @@ export function OrdersView({
               Order {selectedOrder.shortCode}
             </h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              3 Nov 2026, 10:14 WAT · Sold by Nia Stores
+              {new Date(selectedOrder.createdAt).toLocaleDateString("en-NG", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
+              {", "}
+              {new Date(selectedOrder.createdAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}{" "}
+              · Sold by Nia Stores
             </p>
             <div className="flex flex-wrap items-center gap-2 mt-2">
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Paid · server confirmed
-              </span>
               <span
-                className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
-                  supplierStatus.includes("Ready")
+                className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${
+                  selectedOrder.status === "PAID"
                     ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                    : "bg-amber-50 text-amber-800 border-amber-200"
+                    : selectedOrder.status === "OUT_FOR_DELIVERY"
+                    ? "bg-blue-50 text-blue-800 border-blue-200"
+                    : selectedOrder.status === "FULFILLED"
+                    ? "bg-emerald-50 text-emerald-900 border-emerald-300"
+                    : selectedOrder.status === "PENDING_PAYMENT"
+                    ? "bg-amber-50 text-amber-800 border-amber-200"
+                    : selectedOrder.status === "EXPIRED"
+                    ? "bg-rose-50 text-rose-800 border-rose-200"
+                    : "bg-gray-100 text-gray-700 border-gray-200"
                 }`}
               >
-                {supplierStatus.includes("Ready") ? "Ready for pickup" : "Preparing for pickup"}
+                {selectedOrder.status === "PAID"
+                  ? "🟢 Paid · Transfer Verified"
+                  : selectedOrder.status === "OUT_FOR_DELIVERY"
+                  ? `🚚 Out for Delivery${selectedOrder.riderPhone ? ` · Rider: ${selectedOrder.riderPhone}` : ""}`
+                  : selectedOrder.status === "FULFILLED"
+                  ? "✅ Delivered"
+                  : selectedOrder.status === "PENDING_PAYMENT"
+                  ? "🟡 Awaiting Payment"
+                  : selectedOrder.status === "EXPIRED"
+                  ? "🛑 Expired"
+                  : selectedOrder.status}
               </span>
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                 WhatsApp order
@@ -123,6 +176,30 @@ export function OrdersView({
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-center">
+            {(selectedOrder.status === "PAID" || selectedOrder.status === "PROCESSING") && (
+              <button
+                onClick={() => {
+                  setRiderPhoneInput(selectedOrder.riderPhone || "");
+                  setShowDispatchModal(true);
+                }}
+                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+              >
+                <span>🚚</span>
+                <span>Dispatch order</span>
+              </button>
+            )}
+            {selectedOrder.status === "OUT_FOR_DELIVERY" && (
+              <button
+                onClick={() => {
+                  setRiderPhoneInput(selectedOrder.riderPhone || "");
+                  setShowDispatchModal(true);
+                }}
+                className="px-3.5 py-1.5 border border-emerald-600 hover:bg-emerald-50 text-emerald-800 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+              >
+                <span>🛵</span>
+                <span>Update rider</span>
+              </button>
+            )}
             <button
               onClick={() => setShowPrintModal(true)}
               className="px-3.5 py-1.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
@@ -236,43 +313,71 @@ export function OrdersView({
                 </div>
                 <div className="py-2 flex justify-between text-gray-600">
                   <span>Shipping charged</span>
-                  <span className="font-semibold text-gray-900">₦0 · Pickup</span>
+                  <span className="font-semibold text-gray-900">
+                    {selectedOrder.shippingFeeFormatted || "₦0"} · {selectedOrder.shippingZoneName || "Delivery"}
+                  </span>
                 </div>
+                {selectedOrder.discountAmountFormatted && selectedOrder.discountAmountFormatted !== "₦0" && (
+                  <div className="py-2 flex justify-between text-emerald-700">
+                    <span>Discount applied ({selectedOrder.discountCode || "Promo"})</span>
+                    <span className="font-semibold">-{selectedOrder.discountAmountFormatted}</span>
+                  </div>
+                )}
                 <div className="py-2.5 flex justify-between text-sm font-bold text-gray-900">
                   <span>Customer paid</span>
-                  <span>{selectedOrder.totalAmountFormatted || `₦${selectedOrder.totalAmountNaira.toLocaleString()}`}</span>
+                  <span>{selectedOrder.amountPaidFormatted || selectedOrder.totalAmountFormatted}</span>
                 </div>
+                {selectedOrder.remainingBalanceFormatted && selectedOrder.remainingBalanceFormatted !== "₦0" && (
+                  <div className="py-2 flex justify-between text-amber-700 font-semibold">
+                    <span>Remaining balance</span>
+                    <span>{selectedOrder.remainingBalanceFormatted}</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Supplier fulfillment card */}
+            {/* Order fulfillment card */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
               <div>
-                <h3 className="text-sm font-bold text-gray-900">Supplier fulfillment</h3>
-                <p className="text-[11px] text-gray-400">Responsibility: Aroko Wholesale</p>
+                <h3 className="text-sm font-bold text-gray-900">Order fulfillment</h3>
+                <p className="text-[11px] text-gray-400">Delivery & Courier Dispatch</p>
               </div>
 
               <div className="divide-y divide-gray-100">
                 <div className="py-2.5 flex justify-between">
-                  <span className="text-gray-500">Shared stock</span>
-                  <span className="font-semibold text-gray-900">2 units deducted at confirmation</span>
+                  <span className="text-gray-500">Destination</span>
+                  <span className="font-semibold text-gray-900">
+                    {selectedOrder.deliveryAddress || selectedOrder.shippingZoneName || "Standard Delivery"}
+                  </span>
                 </div>
                 <div className="py-2.5 flex justify-between">
-                  <span className="text-gray-500">Master stock remaining</span>
-                  <span className="font-semibold text-gray-900">42 units · Synced</span>
+                  <span className="text-gray-500">Dispatch Rider</span>
+                  <span className="font-semibold text-gray-900">
+                    {selectedOrder.riderPhone ? `📞 ${selectedOrder.riderPhone}` : "Not assigned"}
+                  </span>
                 </div>
                 <div className="py-2.5 flex justify-between">
-                  <span className="text-gray-500">Pickup location</span>
-                  <span className="font-semibold text-gray-900">Ikeja · Address in pickup note</span>
-                </div>
-                <div className="py-2.5 flex justify-between">
-                  <span className="text-gray-500">Fulfillment state</span>
+                  <span className="text-gray-500">Fulfillment status</span>
                   <span
                     className={`font-semibold ${
-                      supplierStatus.includes("Ready") ? "text-emerald-700" : "text-amber-800"
+                      selectedOrder.status === "OUT_FOR_DELIVERY"
+                        ? "text-blue-700 font-bold"
+                        : selectedOrder.status === "FULFILLED"
+                        ? "text-emerald-700 font-bold"
+                        : selectedOrder.status === "PAID"
+                        ? "text-emerald-800"
+                        : "text-amber-800"
                     }`}
                   >
-                    {supplierStatus}
+                    {selectedOrder.status === "OUT_FOR_DELIVERY"
+                      ? `🚚 Out for Delivery${selectedOrder.riderPhone ? ` (${selectedOrder.riderPhone})` : ""}`
+                      : selectedOrder.status === "FULFILLED"
+                      ? "✅ Delivered & Complete"
+                      : selectedOrder.status === "PAID"
+                      ? "🟢 Paid · Ready for Dispatch"
+                      : selectedOrder.status === "PENDING_PAYMENT"
+                      ? "🟡 Awaiting Payment"
+                      : selectedOrder.status}
                   </span>
                 </div>
               </div>
@@ -280,24 +385,45 @@ export function OrdersView({
               <div className="p-4 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1">
                 <div className="font-bold text-blue-900 flex items-center gap-1.5">
                   <span>ℹ</span>
-                  <span>Order Status Update</span>
+                  <span>WhatsApp Live Sync</span>
                 </div>
                 <p className="text-[11px] text-blue-800 leading-relaxed">
-                  Fulfillment is active for {selectedOrder.shortCode}. Customer communication is connected via WhatsApp.
+                  {selectedOrder.status === "OUT_FOR_DELIVERY"
+                    ? `Package marked Out for Delivery. Buyer received automated WhatsApp alert${selectedOrder.riderPhone ? ` with rider contact ${selectedOrder.riderPhone}` : ""}.`
+                    : selectedOrder.status === "PAID"
+                    ? "Payment confirmed. Click 'Dispatch Order' to hand to courier and notify the customer on WhatsApp."
+                    : `Order ${selectedOrder.shortCode} is synchronized live with customer WhatsApp thread.`}
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-2 pt-1">
-                <button
-                  onClick={handleRequestSupplierUpdate}
-                  disabled={supplierRequested}
-                  className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-75 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
-                >
-                  {supplierRequested ? "✓ Fulfillment Notification Sent" : "Notify fulfillment team"}
-                </button>
+                {(selectedOrder.status === "PAID" || selectedOrder.status === "PROCESSING") && (
+                  <button
+                    onClick={() => {
+                      setRiderPhoneInput(selectedOrder.riderPhone || "");
+                      setShowDispatchModal(true);
+                    }}
+                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  >
+                    <span>🚚</span>
+                    <span>Dispatch Order & Notify Customer</span>
+                  </button>
+                )}
+                {selectedOrder.status === "OUT_FOR_DELIVERY" && (
+                  <button
+                    onClick={() => {
+                      setRiderPhoneInput(selectedOrder.riderPhone || "");
+                      setShowDispatchModal(true);
+                    }}
+                    className="px-4 py-2 border border-emerald-300 hover:bg-emerald-50 text-emerald-800 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  >
+                    <span>🛵</span>
+                    <span>Update Dispatch Rider</span>
+                  </button>
+                )}
                 <a
                   href={`https://wa.me/${selectedOrder.customerPhone.replace(/\+/g, "")}?text=${encodeURIComponent(
-                    `Hello ${selectedOrder.customerName}, regarding your Order ${selectedOrder.shortCode}: It is currently being prepared for pickup at our fulfillment center!`
+                    `Hello ${selectedOrder.customerName}, regarding your Order ${selectedOrder.shortCode}: It is currently being processed for delivery!`
                   )}`}
                   target="_blank"
                   rel="noreferrer"
@@ -349,60 +475,87 @@ export function OrdersView({
                     <span className="text-emerald-600">✓</span>
                     <span>Order received</span>
                   </div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">3 Nov · 10:14 WAT</div>
+                  <div className="text-[11px] text-gray-400 mt-0.5">
+                    {new Date(selectedOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · WhatsApp order
+                  </div>
                 </div>
 
                 <div>
                   <div className="font-bold text-gray-900 flex items-center gap-1.5">
-                    <span className="text-emerald-600">✓</span>
-                    <span>Payment confirmed</span>
-                  </div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">10:18 · Verified gateway event</div>
-                </div>
-
-                <div>
-                  <div className="font-bold text-gray-900 flex items-center gap-1.5">
-                    <span className="text-emerald-600">✓</span>
-                    <span>Supplier preparing</span>
-                  </div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">10:24 · Aroko update</div>
-                </div>
-
-                <div>
-                  <div
-                    className={`font-semibold flex items-center gap-1.5 ${
-                      supplierStatus.includes("Ready") ? "text-emerald-700 font-bold" : "text-gray-700 opacity-60"
-                    }`}
-                  >
-                    <span>{supplierStatus.includes("Ready") ? "✓" : "○"}</span>
-                    <span>Ready for pickup</span>
+                    <span className={selectedOrder.status !== "PENDING_PAYMENT" ? "text-emerald-600" : "text-amber-500"}>
+                      {selectedOrder.status !== "PENDING_PAYMENT" ? "✓" : "○"}
+                    </span>
+                    <span>{selectedOrder.status !== "PENDING_PAYMENT" ? "Payment confirmed" : "Payment pending"}</span>
                   </div>
                   <div className="text-[11px] text-gray-400 mt-0.5">
-                    {supplierStatus.includes("Ready") ? "Ready at Ikeja fulfillment station" : "Awaiting supplier confirmation"}
+                    {selectedOrder.paidAt
+                      ? `${new Date(selectedOrder.paidAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · Verified gateway event`
+                      : selectedOrder.status === "PAID"
+                      ? "Verified gateway event"
+                      : "Awaiting customer bank transfer"}
                   </div>
                 </div>
 
-                <div className="opacity-40">
-                  <div className="font-medium text-gray-700 flex items-center gap-1.5">
-                    <span>○</span>
-                    <span>Collected</span>
+                <div>
+                  <div className={`font-semibold flex items-center gap-1.5 ${
+                    selectedOrder.status === "OUT_FOR_DELIVERY" || selectedOrder.status === "FULFILLED"
+                      ? "text-emerald-700 font-bold"
+                      : "text-gray-700"
+                  }`}>
+                    <span className={selectedOrder.status === "OUT_FOR_DELIVERY" || selectedOrder.status === "FULFILLED" ? "text-emerald-600" : "text-gray-400"}>
+                      {selectedOrder.status === "OUT_FOR_DELIVERY" || selectedOrder.status === "FULFILLED" ? "✓" : "○"}
+                    </span>
+                    <span>Out for delivery</span>
                   </div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">Not completed</div>
+                  <div className="text-[11px] text-gray-400 mt-0.5">
+                    {selectedOrder.dispatchedAt
+                      ? `${new Date(selectedOrder.dispatchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · Dispatched${selectedOrder.riderPhone ? ` (${selectedOrder.riderPhone})` : ""}`
+                      : selectedOrder.status === "OUT_FOR_DELIVERY"
+                      ? `Dispatched${selectedOrder.riderPhone ? ` · Rider: ${selectedOrder.riderPhone}` : ""}`
+                      : "Awaiting dispatch rider assignment"}
+                  </div>
+                </div>
+
+                <div>
+                  <div className={`font-semibold flex items-center gap-1.5 ${
+                    selectedOrder.status === "FULFILLED" ? "text-emerald-700 font-bold" : "text-gray-400"
+                  }`}>
+                    <span>{selectedOrder.status === "FULFILLED" ? "✓" : "○"}</span>
+                    <span>Delivered</span>
+                  </div>
+                  <div className="text-[11px] text-gray-400 mt-0.5">
+                    {selectedOrder.status === "FULFILLED" ? "Successfully completed" : "Pending delivery completion"}
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Customer card */}
+            {/* Customer & Delivery card */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">Customer</h3>
+              <h3 className="text-xs font-bold text-gray-900">Customer & Delivery</h3>
               <div>
                 <div className="font-bold text-gray-900 text-sm">{selectedOrder.customerName}</div>
                 <div className="text-[11px] text-gray-400 mt-0.5">
                   WhatsApp · {selectedOrder.customerPhone}
                 </div>
               </div>
-              <div className="text-[11px] text-gray-500 pt-1">
-                Pickup selected · No delivery charge
+              <div className="pt-2 border-t border-gray-100 space-y-1.5">
+                <div className="flex items-center justify-between text-gray-500">
+                  <span>Zone:</span>
+                  <span className="font-semibold text-gray-900">{selectedOrder.shippingZoneName || "Standard Delivery"}</span>
+                </div>
+                <div className="text-gray-500">
+                  <span className="text-[11px] font-medium text-gray-700">Street Delivery Address:</span>
+                  <div className={`mt-1 p-2.5 rounded-lg text-xs leading-relaxed ${
+                    selectedOrder.deliveryAddress
+                      ? "bg-emerald-50 text-emerald-950 border border-emerald-200 font-medium"
+                      : "bg-amber-50 text-amber-900 border border-amber-200 italic"
+                  }`}>
+                    {selectedOrder.deliveryAddress
+                      ? `🏠 ${selectedOrder.deliveryAddress}`
+                      : "⏳ Awaiting buyer street address via WhatsApp"}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -485,6 +638,78 @@ export function OrdersView({
                   className="px-4 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dispatch Order Modal */}
+        {showDispatchModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm">Dispatch Order #{selectedOrder.shortCode}</h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Hand package over to dispatch courier</p>
+                </div>
+                <button
+                  onClick={() => setShowDispatchModal(false)}
+                  className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-3 bg-gray-50 rounded-xl space-y-1.5 text-xs text-gray-700 border border-gray-100">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Customer:</span>
+                  <span className="font-semibold text-gray-900">{selectedOrder.customerName} ({selectedOrder.customerPhone})</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Item:</span>
+                  <span className="font-semibold text-gray-900">{selectedOrder.productName} ×{selectedOrder.quantity || 1}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Delivery Address:</span>
+                  <span className="font-semibold text-emerald-900 text-right max-w-[220px] truncate" title={selectedOrder.deliveryAddress || selectedOrder.shippingZoneName}>
+                    {selectedOrder.deliveryAddress || selectedOrder.shippingZoneName || "Standard Delivery"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 text-xs">
+                <label className="block text-gray-700 font-semibold">
+                  Dispatch Rider Phone Number (Optional)
+                </label>
+                <input
+                  type="tel"
+                  placeholder="e.g. 08031234567"
+                  value={riderPhoneInput}
+                  onChange={(e) => setRiderPhoneInput(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-600 bg-white"
+                />
+                <p className="text-[11px] text-gray-500">
+                  The buyer will immediately receive a WhatsApp message with package details and rider phone number.
+                </p>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleDispatchSubmit}
+                  disabled={isDispatching}
+                  className="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1.5"
+                >
+                  <span>🚚</span>
+                  <span>{isDispatching ? "Dispatching..." : "Confirm & Send WhatsApp Alert"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDispatchModal(false)}
+                  className="px-4 py-2.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs transition-all cursor-pointer"
+                >
+                  Cancel
                 </button>
               </div>
             </div>
@@ -645,6 +870,15 @@ export function OrdersView({
                       <td className="py-3.5 px-5">
                         <div className="font-semibold text-gray-900">{o.customerName}</div>
                         <div className="text-[11px] text-gray-400">{o.customerPhone}</div>
+                        {o.deliveryAddress ? (
+                          <div className="text-[11px] text-emerald-800 font-medium truncate max-w-[220px]" title={o.deliveryAddress}>
+                            📍 {o.deliveryAddress}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-gray-400">
+                            🚚 {o.shippingZoneName || "Zone"}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 px-5">
                         <div className="font-medium text-gray-900">{o.productName}</div>

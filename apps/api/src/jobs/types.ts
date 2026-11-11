@@ -1,6 +1,7 @@
 export type BackgroundJob =
   | { name: "order-expiry"; payload: { orderShortCode: string } }
-  | { name: "payment-reminder"; payload: { orderShortCode: string } }
+  | { name: "payment-reminder"; payload: { orderShortCode: string; minutesRemaining?: number } }
+  | { name: "payment-reminder-2min"; payload: { orderShortCode: string } }
   | { name: "order-expiry-sweep"; payload: Record<string, never> };
 
 export type BackgroundJobName = BackgroundJob["name"];

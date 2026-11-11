@@ -242,6 +242,30 @@ describe("Layer 1 Commerce Core — Pure Domain & Architecture Tests", () => {
         ],
       }
     );
+    // Simple product with "stock: 6" format
+    assert.deepEqual(
+      parseVendorWhatsAppCommand("Mini Leather Bag, #38000, stock: 6"),
+      {
+        type: "QUICK_ADD_PRODUCT",
+        name: "Mini Leather Bag",
+        priceKobo: 3800000n,
+        stockTotal: 6,
+      }
+    );
+    // Variable product with price and quantity inside parentheses without breaking on commas
+    assert.deepEqual(
+      parseVendorWhatsAppCommand("Zara Block Heel, sizes: 38 (#20000, 5), 39 (#25000, 3)"),
+      {
+        type: "QUICK_ADD_PRODUCT",
+        name: "Zara Block Heel",
+        priceKobo: 2000000n,
+        stockTotal: 8,
+        variants: [
+          { name: "38", stockTotal: 5, priceKobo: 2000000n, skuSuffix: "38" },
+          { name: "39", stockTotal: 3, priceKobo: 2500000n, skuSuffix: "39" },
+        ],
+      }
+    );
   });
 
   it("publishes cross-layer domain events so future layers subscribe without coupling", async () => {

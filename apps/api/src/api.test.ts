@@ -4,6 +4,7 @@ import { CaterlogStage1Engine } from "./runtime-engine.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
 import { InlineJobScheduler } from "./jobs/inline.ts";
 import { createJobHandler } from "./jobs/handler.ts";
+import { mediaStore } from "./media/media-store.ts";
 
 describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () => {
   it("synchronizes WhatsApp Vendor Keywords with Dashboard State (Shipping, Discounts, Stock, Settings)", async () => {
@@ -426,6 +427,37 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.equal(state.integrations.monnify.mode, "mock");
   });
 
+  it("handles vendor 'sync catalog' keyword command and resolves relative or empty image URLs safely", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // Add product with relative media URL and product with empty image URL
+    engine.addProduct({
+      name: "Custom Local Bag",
+      basePriceKobo: 15_000_00n,
+      stockTotal: 5,
+      primaryImageUrl: "/api/v1/media/med_test123",
+    });
+    engine.addProduct({
+      name: "No Image Slippers",
+      basePriceKobo: 8_000_00n,
+      stockTotal: 10,
+      primaryImageUrl: "",
+    });
+
+    const vendorRes = await engine.handleVendorWhatsAppKeyword("sync catalog");
+    assert.equal(vendorRes.commandType, "SYNC_CATALOG");
+    assert.ok(vendorRes.replyText.includes("WhatsApp Business Catalog Synced"));
+    assert.ok(vendorRes.replyText.includes("Successfully Upserted"));
+
+    // Verify mock catalog items all received valid absolute http(s) image URLs
+    const items = engine.catalog.getMockCatalog();
+    assert.ok(items.length >= 6);
+    for (const item of items) {
+      assert.ok(item.image_url, `Expected image_url for ${item.retailer_id}`);
+      assert.ok(/^https?:\/\//.test(item.image_url), `Expected valid http(s) URL for ${item.retailer_id}, got ${item.image_url}`);
+    }
+  });
+
   it("renders Dynamic OpenGraph Product Card SVG with price, live stock, and verified badge", () => {
     const svg = renderDynamicProductOgSvg({
       vendorName: "Amaka Luxury Shoes",
@@ -488,16 +520,30 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.equal(status.mode, "inline");
     assert.ok((status.pending ?? 0) >= 1);
 
-    // 2. Test payment reminder directly via handler
-    await handler({ name: "payment-reminder", payload: { orderShortCode: orderCode } });
-    const lastMsg = engine.chatMessages[engine.chatMessages.length - 2];
-    assert.ok(lastMsg.text.includes("Payment Reminder"));
+    // 2. Test standard payment reminder directly via handler
+    await handler({ name: "payment-reminder", payload: { orderShortCode: orderCode, minutesRemaining: 5 } });
+    const reminderMsg = engine.chatMessages[engine.chatMessages.length - 2];
+    assert.ok(reminderMsg.text.includes("Payment Reminder"));
 
-    // 3. Test order expiry via handler
+    // 3. Test urgent 2-minute payment reminder directly via handler
+    await handler({ name: "payment-reminder-2min", payload: { orderShortCode: orderCode } });
+    const urgentMsg = engine.chatMessages[engine.chatMessages.length - 2];
+    assert.ok(urgentMsg.text.includes("URGENT: 2 MINUTES LEFT"));
+    assert.ok(urgentMsg.text.includes("2-minute countdown ends"));
+
+    // 4. Test order expiry via handler: stock released and DO NOT PAY notice sent to customer
     await handler({ name: "order-expiry", payload: { orderShortCode: orderCode } });
     const expiredOrder = engine.orders.find((o) => o.shortCode === orderCode);
     assert.equal(expiredOrder?.status, "EXPIRED");
     assert.equal(expiredOrder?.reservationReleased, true);
+
+    const expiryNotice = engine.chatMessages.find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("ORDER EXPIRED — DO NOT PAY")
+    );
+    assert.ok(expiryNotice, "Customer must receive explicit 'ORDER EXPIRED — DO NOT PAY' notification");
+    assert.ok(expiryNotice.text.includes("PLEASE DO NOT TRANSFER FUNDS TO THIS ACCOUNT"));
+    assert.ok(expiryNotice.text.includes(inquiry.createdOrder.accountNumber));
+    assert.ok(expiryNotice.quickReplies && expiryNotice.quickReplies.some((qr) => qr.replyText.startsWith("I want")));
 
     await scheduler.stop();
   });
@@ -606,26 +652,49 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.ok(replyLabels.some((l) => l.includes("Add 39") && l.includes("₦26,000")));
     assert.ok(lastBotMsg.quickReplies.some((qr) => qr.replyText.startsWith("category")));
 
-    // 3. Buyer clicks the quick reply to add variant 38
+    // 3. Buyer clicks the quick reply to add variant 38 -> Prompts for quantity selection!
     const addReply = lastBotMsg.quickReplies.find((qr) => qr.label.includes("Add 38"))!;
-    await engine.handleBuyerWhatsAppInquiry({
+    const variantRes = await engine.handleBuyerWhatsAppInquiry({
       buyerPhone,
       buyerName: "Amaka Eze",
       text: addReply.replyText,
       simulateFastForwardIdleTimer: true,
     });
 
-    // NOW the item is added to cart
+    assert.equal(variantRes.step, "PROMPTED_FOR_QUANTITY");
+    const sessionAfterClick = engine.buyerSessions.get(buyerPhone);
+    assert.equal(sessionAfterClick?.state, "AWAITING_QUANTITY");
+
+    const qtyPromptMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(qtyPromptMsg?.text.includes("How many units"));
+    assert.ok(qtyPromptMsg?.text.includes("Bella Block Heel — 38"));
+    assert.ok(qtyPromptMsg?.quickReplies && qtyPromptMsg.quickReplies.some((qr) => qr.replyText === "2 units"));
+
+    // 4. Buyer taps "2 units"
+    const qtyRes = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Amaka Eze",
+      text: "2 units",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    assert.equal(qtyRes.step, "PROMPTED_FOR_SHIPPING_ZONE");
+
+    // NOW 2 units of the item are added to cart
     const updatedCart = engine.getBuyerCart(buyerPhone);
     assert.equal(updatedCart.length, 1);
     assert.equal(updatedCart[0].variantName, "38");
+    assert.equal(updatedCart[0].quantity, 2);
     assert.equal(updatedCart[0].unitPriceKobo, 2200000n);
 
-    // And buyer is prompted for delivery zone
+    // And buyer is prompted for delivery zone with ×2 in summary
     const promptMsg = engine.chatMessages
       .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
       .pop();
     assert.ok(promptMsg?.text.includes("Where should we deliver your order"));
+    assert.ok(promptMsg?.text.includes("×2"));
   });
 
   it("browses items under a category with quick-reply cards", async () => {
@@ -915,6 +984,476 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
       .pop();
     assert.ok(lastMsg?.text.includes("Original Amaka Loafer"));
     assert.ok(lastMsg?.text.includes("₦45,000"));
+  });
+
+  it("enforces 100% consistent Content IDs (SKUs) and groups variants with item_group_id", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Adding with explicit bracketed SKU
+    const resExplicit = await engine.handleVendorWhatsAppKeyword(
+      "[SHOE-09] Luxury Stiletto, #35000, sizes: 38 (3), 39 (4)"
+    );
+    assert.equal(resExplicit.commandType, "QUICK_ADD_PRODUCT");
+    const stiletto = engine.products.find((p) => p.skuCode === "SHOE-09");
+    assert.ok(stiletto, "Product must have Content ID SHOE-09");
+    assert.equal(stiletto.variants?.length, 2);
+    assert.equal(stiletto.variants?.[0]?.skuCode, "SHOE-09-38");
+    assert.equal(stiletto.variants?.[1]?.skuCode, "SHOE-09-39");
+
+    // 2. Adding without explicit SKU auto-derives consistent sequential SKU (SHOE-03 after SHOE-01, SHOE-02)
+    const resAuto = await engine.handleVendorWhatsAppKeyword(
+      "Velvet Platform Heels, #28000, sizes: 38 (2), 39 (3)"
+    );
+    assert.equal(resAuto.commandType, "QUICK_ADD_PRODUCT");
+    const velvet = engine.products.find((p) => p.skuCode === "SHOE-03");
+    assert.ok(velvet, "Product must have auto-derived sequential Content ID SHOE-03");
+    assert.equal(velvet.variants?.length, 2);
+    assert.equal(velvet.variants?.[0]?.skuCode, "SHOE-03-38");
+    assert.equal(velvet.variants?.[1]?.skuCode, "SHOE-03-39");
+
+    // 3. Sync to WhatsApp Catalog and verify variants are linked with item_group_id
+    const syncRes = await engine.syncWhatsAppCatalog();
+    assert.ok(syncRes.upserted > 0);
+    const mockItems = engine.catalog.getMockCatalog();
+
+    const parentItem = mockItems.find((i) => i.retailer_id === "SHOE-09");
+    assert.ok(parentItem, "Parent product must exist in catalog");
+
+    const variant38 = mockItems.find((i) => i.retailer_id === "SHOE-09-38");
+    assert.ok(variant38, "Variant 38 must exist in catalog with its own Content ID");
+    assert.equal(variant38.item_group_id, "SHOE-09", "Variant must link to parent Content ID via item_group_id");
+
+    const variant39 = mockItems.find((i) => i.retailer_id === "SHOE-09-39");
+    assert.ok(variant39, "Variant 39 must exist in catalog with its own Content ID");
+    assert.equal(variant39.item_group_id, "SHOE-09", "Variant must link to parent Content ID via item_group_id");
+  });
+
+  it("syncs original product photos to catalog without replacing with random stock images", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // Store real image in MediaStore
+    const realBuffer = Buffer.from("fake-real-product-image-content");
+    const stored = await mediaStore.saveMedia({
+      buffer: realBuffer,
+      contentType: "image/png",
+      publicUrl: "https://files.catbox.moe/real-vendor-original-photo.png",
+    });
+
+    // Add product with the original local media URL
+    engine.addProduct({
+      name: "Handmade Suede Loafers",
+      basePriceKobo: 40_000_00n,
+      stockTotal: 8,
+      primaryImageUrl: `/api/v1/media/${stored.mediaId}`,
+    });
+
+    await engine.syncWhatsAppCatalog();
+    const mockItems = engine.catalog.getMockCatalog();
+    const loafer = mockItems.find((i) => i.name.includes("Handmade Suede Loafers"));
+    assert.ok(loafer, "Loafer must be in mock catalog");
+    assert.equal(
+      loafer.image_url,
+      "https://files.catbox.moe/real-vendor-original-photo.png",
+      "Catalog must use the vendor's real original photo, never a random stock image"
+    );
+  });
+
+  it("supports order flow quantity selection for variations and simple products with stock limits", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. SIMPLE PRODUCT ORDER FLOW: Clicking simple product prompts for quantity
+    const buyerA = "+2348011223344";
+    const simpleRes = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerA,
+      buyerName: "Funke Akindele",
+      text: "Add to cart BAG-01",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    assert.equal(simpleRes.step, "PROMPTED_FOR_QUANTITY");
+    const sessionA = engine.buyerSessions.get(buyerA);
+    assert.equal(sessionA?.state, "AWAITING_QUANTITY");
+
+    const simpleQtyMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(simpleQtyMsg?.text.includes("How many units of Jacquemus Le Chiquito Mini Bag would you like?"));
+    assert.ok(simpleQtyMsg?.quickReplies && simpleQtyMsg.quickReplies.some((qr) => qr.replyText === "3 units"));
+
+    // Buyer replies with "3 units"
+    const simpleQtySubmit = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerA,
+      buyerName: "Funke Akindele",
+      text: "3 units",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.equal(simpleQtySubmit.step, "PROMPTED_FOR_SHIPPING_ZONE");
+
+    const cartA = engine.getBuyerCart(buyerA);
+    assert.equal(cartA.length, 1);
+    assert.equal(cartA[0].productSku, "BAG-01");
+    assert.equal(cartA[0].quantity, 3);
+
+    // 2. VARIABLE PRODUCT ORDER FLOW: Clicking variation prompts for quantity
+    await engine.handleVendorWhatsAppKeyword(
+      "[SHOE-55] Luxury Sneaker, Size 38: #35000 (4), Size 39: #37000 (2)"
+    );
+
+    const buyerB = "+2348099887766";
+    // First browse Sneakers
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerB,
+      buyerName: "Emeka Okafor",
+      text: "SHOE-55",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    // Emeka selects variation "Add SHOE-55 Size 38"
+    const varPromptRes = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerB,
+      buyerName: "Emeka Okafor",
+      text: "Add SHOE-55 Size 38",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.equal(varPromptRes.step, "PROMPTED_FOR_QUANTITY");
+    const sessionB = engine.buyerSessions.get(buyerB);
+    assert.equal(sessionB?.state, "AWAITING_QUANTITY");
+
+    // Emeka taps "2" (bare numeric reply)
+    const varQtySubmit = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerB,
+      buyerName: "Emeka Okafor",
+      text: "2",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.equal(varQtySubmit.step, "PROMPTED_FOR_SHIPPING_ZONE");
+
+    const cartB = engine.getBuyerCart(buyerB);
+    assert.equal(cartB.length, 1);
+    assert.equal(cartB[0].variantName, "38");
+    assert.equal(cartB[0].quantity, 2);
+
+    // 3. EXPLICIT QUANTITY BYPASS: Buyer specifies quantity upfront in command
+    const buyerC = "+2348055443322";
+    const explicitRes = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerC,
+      buyerName: "Simi Adeleke",
+      text: "Add 2 SHOE-55 Size 39",
+      simulateFastForwardIdleTimer: true,
+    });
+    // Bypasses quantity prompt directly to shipping zone!
+    assert.equal(explicitRes.step, "PROMPTED_FOR_SHIPPING_ZONE");
+
+    const cartC = engine.getBuyerCart(buyerC);
+    assert.equal(cartC.length, 1);
+    assert.equal(cartC[0].variantName, "39");
+    assert.equal(cartC[0].quantity, 2);
+
+    // 4. OVER-STOCK REQUEST IN QUANTITY SELECTION: Exceeding available units
+    const buyerD = "+2348077665544";
+    // Size 39 has 2 units in stock
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerD,
+      buyerName: "Dapo",
+      text: "Add SHOE-55 Size 39",
+      simulateFastForwardIdleTimer: true,
+    });
+    // Dapo asks for 10 units
+    const overStockRes = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerD,
+      buyerName: "Dapo",
+      text: "10 units",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.equal(overStockRes.step, "OUT_OF_STOCK");
+
+    const overStockMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(overStockMsg?.text.includes("only has 2 unit(s) available"));
+  });
+
+  it("collects and saves street delivery address from buyer after payment is confirmed", async () => {
+    const engine = new CaterlogStage1Engine();
+    const buyerPhone = "+2348012341234";
+
+    // 1. Buyer creates an order
+    const inquiry = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Ifeoma Nwosu",
+      text: "I want SHOE-01 delivered to Lekki",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.ok(inquiry.createdOrder);
+    const order = inquiry.createdOrder;
+
+    // 2. Buyer pays via bank transfer
+    const txRef = "MNFY_TEST_ADDR_001";
+    engine.monnify.seedMockVerifiedTransfer({
+      providerTransactionRef: txRef,
+      paymentReference: order.invoiceReference,
+      invoiceReference: order.invoiceReference,
+      paymentStatus: "PAID",
+      amountPaidKobo: order.totalAmountKobo,
+      payerName: "Ifeoma Nwosu",
+      paymentMethod: "ACCOUNT_TRANSFER",
+      serverVerifiedAt: new Date(),
+      rawResponse: {},
+    });
+    const payload = JSON.stringify({ eventData: { transactionReference: txRef } });
+
+    await engine.reconcileMonnifyWebhook({
+      rawBody: payload,
+      signatureHeader: engine.monnify.signPayloadForTesting(payload),
+      providerTransactionRef: txRef,
+    });
+
+    // Verify buyer received receipt asking for delivery address
+    const receiptMsg = engine.chatMessages.find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("Payment Confirmed!")
+    );
+    assert.ok(receiptMsg);
+    assert.ok(receiptMsg.text.includes("Where should the rider deliver your package?"));
+
+    // Verify buyer session is now AWAITING_DELIVERY_ADDRESS
+    const session = engine.buyerSessions.get(buyerPhone);
+    assert.ok(session);
+    assert.equal(session.state, "AWAITING_DELIVERY_ADDRESS");
+
+    // 3. Buyer replies with street address
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Ifeoma Nwosu",
+      text: "14 Admiralty Way, opposite Filmhouse Cinema, Lekki Phase 1",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    // Address is saved to the order
+    const updatedOrder = engine.orders.find((o) => o.shortCode === order.shortCode);
+    assert.equal(
+      updatedOrder?.deliveryAddress,
+      "14 Admiralty Way, opposite Filmhouse Cinema, Lekki Phase 1"
+    );
+
+    // Confirmation message delivered to customer
+    const confirmMsg = engine.chatMessages
+      .filter((m) => m.channel === "BUYER_SHOP_WA" && m.sender === "CATERLOG_BOT")
+      .pop();
+    assert.ok(confirmMsg?.text.includes("Delivery Address Saved!"));
+    assert.ok(confirmMsg?.text.includes("14 Admiralty Way"));
+
+    // Vendor alerted with street address
+    const vendorAlert = engine.chatMessages.find(
+      (m) => m.channel === "VENDOR_ADMIN_WA" && m.text.includes("Delivery Address Provided")
+    );
+    assert.ok(vendorAlert);
+    assert.ok(vendorAlert.text.includes("14 Admiralty Way"));
+  });
+
+  it("handles late payment on expired orders: revives order when stock is available, and flags sold-out refund when stock is exhausted", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. CASE A: Stock is STILL available when late payment arrives -> Revives order & asks for address
+    const buyerA = "+2348099112233";
+    const inqA = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerA,
+      buyerName: "Tunde Bakare",
+      text: "I want SHOE-01 delivered to Mainland",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.ok(inqA.createdOrder);
+    const orderA = inqA.createdOrder;
+
+    // Order expires and stock hold is released
+    await engine.expireOrderReservation(orderA.shortCode);
+    const expiredA = engine.orders.find((o) => o.shortCode === orderA.shortCode);
+    assert.equal(expiredA?.status, "EXPIRED");
+    assert.equal(expiredA?.reservationReleased, true);
+
+    // Late payment arrives for Order A while stock is still available (shoe stock > 0)
+    const txA = "MNFY_TEST_LATE_REVIVE_001";
+    engine.monnify.seedMockVerifiedTransfer({
+      providerTransactionRef: txA,
+      paymentReference: orderA.invoiceReference,
+      invoiceReference: orderA.invoiceReference,
+      paymentStatus: "PAID",
+      amountPaidKobo: orderA.totalAmountKobo,
+      payerName: "Tunde Bakare",
+      paymentMethod: "ACCOUNT_TRANSFER",
+      serverVerifiedAt: new Date(),
+      rawResponse: {},
+    });
+    const payloadA = JSON.stringify({ eventData: { transactionReference: txA } });
+    await engine.reconcileMonnifyWebhook({
+      rawBody: payloadA,
+      signatureHeader: engine.monnify.signPayloadForTesting(payloadA),
+      providerTransactionRef: txA,
+    });
+
+    // Order A is revived to PAID with reservation secured
+    assert.equal(orderA.status, "PAID");
+    assert.equal(orderA.reservationReleased, false);
+
+    const reviveMsg = engine.chatMessages.find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("Late Payment Accepted")
+    );
+    assert.ok(reviveMsg, "Receipt must note late payment acceptance");
+    assert.ok(reviveMsg.text.includes("Where should the rider deliver your package?"));
+
+    // 2. CASE B: Stock was EXHAUSTED while expired -> Customer & vendor alerted of Sold Out status
+    const buyerB = "+2348088223344";
+    const inqB = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: buyerB,
+      buyerName: "Korede Bello",
+      text: "I want BAG-01 delivered to Lekki",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.ok(inqB.createdOrder);
+    const orderB = inqB.createdOrder;
+
+    // Expire order B
+    await engine.expireOrderReservation(orderB.shortCode);
+
+    // In the meantime, the remaining BAG-01 stock is bought or depleted
+    const bag = engine.products.find((p) => p.skuCode === "BAG-01")!;
+    bag.stockTotal = 0; // Completely sold out
+
+    // Late transfer arrives for Order B when item is completely sold out
+    const txB = "MNFY_TEST_LATE_SOLDOUT_002";
+    engine.monnify.seedMockVerifiedTransfer({
+      providerTransactionRef: txB,
+      paymentReference: orderB.invoiceReference,
+      invoiceReference: orderB.invoiceReference,
+      paymentStatus: "PAID",
+      amountPaidKobo: orderB.totalAmountKobo,
+      payerName: "Korede Bello",
+      paymentMethod: "ACCOUNT_TRANSFER",
+      serverVerifiedAt: new Date(),
+      rawResponse: {},
+    });
+    const payloadB = JSON.stringify({ eventData: { transactionReference: txB } });
+    await engine.reconcileMonnifyWebhook({
+      rawBody: payloadB,
+      signatureHeader: engine.monnify.signPayloadForTesting(payloadB),
+      providerTransactionRef: txB,
+    });
+
+    // Customer receives sold out notice and vendor is alerted to refund
+    const soldOutBuyerAlert = engine.chatMessages.find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("PAYMENT RECEIVED FOR EXPIRED ORDER")
+    );
+    assert.ok(soldOutBuyerAlert);
+    assert.ok(soldOutBuyerAlert.text.includes("Sold Out"));
+
+    const soldOutVendorAlert = engine.chatMessages.find(
+      (m) => m.channel === "VENDOR_ADMIN_WA" && m.text.includes("Late Transfer on Expired Order")
+    );
+    assert.ok(soldOutVendorAlert);
+    assert.ok(soldOutVendorAlert.text.includes("SOLD OUT"));
+    assert.ok(soldOutVendorAlert.text.includes("arrange an alternative product or issue a refund"));
+  });
+
+  it("dispatches order with rider details, alerts buyer via WhatsApp, and provides live self-service tracking", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Buyer places order
+    const inq = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: "+2348055554444",
+      buyerName: "Ibrahim Sadiq",
+      text: "I want SHOE-01 delivered to Mainland",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.ok(inq.createdOrder);
+    const order = inq.createdOrder;
+    assert.strictEqual(order.status, "PENDING_PAYMENT");
+
+    // 2. Buyer tracks order while PENDING_PAYMENT
+    const trackPending = await engine.processBuyerConversationTurn({
+      buyerPhone: "+2348055554444",
+      buyerName: "Ibrahim Sadiq",
+      text: "track",
+    });
+    assert.strictEqual(trackPending.step, "ORDER_TRACKED");
+    const trackPendingMsg = engine.chatMessages.slice().reverse().find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("ORDER STATUS")
+    );
+    assert.ok(trackPendingMsg);
+    assert.ok(trackPendingMsg.text.includes("AWAITING BANK TRANSFER"));
+    assert.ok(trackPendingMsg.text.includes(order.shortCode));
+
+    // 3. Payment is verified and delivery address provided
+    await engine.applyVerifiedPayment({
+      orderShortCode: order.shortCode,
+      providerTransactionRef: "TX_TRACK_1",
+      paymentReference: order.invoiceReference,
+      invoiceReference: order.invoiceReference,
+      paymentStatus: "PAID",
+      amountPaidKobo: order.totalAmountKobo,
+      payerName: "Ibrahim Sadiq",
+      paymentMethod: "ACCOUNT_TRANSFER",
+      serverVerifiedAt: new Date(),
+      rawResponse: {},
+    });
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: "+2348055554444",
+      buyerName: "Ibrahim Sadiq",
+      text: "Plot 8 Admiralty Road, Lekki Phase 1",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.strictEqual(order.status, "PAID");
+    assert.strictEqual(order.deliveryAddress, "Plot 8 Admiralty Road, Lekki Phase 1");
+
+    // 4. Vendor dispatches order with rider phone number
+    const riderPhone = "08023456789";
+    const dispatchResult = await engine.dispatchOrder(order.shortCode, riderPhone);
+    assert.ok(dispatchResult);
+    assert.strictEqual(order.status, "OUT_FOR_DELIVERY");
+    assert.strictEqual(order.riderPhone, riderPhone);
+    assert.ok(order.dispatchedAt instanceof Date);
+
+    // Verify buyer received automated WhatsApp dispatch notification
+    const dispatchNotice = engine.chatMessages.find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("ORDER OUT FOR DELIVERY")
+    );
+    assert.ok(dispatchNotice);
+    assert.ok(dispatchNotice.text.includes(order.shortCode));
+    assert.ok(dispatchNotice.text.includes(riderPhone));
+    assert.ok(dispatchNotice.text.includes("Plot 8 Admiralty Road"));
+
+    // Verify vendor admin was also notified
+    const vendorNotice = engine.chatMessages.find(
+      (m) => m.channel === "VENDOR_ADMIN_WA" && m.text.includes("marked Out for Delivery")
+    );
+    assert.ok(vendorNotice);
+    assert.ok(vendorNotice.text.includes(riderPhone));
+
+    // 5. Buyer queries live status via "track", "status", and "track <orderCode>"
+    const trackDispatched = await engine.processBuyerConversationTurn({
+      buyerPhone: "+2348055554444",
+      buyerName: "Ibrahim Sadiq",
+      text: `track ${order.shortCode}`,
+    });
+    assert.strictEqual(trackDispatched.step, "ORDER_TRACKED");
+
+    const trackDispatchedMsg = engine.chatMessages.slice().reverse().find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("OUT FOR DELIVERY")
+    );
+    assert.ok(trackDispatchedMsg);
+    assert.ok(trackDispatchedMsg.text.includes(riderPhone));
+    assert.ok(trackDispatchedMsg.text.includes("Plot 8 Admiralty Road"));
+    assert.ok(trackDispatchedMsg.text.includes("Zara Block Heel"));
+
+    // 6. Unknown order tracking returns helpful guidance
+    const trackUnknown = await engine.processBuyerConversationTurn({
+      buyerPhone: "+2348099990000",
+      buyerName: "Unknown Customer",
+      text: "track ORD-9999",
+    });
+    assert.strictEqual(trackUnknown.step, "UNMATCHED");
+    const trackUnknownMsg = engine.chatMessages.slice().reverse().find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("Order Not Found")
+    );
+    assert.ok(trackUnknownMsg);
   });
 });
 

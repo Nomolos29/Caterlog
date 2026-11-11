@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { SearchIcon, BellIcon, MenuIcon, CheckIcon } from "./icons";
 import type { VendorProfile, OrderItem, ProductItem } from "@/lib/types";
 
@@ -44,48 +44,116 @@ export function TopNav({
   onNavigateToView,
   onSignOut,
 }: TopNavProps) {
-  const initials = activeWorkspace === "reseller" ? "NS" : "AW";
+  const initials = vendor.businessName
+    ? vendor.businessName
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0]?.toUpperCase() || "")
+        .join("") || (activeWorkspace === "reseller" ? "NS" : "AW")
+    : activeWorkspace === "reseller" ? "NS" : "AW";
 
   // Search Palette State
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Notifications State
+  // Notifications State (dynamically derived from live orders and catalog)
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    {
-      id: "notif-1",
-      title: "Split Settlement Complete",
-      message: "₦85,000 paid for CT-1042. Aroko Wholesale split (₦61,200) routed instantly.",
-      timestamp: "12m ago",
-      read: false,
-      type: "settlement",
-    },
-    {
-      id: "notif-2",
-      title: "New WhatsApp Inquiry",
-      message: "Tunde Bello inquired about 5.5L Digital Air Fryer availability.",
-      timestamp: "45m ago",
-      read: false,
-      type: "order",
-    },
-    {
-      id: "notif-3",
-      title: "Stock Alert",
-      message: "Aroko Wholesale updated wholesale inventory for SKU ARO-8821.",
-      timestamp: "2h ago",
-      read: false,
-      type: "stock",
-    },
-    {
-      id: "notif-4",
+  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(() => new Set());
+
+  const notifications = useMemo<NotificationItem[]>(() => {
+    const list: NotificationItem[] = [];
+
+    const getTimeAgo = (dateStr?: string) => {
+      if (!dateStr) return "Just now";
+      try {
+        const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+        if (diff < 60) return "Just now";
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+        return `${Math.floor(diff / 86400)}d ago`;
+      } catch {
+        return "Recently";
+      }
+    };
+
+    // 1. Confirmed / Paid orders
+    orders
+      .filter((o) => o.status === "PAID")
+      .slice(0, 4)
+      .forEach((o) => {
+        const id = `notif-paid-${o.id}`;
+        list.push({
+          id,
+          title: `Payment Confirmed · ${o.shortCode}`,
+          message: `₦${o.totalAmountNaira.toLocaleString()} received from ${o.customerName} via Monnify.`,
+          timestamp: getTimeAgo(o.paidAt || o.createdAt),
+          read: readNotifIds.has(id),
+          type: "settlement",
+        });
+      });
+
+    // 2. Dispatched / En Route
+    orders
+      .filter((o) => o.status === "OUT_FOR_DELIVERY")
+      .slice(0, 2)
+      .forEach((o) => {
+        const id = `notif-dispatch-${o.id}`;
+        list.push({
+          id,
+          title: `Order Dispatched · ${o.shortCode}`,
+          message: `Package en route to ${o.customerName}${o.deliveryAddress ? ` (${o.deliveryAddress})` : ""}.`,
+          timestamp: getTimeAgo(o.createdAt),
+          read: readNotifIds.has(id),
+          type: "order",
+        });
+      });
+
+    // 3. New Orders Placed
+    orders
+      .filter((o) => o.status === "PENDING_PAYMENT")
+      .slice(0, 3)
+      .forEach((o) => {
+        const id = `notif-pending-${o.id}`;
+        list.push({
+          id,
+          title: `New Order Placed · ${o.shortCode}`,
+          message: `${o.customerName} placed order for ${o.quantity}x ${o.productName}. Awaiting transfer.`,
+          timestamp: getTimeAgo(o.createdAt),
+          read: readNotifIds.has(id),
+          type: "order",
+        });
+      });
+
+    // 4. Low stock products
+    products
+      .filter((p) => p.stockTotal <= 3)
+      .slice(0, 2)
+      .forEach((p) => {
+        const id = `notif-stock-${p.id}`;
+        list.push({
+          id,
+          title: `Low Stock Alert · ${p.skuCode}`,
+          message: `${p.name} has only ${p.stockTotal} items remaining.`,
+          timestamp: "Alert",
+          read: readNotifIds.has(id),
+          type: "stock",
+        });
+      });
+
+    // 5. System verification notice
+    const verifId = "notif-cac-verified";
+    list.push({
+      id: verifId,
       title: "CAC Business Verified",
       message: "Your Nigerian NUBAN settlement channel is fully verified with Monnify.",
-      timestamp: "1d ago",
-      read: true,
+      timestamp: "Active",
+      read: readNotifIds.has(verifId),
       type: "verification",
-    },
-  ]);
+    });
+
+    return list;
+  }, [orders, products, readNotifIds]);
 
   // Profile Menu State
   const [profileOpen, setProfileOpen] = useState(false);
@@ -93,7 +161,7 @@ export function TopNav({
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const handleMarkAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setReadNotifIds(new Set(notifications.map((n) => n.id)));
   };
 
   // Search Results
@@ -195,18 +263,30 @@ export function TopNav({
                 </div>
 
                 <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto my-2">
-                  {notifications.map((n) => (
-                    <div
-                      key={n.id}
-                      className={`py-3 px-1 transition-colors ${!n.read ? "bg-emerald-50/30 rounded-xl px-2" : ""}`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-xs font-bold text-gray-900">{n.title}</span>
-                        <span className="text-[10px] text-gray-400 shrink-0">{n.timestamp}</span>
+                  {notifications.map((n) => {
+                    const matchingOrder = orders.find((o) => n.id.includes(o.id));
+                    return (
+                      <div
+                        key={n.id}
+                        onClick={() => {
+                          if (matchingOrder && onSelectOrder) {
+                            onSelectOrder(matchingOrder);
+                            setNotificationsOpen(false);
+                          }
+                          setReadNotifIds((prev) => new Set([...prev, n.id]));
+                        }}
+                        className={`py-3 px-2 rounded-xl transition-colors cursor-pointer hover:bg-gray-50 ${
+                          !n.read ? "bg-emerald-50/40" : ""
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-xs font-bold text-gray-900">{n.title}</span>
+                          <span className="text-[10px] text-gray-400 shrink-0">{n.timestamp}</span>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-1 leading-relaxed">{n.message}</p>
                       </div>
-                      <p className="text-xs text-gray-600 mt-1 leading-relaxed">{n.message}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
@@ -243,7 +323,7 @@ export function TopNav({
               className="w-7 h-7 rounded-full bg-[#eef2ff] text-[#1e1b4b] border border-indigo-200 flex items-center justify-center font-bold text-xs hover:ring-2 hover:ring-emerald-400 transition-all ml-1 cursor-pointer"
               title="Merchant Account"
             >
-              NS
+              {initials}
             </button>
 
             {/* Profile Dropdown */}
@@ -251,7 +331,7 @@ export function TopNav({
               <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-gray-100 p-4 z-50">
                 <div className="flex items-center gap-3 pb-3 border-b border-gray-100">
                   <div className="w-10 h-10 rounded-full bg-[#eef2ff] text-[#1e1b4b] flex items-center justify-center font-bold text-sm shrink-0">
-                    NS
+                    {initials}
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-gray-900 truncate">{vendor.businessName}</div>

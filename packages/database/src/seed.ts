@@ -21,7 +21,7 @@ async function main() {
       whatsappPhone: "+2348031234567",
       whatsappPhoneId: "105992837465001",
       wabaId: "waba_amaka_001",
-      copilotMode: CopilotMode.COPILOT,
+      copilotMode: CopilotMode.FULL_AUTO,
       copilotIdleSeconds: 60,      // Configurable default: 60s
       reservationTtlMinutes: 15,   // Configurable default: 15 mins
       settlementBankCode: "058",   // GTBank
