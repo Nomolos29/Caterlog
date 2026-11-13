@@ -49,6 +49,44 @@ interface MonnifyEnvelope<T> {
   responseBody?: T;
 }
 
+export interface CreateSubAccountRequest {
+  bankCode: string;
+  accountNumber: string;
+  email: string;
+  currencyCode?: string;
+  defaultSplitPercentage?: number;
+}
+
+export interface SubAccountResult {
+  subAccountCode: string;
+  accountNumber: string;
+  accountName?: string;
+  bankCode: string;
+  bankName?: string;
+  currencyCode: string;
+  email: string;
+  defaultSplitPercentage: number;
+}
+
+export interface InitiateRefundRequest {
+  transactionReference: string;
+  refundReference?: string;
+  refundAmountKobo: bigint;
+  refundReason: string;
+  customerNote?: string;
+  destinationAccountNumber?: string;
+  destinationAccountBankCode?: string;
+}
+
+export interface RefundResult {
+  refundReference: string;
+  transactionReference: string;
+  refundAmountKobo: bigint;
+  refundStatus: "INITIATED" | "PROCESSING" | "COMPLETED" | "FAILED";
+  refundReason: string;
+  createdAt: Date;
+}
+
 /**
  * Monnify Payment Provider Adapter (Implements `PaymentProviderPort` from `@caterlog/commerce-core`).
  *
@@ -129,15 +167,28 @@ export class MonnifyPaymentAdapter implements PaymentProviderPort {
 
   /**
    * Verifies Monnify's `monnify-signature` header using HMAC-SHA512 over the raw request body.
+   * Fail-closed: rejects missing signatures, empty secrets, or placeholder secrets in live mode.
    */
   public verifyWebhookSignature(rawBody: string | Buffer, signatureHeader?: string): boolean {
-    if (!signatureHeader) return false;
+    if (!signatureHeader || typeof signatureHeader !== "string") return false;
+    const trimmedSig = signatureHeader.trim();
+    if (!trimmedSig) return false;
+
+    const secret = this.config.secretKey?.trim() ?? "";
+    if (this.mode !== "mock" && !secret) return false;
+    if (
+      this.mode === "live" &&
+      (secret === "test_secret_key" || secret === "mock_secret" || secret.length < 12)
+    ) {
+      return false;
+    }
+
     const computed = crypto
-      .createHmac("sha512", this.config.secretKey)
+      .createHmac("sha512", secret)
       .update(rawBody)
       .digest("hex");
     const a = Buffer.from(computed, "utf8");
-    const b = Buffer.from(signatureHeader.trim(), "utf8");
+    const b = Buffer.from(trimmedSig, "utf8");
     if (a.length !== b.length) return false;
     return crypto.timingSafeEqual(a, b);
   }
@@ -241,6 +292,170 @@ export class MonnifyPaymentAdapter implements PaymentProviderPort {
       accountName: body.accountName ?? req.vendorBusinessName,
       checkoutUrl: body.checkoutUrl,
       expiresAt: req.expiresAt,
+    };
+  }
+
+  private readonly mockSubAccounts = new Map<string, SubAccountResult>();
+
+  /**
+   * Creates a dedicated Monnify Sub-Account for a vendor so that customer payments
+   * can be split automatically to their settlement bank account.
+   */
+  public async createSubAccount(
+    req: CreateSubAccountRequest
+  ): Promise<SubAccountResult> {
+    const currencyCode = req.currencyCode ?? "NGN";
+    const defaultSplitPercentage = req.defaultSplitPercentage ?? 100;
+
+    if (this.isMockMode()) {
+      const subAccountCode = `MFY_SUB_${req.bankCode}_${req.accountNumber.slice(-4)}_${Math.abs(this.hashString(req.accountNumber)) % 1000}`;
+      const result: SubAccountResult = {
+        subAccountCode,
+        accountNumber: req.accountNumber,
+        accountName: `VENDOR / ${req.email.split("@")[0].toUpperCase()}`,
+        bankCode: req.bankCode,
+        bankName: this.lookupBankName(req.bankCode),
+        currencyCode,
+        email: req.email,
+        defaultSplitPercentage,
+      };
+      this.mockSubAccounts.set(subAccountCode, result);
+      return result;
+    }
+
+    const token = await this.getAccessToken();
+    const json = await this.request<Array<{
+      subAccountCode?: string;
+      accountNumber?: string;
+      accountName?: string;
+      bankCode?: string;
+      bankName?: string;
+      currencyCode?: string;
+      email?: string;
+      defaultSplitPercentage?: number;
+    }>>("/api/v1/sub-accounts", {
+      method: "POST",
+      token,
+      body: [
+        {
+          currencyCode,
+          accountNumber: req.accountNumber,
+          bankCode: req.bankCode,
+          email: req.email,
+          defaultSplitPercentage,
+        },
+      ],
+    });
+
+    const created = json.responseBody?.[0];
+    if (!created?.subAccountCode) {
+      throw new Error(
+        `Monnify sub-account creation failed: ${json.responseMessage ?? "missing subAccountCode"}`
+      );
+    }
+
+    return {
+      subAccountCode: created.subAccountCode,
+      accountNumber: created.accountNumber ?? req.accountNumber,
+      accountName: created.accountName,
+      bankCode: created.bankCode ?? req.bankCode,
+      bankName: created.bankName ?? this.lookupBankName(req.bankCode),
+      currencyCode: created.currencyCode ?? currencyCode,
+      email: created.email ?? req.email,
+      defaultSplitPercentage: created.defaultSplitPercentage ?? defaultSplitPercentage,
+    };
+  }
+
+  public lookupBankName(bankCode: string): string {
+    const banks: Record<string, string> = {
+      "058": "Guaranty Trust Bank (GTBank)",
+      "044": "Access Bank",
+      "011": "First Bank of Nigeria",
+      "033": "United Bank for Africa (UBA)",
+      "057": "Zenith Bank",
+      "214": "First City Monument Bank (FCMB)",
+      "035": "Wema Bank (ALAT)",
+      "070": "Fidelity Bank",
+      "082": "Keystone Bank",
+      "101": "Providus Bank",
+      "032": "Union Bank",
+      "232": "Sterling Bank",
+      "50515": "Moniepoint MFB",
+      "999992": "OPay Digital Services",
+      "999991": "PalmPay",
+      "50211": "Kuda Microfinance Bank",
+    };
+    return banks[bankCode] ?? "Commercial Bank";
+  }
+
+  private readonly mockRefunds = new Map<string, RefundResult>();
+
+  /**
+   * Initiates an instant customer refund via Monnify's Refund API (or deterministic mock ledger).
+   */
+  public async initiateRefund(req: InitiateRefundRequest): Promise<RefundResult> {
+    if (req.refundAmountKobo <= 0n) {
+      throw new Error("Refund amount must be greater than ₦0.");
+    }
+
+    const refundReference =
+      req.refundReference?.trim() ||
+      `MFY_RFD_${Date.now()}_${Math.abs(this.hashString(req.transactionReference)) % 10000}`;
+
+    if (this.isMockMode()) {
+      const result: RefundResult = {
+        refundReference,
+        transactionReference: req.transactionReference,
+        refundAmountKobo: req.refundAmountKobo,
+        refundStatus: "COMPLETED",
+        refundReason: req.refundReason || "Merchant initiated customer refund",
+        createdAt: new Date(),
+      };
+      this.mockRefunds.set(refundReference, result);
+      return result;
+    }
+
+    const token = await this.getAccessToken();
+    const json = await this.request<{
+      refundReference?: string;
+      transactionReference?: string;
+      refundAmount?: number;
+      refundStatus?: string;
+      refundReason?: string;
+    }>("/api/v1/refunds/initiate-refund", {
+      method: "POST",
+      token,
+      body: {
+        transactionReference: req.transactionReference,
+        refundReference,
+        refundAmount: koboToNaira(req.refundAmountKobo),
+        refundReason: req.refundReason,
+        customerNote: req.customerNote ?? req.refundReason,
+        ...(req.destinationAccountNumber
+          ? { destinationAccountNumber: req.destinationAccountNumber }
+          : {}),
+        ...(req.destinationAccountBankCode
+          ? { destinationAccountBankCode: req.destinationAccountBankCode }
+          : {}),
+      },
+    });
+
+    const body = json.responseBody;
+    return {
+      refundReference: body?.refundReference ?? refundReference,
+      transactionReference: body?.transactionReference ?? req.transactionReference,
+      refundAmountKobo:
+        body?.refundAmount !== undefined
+          ? nairaToKobo(body.refundAmount)
+          : req.refundAmountKobo,
+      refundStatus:
+        body?.refundStatus?.toUpperCase() === "COMPLETED"
+          ? "COMPLETED"
+          : body?.refundStatus?.toUpperCase() === "FAILED"
+          ? "FAILED"
+          : "PROCESSING",
+      refundReason: body?.refundReason ?? req.refundReason,
+      createdAt: new Date(),
     };
   }
 

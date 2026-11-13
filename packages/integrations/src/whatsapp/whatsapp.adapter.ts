@@ -172,6 +172,69 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
     this.sandboxOutbox.length = 0;
   }
 
+  private readonly mediaIdCache = new Map<string, string>();
+
+  /**
+   * Uploads binary media buffer directly to Meta WhatsApp Cloud API so it can be sent
+   * to recipients without requiring an external public URL or tunnel.
+   */
+  public async uploadMedia(params: {
+    buffer: Buffer;
+    contentType?: string;
+    filename?: string;
+    cacheKey?: string;
+    vendorPhoneId?: string | null;
+  }): Promise<string | null> {
+    if (this.isMockMode() || !this.config.accessToken) {
+      return null;
+    }
+    if (params.cacheKey && this.mediaIdCache.has(params.cacheKey)) {
+      return this.mediaIdCache.get(params.cacheKey)!;
+    }
+
+    const phoneId = params.vendorPhoneId ?? this.config.defaultPhoneNumberId;
+    if (!phoneId) return null;
+
+    try {
+      const contentType = params.contentType || "image/jpeg";
+      const filename = params.filename || "image.jpg";
+      const form = new FormData();
+      form.append("messaging_product", "whatsapp");
+      form.append(
+        "file",
+        new Blob([params.buffer], { type: contentType }),
+        filename
+      );
+      form.append("type", contentType);
+
+      const url = `https://graph.facebook.com/${this.config.graphApiVersion}/${phoneId}/media`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.config.accessToken}`,
+        },
+        body: form,
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.warn(`[caterlog:whatsapp] Meta media upload failed (${res.status}):`, errText);
+        return null;
+      }
+
+      const data = (await res.json()) as { id?: string };
+      if (data.id) {
+        if (params.cacheKey) {
+          this.mediaIdCache.set(params.cacheKey, data.id);
+        }
+        return data.id;
+      }
+    } catch (err) {
+      console.warn("[caterlog:whatsapp] Exception during Meta media upload:", err);
+    }
+    return null;
+  }
+
   public async sendTextMessage(params: {
     toPhone: string;
     text: string;
@@ -193,14 +256,24 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
   }
 
   /**
-   * Sends a media image message with optional caption.
+   * Sends a media image message with optional caption. Supports either a direct Meta Media ID
+   * (for uploaded media) or a public image URL.
    */
   public async sendImageMessage(params: {
     toPhone: string;
-    imageUrl: string;
+    imageUrl?: string;
+    mediaId?: string;
     caption?: string;
     vendorPhoneId?: string | null;
   }): Promise<void> {
+    const imagePayload: Record<string, string> = params.mediaId
+      ? { id: params.mediaId }
+      : { link: params.imageUrl || "" };
+
+    if (params.caption) {
+      imagePayload.caption = params.caption;
+    }
+
     await this.postMessage({
       toPhone: params.toPhone,
       vendorPhoneId: params.vendorPhoneId,
@@ -211,23 +284,21 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
         recipient_type: "individual",
         to: params.toPhone.replace(/\+/g, ""),
         type: "image",
-        image: {
-          link: params.imageUrl,
-          ...(params.caption ? { caption: params.caption } : {}),
-        },
+        image: imagePayload,
       },
     });
   }
 
   /**
    * Sends an interactive message with up to 3 quick-reply buttons.
-   * Can include a header image when provided.
+   * Can include a header image (via Meta Media ID or public image URL) when provided.
    */
   public async sendInteractiveButtonsMessage(params: {
     toPhone: string;
     bodyText: string;
     buttons: Array<{ id: string; title: string }>;
     headerImageUrl?: string;
+    headerMediaId?: string;
     footerText?: string;
     vendorPhoneId?: string | null;
   }): Promise<void> {
@@ -241,7 +312,7 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
 
     const isPublicHeaderImage = Boolean(
       params.headerImageUrl &&
-      /^https?:\/\/(?!localhost|127\.0\.0\.1)/i.test(params.headerImageUrl)
+      (this.isMockMode() || !/^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1)/i.test(params.headerImageUrl))
     );
 
     const interactivePayload: Record<string, unknown> = {
@@ -250,7 +321,12 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
       action: { buttons: formattedButtons },
     };
 
-    if (isPublicHeaderImage) {
+    if (params.headerMediaId) {
+      interactivePayload.header = {
+        type: "image",
+        image: { id: params.headerMediaId },
+      };
+    } else if (isPublicHeaderImage && params.headerImageUrl) {
       interactivePayload.header = {
         type: "image",
         image: { link: params.headerImageUrl },
@@ -344,14 +420,31 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
     toPhone: string;
     text: string;
     imageUrl?: string;
+    mediaBuffer?: Buffer;
+    mediaContentType?: string;
+    mediaId?: string;
     quickReplies?: Array<{ label: string; replyText: string }>;
     headerText?: string;
     footerText?: string;
     vendorPhoneId?: string | null;
   }): Promise<void> {
+    let resolvedMediaId = params.mediaId;
+
+    // In live mode, if mediaBuffer is provided (or if imageUrl is local and we have buffer),
+    // upload directly to Meta Graph API so recipients receive the image directly from Meta's CDN!
+    if (!this.isMockMode() && !resolvedMediaId && params.mediaBuffer) {
+      resolvedMediaId = (await this.uploadMedia({
+        buffer: params.mediaBuffer,
+        contentType: params.mediaContentType,
+        cacheKey: params.imageUrl,
+        vendorPhoneId: params.vendorPhoneId,
+      })) ?? undefined;
+    }
+
     const isPublicImage = Boolean(
-      params.imageUrl &&
-      /^https?:\/\/(?!localhost|127\.0\.0\.1)/i.test(params.imageUrl)
+      resolvedMediaId ||
+      (params.imageUrl &&
+        (this.isMockMode() || !/^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1)/i.test(params.imageUrl)))
     );
 
     // 1. Interactive Buttons (1 to 3 quick-reply options)
@@ -364,6 +457,7 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
             id: qr.replyText,
             title: qr.label,
           })),
+          headerMediaId: resolvedMediaId,
           headerImageUrl: isPublicImage ? params.imageUrl : undefined,
           footerText: params.footerText,
           vendorPhoneId: params.vendorPhoneId,
@@ -377,10 +471,11 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
     // 2. Interactive List (4 to 10 options)
     if (params.quickReplies && params.quickReplies.length > 3) {
       try {
-        if (isPublicImage && params.imageUrl) {
+        if (isPublicImage && (resolvedMediaId || params.imageUrl)) {
           try {
             await this.sendImageMessage({
               toPhone: params.toPhone,
+              mediaId: resolvedMediaId,
               imageUrl: params.imageUrl,
               vendorPhoneId: params.vendorPhoneId,
             });
@@ -413,10 +508,11 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
     }
 
     // 3. Standalone Image with Caption
-    if (isPublicImage && params.imageUrl) {
+    if (isPublicImage && (resolvedMediaId || params.imageUrl)) {
       try {
         await this.sendImageMessage({
           toPhone: params.toPhone,
+          mediaId: resolvedMediaId,
           imageUrl: params.imageUrl,
           caption: params.text,
           vendorPhoneId: params.vendorPhoneId,

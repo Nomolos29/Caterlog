@@ -1,18 +1,20 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { CheckIcon } from "../icons";
 
 interface VerificationViewProps {
   onBack?: () => void;
   onComplete?: () => void;
+  vendorName?: string;
+  whatsappPhone?: string;
 }
 
-export function VerificationView({ onBack, onComplete }: VerificationViewProps) {
+export function VerificationView({ onBack, onComplete, vendorName, whatsappPhone: initialWhatsappPhone }: VerificationViewProps) {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Step 1: Business Info
-  const [businessName, setBusinessName] = useState("Nia Stores & Goods Ltd");
+  const [businessName, setBusinessName] = useState(vendorName || "My Store");
   const [cacNumber, setCacNumber] = useState("RC-1849204");
   const [tinNumber, setTinNumber] = useState("24910293-0001");
   const [businessAddress, setBusinessAddress] = useState("Block 4, Plot 12, Admiralty Way, Lekki Phase 1, Lagos");
@@ -26,9 +28,17 @@ export function VerificationView({ onBack, onComplete }: VerificationViewProps) 
 
   // Step 3: Socials & Channels
   const [whatsappConnected, setWhatsappConnected] = useState(true);
-  const [whatsappPhone, setWhatsappPhone] = useState("+2348031234567");
+  const [whatsappPhone, setWhatsappPhone] = useState(initialWhatsappPhone || "+2348031234567");
   const [instagramConnected, setInstagramConnected] = useState(true);
   const [instagramHandle, setInstagramHandle] = useState("@niastores.ng");
+
+  useEffect(() => {
+    if (vendorName) setBusinessName(vendorName);
+  }, [vendorName]);
+
+  useEffect(() => {
+    if (initialWhatsappPhone) setWhatsappPhone(initialWhatsappPhone);
+  }, [initialWhatsappPhone]);
 
   // Step 4: Documents & Review
   const [uploadedCac, setUploadedCac] = useState(true);

@@ -161,11 +161,11 @@ export class WhatsAppCatalogAdapter {
       imageUrl = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&q=80";
     }
     item.image_url = imageUrl;
-    if (this.config.productUrlBase) {
-      item.url = `${this.config.productUrlBase.replace(/\/+$/, "")}/${encodeURIComponent(
-        product.skuCode.toUpperCase()
-      )}`;
-    }
+    const baseUrl =
+      this.config.productUrlBase || "https://shop.caterlog.store/p";
+    item.url = `${baseUrl.replace(/\/+$/, "")}/${encodeURIComponent(
+      product.skuCode.toUpperCase()
+    )}`;
     if (product.itemGroupId) {
       item.item_group_id = product.itemGroupId.toUpperCase();
     }
@@ -252,16 +252,57 @@ export class WhatsAppCatalogAdapter {
     }
 
     this.assertConfigured(["catalogId", "accessToken"]);
-    await this.linkCatalogToBusinessAccount();
+    try {
+      await this.linkCatalogToBusinessAccount();
+    } catch (err) {
+      console.warn("[caterlog:catalog] Catalog link note:", err);
+    }
+
+    // Pre-fetch existing catalog items from Meta so we know which items exist
+    try {
+      await this.fetchCatalogProducts();
+    } catch (err) {
+      console.warn("[caterlog:catalog] Could not pre-fetch Meta catalog items:", err);
+    }
 
     for (const product of products) {
       const item = this.mapProduct(product);
+      const existingItemId = this.productItemIds.get(item.retailer_id);
       try {
-        const response = await this.request<{ id?: string; product_item_id?: string }>(
-          `/${this.config.catalogId}/products`,
-          { method: "POST", body: item }
-        );
-        const productItemId = response.id ?? response.product_item_id;
+        let productItemId: string | undefined;
+        if (existingItemId) {
+          // Update existing Meta product item
+          const updateRes = await this.request<{ id?: string; success?: boolean }>(
+            `/${existingItemId}`,
+            { method: "POST", body: item }
+          );
+          productItemId = updateRes.id ?? existingItemId;
+        } else {
+          // Create new product item in Meta catalog
+          try {
+            const createRes = await this.request<{ id?: string; product_item_id?: string }>(
+              `/${this.config.catalogId}/products`,
+              { method: "POST", body: item }
+            );
+            productItemId = createRes.id ?? createRes.product_item_id;
+          } catch (createErr) {
+            const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
+            // Handle duplicate retailer_id (Meta error 10800) by querying ID and updating
+            if (errMsg.includes("10800") || errMsg.includes("duplicate") || errMsg.includes("already exists")) {
+              await this.fetchCatalogProducts().catch(() => []);
+              const retryId = this.productItemIds.get(item.retailer_id);
+              if (retryId) {
+                await this.request(`/${retryId}`, { method: "POST", body: item });
+                productItemId = retryId;
+              } else {
+                throw createErr;
+              }
+            } else {
+              throw createErr;
+            }
+          }
+        }
+
         if (productItemId) this.productItemIds.set(item.retailer_id, productItemId);
         result.upserted += 1;
         result.items.push({

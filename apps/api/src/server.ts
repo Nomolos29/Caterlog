@@ -1,7 +1,7 @@
 import http from "node:http";
 import { existsSync } from "node:fs";
 import { URL } from "node:url";
-import { nairaToKobo, parseVendorWhatsAppCommand } from "@caterlog/commerce-core";
+import { formatNaira, nairaToKobo, parseVendorWhatsAppCommand } from "@caterlog/commerce-core";
 import { CaterlogStage1Engine } from "./runtime-engine.ts";
 import { createEngineFromEnv } from "./bootstrap.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
@@ -105,39 +105,135 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
-      // 1c. Vendor WhatsApp Magic Link / OTP Login Request (`POST /api/v1/auth/whatsapp-otp`)
-      if (req.method === "POST" && path === "/api/v1/auth/whatsapp-otp") {
+      // 1c. Vendor WhatsApp 6-Digit OTP / Magic Link Request (`POST /api/v1/auth/whatsapp-otp` or `POST /api/v1/auth/request-otp`)
+      if (req.method === "POST" && (path === "/api/v1/auth/whatsapp-otp" || path === "/api/v1/auth/request-otp")) {
         const rawBody = await readRawBody(req);
         const body = (rawBody ? JSON.parse(rawBody) : {}) as {
           phone?: string;
           vendorSlug?: string;
+          purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
         };
         const inputPhone = body.phone ? body.phone.replace(/\D/g, "") : null;
         const vendorPhone = engine.vendor.whatsappPhone.replace(/\D/g, "");
         const inputSlug = body.vendorSlug?.trim().toLowerCase();
 
-        if (inputPhone && inputPhone !== vendorPhone && inputSlug !== engine.vendor.slug.toLowerCase()) {
-          throw new HttpError(404, "Vendor not found for provided phone or slug.");
+        const isKnownVendor =
+          (!inputPhone || inputPhone === vendorPhone) &&
+          (!inputSlug || inputSlug === engine.vendor.slug.toLowerCase());
+
+        let targetPhone = engine.vendor.whatsappPhone;
+        if (!isKnownVendor) {
+          if (!body.phone) {
+            throw new HttpError(400, "Please provide your WhatsApp phone number.");
+          }
+          const clean = body.phone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
+          targetPhone = clean.startsWith("+") ? clean : `+${clean}`;
         }
 
-        const token = engine.createMagicLinkToken();
-        const dashboardUrl = process.env.DASHBOARD_URL ?? "http://localhost:3000";
-        const loginUrl = `${dashboardUrl}?token=${token}&magic_vendor=${engine.vendor.slug}`;
+        const purpose = body.purpose || "LOGIN";
+        engine.generateOtp(targetPhone, purpose);
 
-        await engine.whatsapp.sendTextMessage({
-          toPhone: engine.vendor.whatsappPhone,
-          text: `🔐 *Your 1-Tap Dashboard Login Link:*\n${loginUrl}\n\n⏳ _Valid for 15 minutes._`,
-          vendorPhoneId: engine.vendor.whatsappPhoneId,
-        });
-
-        const masked = engine.vendor.whatsappPhone.replace(
+        const masked = targetPhone.replace(
           /(\+\d{3})\d+(\d{4})/,
           "$1****$2"
         );
         return sendJson(res, 200, {
           status: "sent",
           destinationPhone: masked,
-          expiresInSeconds: 900,
+          purpose,
+          expiresInSeconds: 600,
+          isNewVendor: !isKnownVendor,
+        });
+      }
+
+      // 1c1. Verify 6-Digit WhatsApp Code (`POST /api/v1/auth/verify-otp`)
+      if (req.method === "POST" && path === "/api/v1/auth/verify-otp") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+          phone?: string;
+          code?: string;
+          purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
+          businessName?: string;
+          isExistingBusiness?: boolean;
+          catalogSelection?: "mirror" | "custom";
+        };
+
+        if (!body.code || body.code.trim().length !== 6) {
+          throw new HttpError(400, "Please enter the 6-digit code sent to your WhatsApp.");
+        }
+
+        const cleanPhone = (body.phone || engine.vendor.whatsappPhone).trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
+        const targetPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
+        const purpose = body.purpose || "LOGIN";
+
+        const isValid = engine.verifyOtp(targetPhone, body.code, purpose);
+        if (!isValid) {
+          throw new HttpError(401, "Invalid or expired 6-digit verification code. Please check your WhatsApp and try again.");
+        }
+
+        if (purpose === "SIGNUP") {
+          engine.onboardVendorProfile({
+            businessName: body.businessName || "My WhatsApp Store",
+            whatsappPhone: targetPhone,
+            isExistingBusiness: body.isExistingBusiness,
+            catalogSelection: body.catalogSelection,
+          });
+        }
+
+        const token = engine.createMagicLinkToken();
+        return sendJson(res, 200, {
+          authenticated: true,
+          token,
+          vendor: {
+            id: engine.vendor.id,
+            slug: engine.vendor.slug,
+            businessName: engine.vendor.businessName,
+            whatsappPhone: engine.vendor.whatsappPhone,
+          },
+          state: engine.serializeState(),
+        });
+      }
+
+      // 1c2. Vendor Onboarding / Profile Setup (`POST /api/v1/auth/onboard`)
+      if (req.method === "POST" && path === "/api/v1/auth/onboard") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+          phone?: string;
+          businessName?: string;
+          isExistingBusiness?: boolean;
+          catalogSelection?: "mirror" | "custom";
+          cacNumber?: string;
+        };
+
+        if (!body.phone && !body.businessName) {
+          throw new HttpError(400, "Please provide your WhatsApp phone number and store name.");
+        }
+
+        const updatedVendor = engine.onboardVendorProfile({
+          businessName: body.businessName || "My WhatsApp Store",
+          whatsappPhone: body.phone || engine.vendor.whatsappPhone,
+          isExistingBusiness: body.isExistingBusiness,
+          catalogSelection: body.catalogSelection,
+        });
+
+        // Trigger 6-digit verification code to the vendor's WhatsApp phone
+        engine.generateOtp(updatedVendor.whatsappPhone, "SIGNUP");
+
+        const masked = updatedVendor.whatsappPhone.replace(
+          /(\+\d{3})\d+(\d{4})/,
+          "$1****$2"
+        );
+
+        return sendJson(res, 200, {
+          status: "otp_sent",
+          destinationPhone: masked,
+          vendor: {
+            id: updatedVendor.id,
+            slug: updatedVendor.slug,
+            businessName: updatedVendor.businessName,
+            whatsappPhone: updatedVendor.whatsappPhone,
+          },
+          state: engine.serializeState(),
         });
       }
 
@@ -243,6 +339,12 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
             changes?: Array<{
               field?: string;
               value?: {
+                statuses?: Array<{
+                  id?: string;
+                  status?: "sent" | "delivered" | "read" | "failed";
+                  recipient_id?: string;
+                  timestamp?: string;
+                }>;
                 messages?: Array<{
                   from?: string;
                   from_user_id?: string;
@@ -267,134 +369,161 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           }>;
         };
 
-        for (const entry of body.entry ?? []) {
-          for (const change of entry.changes ?? []) {
-            const val = change.value;
-            // Handle Coexistence `message_echoes` / `smb_message_echoes` (Vendor replied from mobile app or companion device)
-            const allEchoes = [
-              ...(val?.message_echoes ?? []),
-              ...(val?.smb_message_echoes ?? []),
-            ];
-            for (const echo of allEchoes) {
-              if (echo.text?.body) {
-                await engine.recordVendorManualReplyInBuyerThread(echo.text.body);
+        const processInboundWebhook = async () => {
+          for (const entry of body.entry ?? []) {
+            for (const change of entry.changes ?? []) {
+              const val = change.value;
+
+              // Handle Meta WhatsApp message delivery/read status ticks (`sent`, `delivered`, `read`, `failed`)
+              if (val?.statuses && val.statuses.length > 0) {
+                for (const st of val.statuses) {
+                  if (st.status === "failed") {
+                    console.warn(`[whatsapp:status] Outbound message ${st.id} to ${st.recipient_id} failed.`);
+                  }
+                }
               }
-            }
 
-            if (change.field === "smb_app_state_sync") {
-              console.log("[caterlog:webhook] Received smb_app_state_sync (WhatsApp Business app contact sync event).");
-            }
-            // Handle inbound messages (Vendor Keyword CLI or Buyer Inquiry)
-            for (const msg of val?.messages ?? []) {
-              const rawFrom = msg.from ?? msg.from_user_id ?? "";
-              const fromPhone = rawFrom
-                ? rawFrom.startsWith("+")
-                  ? rawFrom
-                  : `+${rawFrom}`
-                : "";
-              // Handle text messages, image captions, and WhatsApp interactive button/list replies
-              const text =
-                msg.text?.body ??
-                msg.image?.caption ??
-                msg.interactive?.button_reply?.id ??
-                msg.interactive?.button_reply?.title ??
-                msg.interactive?.list_reply?.id ??
-                msg.interactive?.list_reply?.title ??
-                "";
-              if (!text) continue;
+              // Handle Coexistence `message_echoes` / `smb_message_echoes` (Vendor replied from mobile app or companion device)
+              const allEchoes = [
+                ...(val?.message_echoes ?? []),
+                ...(val?.smb_message_echoes ?? []),
+              ];
+              for (const echo of allEchoes) {
+                if (echo.text?.body) {
+                  await engine.recordVendorManualReplyInBuyerThread(echo.text.body);
+                }
+              }
 
-              const cleanVendorPhone = engine.vendor.whatsappPhone.replace(/\+/g, "");
-              const cleanFromPhone = fromPhone.replace(/\+/g, "");
+              if (change.field === "smb_app_state_sync") {
+                console.log("[caterlog:webhook] Received smb_app_state_sync (WhatsApp Business app contact sync event).");
+              }
+              // Handle inbound messages (Vendor Keyword CLI or Buyer Inquiry)
+              for (const msg of val?.messages ?? []) {
+                const rawFrom = msg.from ?? msg.from_user_id ?? "";
+                const fromPhone = rawFrom
+                  ? rawFrom.startsWith("+")
+                    ? rawFrom
+                    : `+${rawFrom}`
+                  : "";
+                // Handle text messages, image captions, and WhatsApp interactive button/list replies
+                const text =
+                  msg.text?.body ??
+                  msg.image?.caption ??
+                  msg.interactive?.button_reply?.id ??
+                  msg.interactive?.button_reply?.title ??
+                  msg.interactive?.list_reply?.id ??
+                  msg.interactive?.list_reply?.title ??
+                  "";
+                if (!text) continue;
 
-              // Extract attached product photo/media from WhatsApp payload if present
-              let attachedImageUrl: string | undefined = undefined;
-              let attachedImagePhash: string | undefined = undefined;
-              const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
+                const cleanVendorPhone = engine.vendor.whatsappPhone.replace(/\+/g, "");
+                const cleanFromPhone = fromPhone.replace(/\+/g, "");
 
-              if (msg.image) {
-                if (msg.image.id) {
-                  try {
-                    const downloaded = await engine.whatsapp.downloadMedia(msg.image.id);
-                    if (downloaded) {
-                      const saved = await mediaStore.saveMedia({
-                        buffer: downloaded.buffer,
-                        contentType: downloaded.contentType,
-                        mediaId: msg.image.id,
-                      });
-                      attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
-                      attachedImagePhash = saved.phash;
+                // Extract attached product photo/media from WhatsApp payload if present
+                let attachedImageUrl: string | undefined = undefined;
+                let attachedImagePhash: string | undefined = undefined;
+                const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
+
+                if (msg.image) {
+                  if (msg.image.id) {
+                    try {
+                      const downloaded = await engine.whatsapp.downloadMedia(msg.image.id);
+                      if (downloaded) {
+                        const saved = await mediaStore.saveMedia({
+                          buffer: downloaded.buffer,
+                          contentType: downloaded.contentType,
+                          mediaId: msg.image.id,
+                        });
+                        attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+                        attachedImagePhash = saved.phash;
+                      }
+                    } catch (err) {
+                      console.error("[whatsapp:media] Failed to download media from Meta:", err);
                     }
-                  } catch (err) {
-                    console.error("[whatsapp:media] Failed to download media from Meta:", err);
-                  }
-                  if (!attachedImageUrl) {
-                    attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(msg.image.id)}`;
-                  }
-                } else if (msg.image.url || msg.image.link) {
-                  const rawUrl = msg.image.url || msg.image.link;
-                  try {
-                    const saved = await mediaStore.saveFromUrl(rawUrl);
-                    if (saved) {
-                      attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
-                      attachedImagePhash = saved.phash;
-                    } else {
+                    if (!attachedImageUrl) {
+                      attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(msg.image.id)}`;
+                    }
+                  } else if (msg.image.url || msg.image.link) {
+                    const rawUrl = (msg.image.url || msg.image.link)!;
+                    try {
+                      const saved = await mediaStore.saveFromUrl(rawUrl);
+                      if (saved) {
+                        attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+                        attachedImagePhash = saved.phash;
+                      } else {
+                        attachedImageUrl = rawUrl;
+                      }
+                    } catch {
                       attachedImageUrl = rawUrl;
                     }
-                  } catch {
-                    attachedImageUrl = rawUrl;
                   }
                 }
-              }
 
-              // Also check if text contained an image URL directly
-              if (!attachedImageUrl) {
-                const embeddedMatch = text.match(/https?:\/\/[^\s,]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s,]*)?/i);
-                if (embeddedMatch) {
-                  attachedImageUrl = embeddedMatch[0];
-                  try {
-                    const saved = await mediaStore.saveFromUrl(attachedImageUrl);
-                    if (saved) {
-                      attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
-                      attachedImagePhash = saved.phash;
-                    }
-                  } catch {}
+                // Also check if text contained an image URL directly
+                if (!attachedImageUrl) {
+                  const embeddedMatch = text.match(/https?:\/\/[^\s,]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s,]*)?/i);
+                  if (embeddedMatch) {
+                    attachedImageUrl = embeddedMatch[0];
+                    try {
+                      const saved = await mediaStore.saveFromUrl(attachedImageUrl);
+                      if (saved) {
+                        attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
+                        attachedImagePhash = saved.phash;
+                      }
+                    } catch {}
+                  }
                 }
-              }
 
-              if (cleanFromPhone === cleanVendorPhone) {
-                // If the message is an explicit vendor keyword command (#help, sales, stock, ship, discount, reply, resume, etc.),
-                // execute store owner admin CLI.
-                const cmd = parseVendorWhatsAppCommand(text);
-                if (cmd.type !== "UNKNOWN_COMMAND" || text.trim().startsWith("#")) {
-                  await engine.handleVendorWhatsAppKeyword(text, attachedImageUrl, attachedImagePhash);
-                } else {
-                  // Check if a customer is currently awaiting assistance or vendor is in active assistance mode
-                  const needsAssistSession = Array.from(engine.buyerSessions.values()).find(
-                    (s) => s.state === "NEEDS_ASSISTANCE" || s.state === "ASSISTING"
-                  );
-                  if (needsAssistSession) {
-                    await engine.recordVendorManualReplyInBuyerThread(text, needsAssistSession.buyerPhone);
+                if (cleanFromPhone === cleanVendorPhone) {
+                  // If the message is an explicit vendor keyword command (#help, sales, stock, ship, discount, reply, resume, etc.),
+                  // execute store owner admin CLI.
+                  const cmd = parseVendorWhatsAppCommand(text);
+                  if (cmd.type !== "UNKNOWN_COMMAND" || text.trim().startsWith("#")) {
+                    await engine.handleVendorWhatsAppKeyword(text, attachedImageUrl, attachedImagePhash);
                   } else {
-                    await engine.handleBuyerWhatsAppInquiry({
-                      buyerPhone: fromPhone,
-                      text,
-                      quotedStatusImagePhash: attachedImagePhash,
-                      attachedImageUrl,
-                    });
+                    // Check if a customer is currently awaiting assistance or vendor is in active assistance mode
+                    const needsAssistSession = Array.from(engine.buyerSessions.values()).find(
+                      (s) => s.state === "NEEDS_ASSISTANCE" || s.state === "ASSISTING"
+                    );
+                    if (needsAssistSession) {
+                      await engine.recordVendorManualReplyInBuyerThread(text, needsAssistSession.buyerPhone);
+                    } else {
+                      await engine.handleBuyerWhatsAppInquiry({
+                        buyerPhone: fromPhone,
+                        text,
+                        quotedStatusImagePhash: attachedImagePhash,
+                        attachedImageUrl,
+                      });
+                    }
                   }
+                } else {
+                  // All other phone numbers are customer shoppers
+                  await engine.handleBuyerWhatsAppInquiry({
+                    buyerPhone: fromPhone,
+                    text,
+                    quotedStatusImagePhash: attachedImagePhash,
+                    attachedImageUrl,
+                  });
                 }
-              } else {
-                // All other phone numbers are customer shoppers
-                await engine.handleBuyerWhatsAppInquiry({
-                  buyerPhone: fromPhone,
-                  text,
-                  quotedStatusImagePhash: attachedImagePhash,
-                  attachedImageUrl,
-                });
               }
             }
           }
+        };
+
+        // Fast-Ack (<3s SLA for Meta Graph API):
+        // Complete synchronously if fast (<2.2s), or immediately acknowledge 200 OK while continuing in background.
+        const processingPromise = processInboundWebhook().catch((err) => {
+          console.error("[caterlog:whatsapp-webhook] Background processing error:", err);
+        });
+
+        if (process.env.WHATSAPP_FAST_ACK === "true") {
+          return sendJson(res, 200, { status: "acknowledged", mode: "fast-ack" });
         }
+
+        await Promise.race([
+          processingPromise,
+          new Promise<void>((resolve) => setTimeout(resolve, 2200)),
+        ]);
 
         return sendJson(res, 200, { status: "acknowledged" });
       }
@@ -534,6 +663,89 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, engine.serializeState());
       }
 
+      // 8b. Dashboard REST API: Secure Fund Withdrawal (`POST /api/v1/vendor/withdraw`)
+      if (req.method === "POST" && path === "/api/v1/vendor/withdraw") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          amountNaira: number;
+          bankName: string;
+          accountNumber: string;
+          securityCode: string;
+        };
+        if (!body.securityCode || body.securityCode.trim().length !== 6) {
+          throw new HttpError(400, "A 6-digit WhatsApp security code is required for fund withdrawals.");
+        }
+        const isValid = engine.verifyOtp(engine.vendor.whatsappPhone, body.securityCode, "WITHDRAWAL");
+        if (!isValid) {
+          throw new HttpError(401, "Invalid or expired 6-digit withdrawal security code. Please check WhatsApp.");
+        }
+
+        const withdrawAmountKobo = nairaToKobo(body.amountNaira || 0);
+        await engine.whatsapp.sendTextMessage({
+          toPhone: engine.vendor.whatsappPhone,
+          text: `💸 *Settlement Payout Dispatched:*\nAmount: *${formatNaira(withdrawAmountKobo)}*\nBank: *${body.bankName}* (\`${body.accountNumber}\`)\nReference: \`WTH-${Date.now().toString().slice(-6)}\`\n\n_Funds will reflect in your verified settlement account within 10 minutes._`,
+          vendorPhoneId: engine.vendor.whatsappPhoneId,
+        });
+
+        return sendJson(res, 200, {
+          status: "dispatched",
+          amountNaira: body.amountNaira,
+          bankName: body.bankName,
+          accountNumber: body.accountNumber,
+          reference: `WTH-${Date.now().toString().slice(-6)}`,
+          message: "Withdrawal successfully authorized and queued for bank settlement.",
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8c. Dashboard REST API: Update Sensitive Settings with 6-Digit Code (`POST /api/v1/vendor/settings/secure`)
+      if (req.method === "POST" && path === "/api/v1/vendor/settings/secure") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          securityCode: string;
+          businessName?: string;
+          notifyPhone?: string;
+        };
+        if (!body.securityCode || body.securityCode.trim().length !== 6) {
+          throw new HttpError(400, "A 6-digit WhatsApp security code is required to modify account settings.");
+        }
+        const isValid = engine.verifyOtp(engine.vendor.whatsappPhone, body.securityCode, "SETTINGS");
+        if (!isValid) {
+          throw new HttpError(401, "Invalid or expired 6-digit security code. Please check WhatsApp.");
+        }
+
+        engine.updateVendorSettings({
+          businessName: body.businessName,
+          notifyPhone: body.notifyPhone,
+        });
+
+        return sendJson(res, 200, {
+          status: "updated",
+          vendor: engine.vendor,
+          state: engine.serializeState(),
+          message: "Sensitive account settings updated successfully.",
+        });
+      }
+
+      // 8d. Dashboard REST API: Link Settlement Bank Account & Provision Subaccount (`POST /api/v1/vendor/bank`)
+      if (req.method === "POST" && path === "/api/v1/vendor/bank") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          bankCode: string;
+          accountNumber: string;
+          email?: string;
+        };
+        if (!body.bankCode || !body.accountNumber) {
+          throw new HttpError(400, "Bank code and 10-digit account number are required.");
+        }
+        const result = await engine.linkVendorBankAccount(body);
+        return sendJson(res, 200, {
+          status: "linked",
+          subAccountCode: result.subAccount.subAccountCode,
+          bankName: result.vendor.bankName,
+          accountNumber: result.vendor.bankAccountNumber,
+          accountName: result.vendor.bankAccountName,
+          state: engine.serializeState(),
+        });
+      }
+
       // 9. Dashboard REST API: Add Product (`POST /api/v1/vendor/products`)
       if (req.method === "POST" && path === "/api/v1/vendor/products") {
         const body = JSON.parse(await readRawBody(req)) as {
@@ -543,6 +755,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           priceNaira: number | string;
           stockTotal?: number;
           category?: string;
+          customFields?: Record<string, string>;
           primaryImageUrl?: string;
           variants?: Array<{
             id?: string;
@@ -585,6 +798,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           primaryImageUrl,
           imagePhash,
           variants: mappedVariants,
+          customFields: body.customFields,
         });
         return sendJson(res, 201, engine.serializeState());
       }
@@ -599,6 +813,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           priceNaira?: number | string;
           stockTotal?: number;
           primaryImageUrl?: string;
+          customFields?: Record<string, string>;
           variants?: Array<{
             id?: string;
             name: string;
@@ -639,6 +854,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           primaryImageUrl,
           imagePhash,
           variants: mappedVariants,
+          customFields: body.customFields,
         });
         if (!updated) {
           throw new HttpError(404, `Product SKU "${sku}" not found.`);
@@ -785,7 +1001,92 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
-      // 15d. Dashboard REST API: Publish Inventory to the WhatsApp Business Catalog
+      // 15d. Dashboard REST API: 1-Click Dispatch Rider Waybill / Packing Slip (`GET /api/v1/vendor/orders/:code/waybill`)
+      if (
+        req.method === "GET" &&
+        path.startsWith("/api/v1/vendor/orders/") &&
+        path.endsWith("/waybill")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/vendor/orders/", "").replace("/waybill", "")
+        );
+        const waybill = engine.getOrderWaybill(shortCode);
+        if (!waybill) {
+          throw new HttpError(404, `Order "${shortCode}" not found.`);
+        }
+        return sendJson(res, 200, { waybill });
+      }
+
+      // 15e. Dashboard REST API: 1-Click Instant Customer Refund (`POST /api/v1/vendor/orders/:code/refund`)
+      if (
+        req.method === "POST" &&
+        path.startsWith("/api/v1/vendor/orders/") &&
+        path.endsWith("/refund")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/vendor/orders/", "").replace("/refund", "")
+        );
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          reason?: string;
+          amountNaira?: number | string;
+        };
+        const result = await engine.refundOrder(shortCode, {
+          reason: body.reason,
+          amountKobo: body.amountNaira !== undefined ? nairaToKobo(body.amountNaira) : undefined,
+        });
+        if (!result) {
+          throw new HttpError(404, `Order "${shortCode}" not found.`);
+        }
+        return sendJson(res, 200, {
+          status: "refunded",
+          refundReference: result.refund.refundReference,
+          refundAmountFormatted: formatNaira(result.refund.refundAmountKobo),
+          refundStatus: result.refund.refundStatus,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 15f. Public Post-Payment Web Receipt & Live Tracker (`GET /api/v1/public/orders/:shortCode`)
+      if (
+        req.method === "GET" &&
+        path.startsWith("/api/v1/public/orders/") &&
+        !path.endsWith("/delivery")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/public/orders/", "")
+        );
+        const receipt = engine.getPublicOrderReceipt(shortCode);
+        if (!receipt) {
+          throw new HttpError(404, `Order "${shortCode}" not found.`);
+        }
+        return sendJson(res, 200, { receipt });
+      }
+
+      // 15g. Public Post-Payment Buyer Delivery Landmark & Alternate Phone Update (`PATCH /api/v1/public/orders/:shortCode/delivery`)
+      if (
+        (req.method === "PATCH" || req.method === "POST") &&
+        path.startsWith("/api/v1/public/orders/") &&
+        path.endsWith("/delivery")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/public/orders/", "").replace("/delivery", "")
+        );
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          deliveryAddress?: string;
+          deliveryLandmark?: string;
+          alternatePhone?: string;
+        };
+        const updated = await engine.updateOrderDeliveryDetails(shortCode, body);
+        if (!updated) {
+          throw new HttpError(404, `Order "${shortCode}" not found.`);
+        }
+        return sendJson(res, 200, {
+          status: "updated",
+          receipt: engine.getPublicOrderReceipt(shortCode),
+        });
+      }
+
+      // 15h. Dashboard REST API: Publish Inventory to the WhatsApp Business Catalog
       if (req.method === "POST" && path === "/api/v1/vendor/catalog/sync") {
         const rawBody = await readRawBody(req);
         const body = rawBody
@@ -812,12 +1113,33 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         let attachedImageUrl = body.attachedImageUrl;
         let attachedPhash = body.quotedStatusImagePhash;
 
+        // Extract inline image URL from message text if no explicit attachedImageUrl provided
+        if (!attachedImageUrl && body.text) {
+          const urlMatch =
+            body.text.match(/https?:\/\/[^\s,]+(?:\.(?:jpg|jpeg|png|webp|gif|svg)|\?[^\s,]*)/i) ||
+            body.text.match(/https?:\/\/images\.unsplash\.com\/[^\s,]+/i);
+          if (urlMatch) {
+            attachedImageUrl = urlMatch[0];
+          }
+        }
+
         if (attachedImageUrl && attachedImageUrl.startsWith("data:")) {
           const saved = await mediaStore.saveDataUrl(attachedImageUrl);
           if (saved) {
             const apiBase = process.env.API_BASE_URL || "http://localhost:4000";
             attachedImageUrl = `${apiBase}/api/v1/media/${encodeURIComponent(saved.mediaId)}`;
             attachedPhash = attachedPhash || saved.phash;
+          }
+        } else if (attachedImageUrl && /^https?:\/\//i.test(attachedImageUrl)) {
+          if (!attachedPhash) {
+            try {
+              const saved = await mediaStore.saveFromUrl(attachedImageUrl);
+              if (saved) {
+                attachedPhash = saved.phash;
+              }
+            } catch {
+              // Non-blocking if remote host fails
+            }
           }
         }
 
@@ -919,23 +1241,32 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
   return { server, engine };
 }
 
-const MAX_BODY_BYTES = 1_000_000;
+const MAX_BODY_BYTES = 25 * 1024 * 1024; // 25 MB allows high-resolution mobile camera uploads
 
 function readRawBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
+    let rejected = false;
     req.on("data", (chunk: Buffer) => {
+      if (rejected) return;
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new HttpError(413, "Request body exceeds the 1 MB limit."));
-        req.destroy();
+        rejected = true;
+        reject(new HttpError(413, "Request body exceeds the maximum 25 MB limit."));
+        req.resume(); // drain incoming data gracefully without destroying TCP socket
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
+    req.on("end", () => {
+      if (!rejected) {
+        resolve(Buffer.concat(chunks).toString("utf8"));
+      }
+    });
+    req.on("error", (err) => {
+      if (!rejected) reject(err);
+    });
   });
 }
 

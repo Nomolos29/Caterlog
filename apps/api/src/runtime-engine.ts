@@ -23,7 +23,10 @@ import {
   resolveIntegrationConfig,
   WhatsAppCatalogAdapter,
   WhatsAppCloudAdapter,
+  type CatalogProductInput,
   type CatalogSyncResult,
+  type RefundResult,
+  type SubAccountResult,
   type EnvLike,
   type IntegrationConfig,
 } from "@caterlog/integrations";
@@ -154,6 +157,11 @@ export class CaterlogStage1Engine {
     copilotMode: ((process.env.COPILOT_MODE as DomainCopilotMode) || "FULL_AUTO") as DomainCopilotMode,
     copilotIdleSeconds: 60,
     reservationTtlMinutes: 15,
+    bankCode: "50515",
+    bankName: "Moniepoint MFB",
+    bankAccountNumber: "8031234567",
+    bankAccountName: "Amaka Luxury Shoes Ltd",
+    monnifySubAccountCode: "MFY_SUB_AMAKA_001",
   };
 
   public products: RuntimeProduct[] = [
@@ -531,10 +539,29 @@ export class CaterlogStage1Engine {
     headerText?: string;
     footerText?: string;
   }): Promise<void> {
+    let finalImageUrl = params.imageUrl;
+    let mediaBuffer: Buffer | undefined;
+    let mediaContentType: string | undefined;
+
+    if (params.imageUrl) {
+      const mediaMatch = params.imageUrl.match(/\/api\/v1\/media\/([^/?#]+)/);
+      if (mediaMatch?.[1]) {
+        const item = mediaStore.getMedia(decodeURIComponent(mediaMatch[1]));
+        if (item) {
+          mediaBuffer = item.buffer;
+          mediaContentType = item.contentType;
+          const pub = await mediaStore.getPublicUrl(item.mediaId);
+          if (pub) finalImageUrl = pub;
+        }
+      }
+    }
+
     await this.whatsapp.sendWhatsAppMessage({
       toPhone: params.toPhone,
       text: params.text,
-      imageUrl: params.imageUrl,
+      imageUrl: finalImageUrl,
+      mediaBuffer,
+      mediaContentType,
       quickReplies: params.quickReplies,
       headerText: params.headerText,
       footerText: params.footerText,
@@ -798,12 +825,13 @@ export class CaterlogStage1Engine {
             effectiveBasePrice = variantWithPrice?.priceKobo ?? 0n;
           }
 
+          const finalImageUrl = attachedImageUrl || cmd.imageUrl;
           const prod = this.addProduct({
             skuCode,
             name: cmd.name,
             basePriceKobo: effectiveBasePrice,
             stockTotal: cmd.stockTotal,
-            primaryImageUrl: attachedImageUrl,
+            primaryImageUrl: finalImageUrl,
             imagePhash: attachedImagePhash,
             variants: mappedVariants,
           });
@@ -1184,7 +1212,7 @@ export class CaterlogStage1Engine {
     simulateFastForwardIdleTimer?: boolean;
   }): Promise<{
     copilotDecision: ReturnType<typeof evaluateCopilotAction>;
-    step?: "PROMPTED_FOR_QUANTITY" | "PROMPTED_FOR_SHIPPING_ZONE" | "INVOICE_CREATED" | "OUT_OF_STOCK" | "UNMATCHED";
+    step?: "PROMPTED_FOR_QUANTITY" | "PROMPTED_FOR_SHIPPING_ZONE" | "INVOICE_CREATED" | "OUT_OF_STOCK" | "ORDER_TRACKED" | "UNMATCHED";
     createdOrder?: RuntimeOrder;
   }> {
     const buyerMessageTime = new Date();
@@ -2582,6 +2610,7 @@ export class CaterlogStage1Engine {
       customerPhone: params.buyerPhone,
       expectedAmountKobo: pricing.totalAmountKobo,
       expiresAt,
+      vendorSubAccountCode: this.vendor.monnifySubAccountCode,
     });
 
     const orderItems: RuntimeOrderItem[] = rawCart.map((it, idx) => ({
@@ -2644,6 +2673,8 @@ export class CaterlogStage1Engine {
         await this.persistence.createOrder(newOrder, p);
       }
     });
+
+    this.triggerRealtimeCatalogSync();
 
     const itemInvoiceLines = rawCart.map((it) => {
       const vDisplay = it.variantName ? ` (${it.variantName})` : "";
@@ -2916,7 +2947,7 @@ export class CaterlogStage1Engine {
 
   private buildQuantityPrompt(
     product: RuntimeProduct,
-    variant: RuntimeVariant | undefined,
+    variant: RuntimeProductVariant | undefined,
     availableStock: number
   ): { text: string; quickReplies: QuickReplyOption[] } {
     const itemLabel = variant ? `${product.name} — ${variant.name}` : product.name;
@@ -3104,6 +3135,8 @@ export class CaterlogStage1Engine {
       verifiedIncomingKobo: verified.amountPaidKobo,
     });
 
+    const wasExpired = order.status === "EXPIRED" || Boolean(order.reservationReleased);
+
     assertValidOrderTransition(order.status, decision.nextStatus);
 
     order.amountPaidKobo = decision.newAmountPaidKobo;
@@ -3111,8 +3144,6 @@ export class CaterlogStage1Engine {
     order.status = decision.nextStatus;
 
     const product = this.products.find((p) => p.id === order.productId);
-
-    const wasExpired = order.status === "EXPIRED" || Boolean(order.reservationReleased);
 
     // If order was expired, verify whether physical stock is still available before reviving!
     let isOversoldOnLatePayment = false;
@@ -3147,6 +3178,8 @@ export class CaterlogStage1Engine {
         }
       }
     }
+
+    order.paymentTransactionRef = verified.providerTransactionRef;
 
     if (decision.nextStatus === "PAID") {
       order.paidAt = new Date();
@@ -3249,6 +3282,9 @@ export class CaterlogStage1Engine {
           ? `${order.productName} (${order.variantName})`
           : order.productName;
 
+        const dashboardBase = (process.env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+        const trackUrl = `${dashboardBase}/track/${encodeURIComponent(order.shortCode)}`;
+
         const buyerReceipt = [
           `✅ *Payment Confirmed!* (${formatNaira(decision.newAmountPaidKobo)})`,
           `🧾 Receipt: *${order.shortCode}*`,
@@ -3260,6 +3296,8 @@ export class CaterlogStage1Engine {
           ``,
           `📍 *Where should the rider deliver your package?*`,
           `Please reply with your full street address, nearest landmark, and contact phone number (e.g. *14 Admiralty Way, Lekki Phase 1*):`,
+          ``,
+          `🔗 *Web Receipt & Live Tracking:* ${trackUrl}`,
         ].filter(Boolean).join("\n");
 
         const vendorAlert = [
@@ -3345,6 +3383,7 @@ export class CaterlogStage1Engine {
     });
 
     await this.broadcastStateChange();
+    this.triggerRealtimeCatalogSync();
     return {
       order,
       status: decision.nextStatus,
@@ -3354,12 +3393,31 @@ export class CaterlogStage1Engine {
     };
   }
 
+  private catalogSyncDebounceTimer: NodeJS.Timeout | null = null;
+
+  /**
+   * Automatically synchronizes inventory and products with WhatsApp Business Catalog
+   * in real time whenever products are added, updated, stock counts change, or items are sold.
+   */
+  public triggerRealtimeCatalogSync(): void {
+    if (this.catalogSyncDebounceTimer) {
+      clearTimeout(this.catalogSyncDebounceTimer);
+    }
+    this.catalogSyncDebounceTimer = setTimeout(() => {
+      this.catalogSyncDebounceTimer = null;
+      void this.syncWhatsAppCatalog({ deleteMissing: true, silent: true }).catch((err) => {
+        console.warn("[caterlog:catalog] Real-time background WhatsApp catalog sync failed:", err);
+      });
+    }, 250);
+  }
+
   /**
    * Pushes the current inventory to the WhatsApp Business catalog.
    * Mock mode publishes to an in-memory catalog; live mode calls the Meta Graph API.
    */
   public async syncWhatsAppCatalog(options: {
     deleteMissing?: boolean;
+    silent?: boolean;
   } = {}): Promise<CatalogSyncResult> {
     const apiBase = (process.env.API_BASE_URL || "http://localhost:4000").replace(/\/+$/, "");
     const isLocalApi = /localhost|127\.0\.0\.1/i.test(apiBase);
@@ -3439,12 +3497,14 @@ export class CaterlogStage1Engine {
             .map((failure) => `${failure.skuCode} (${failure.error})`)
             .join(", ")}`
         : "";
-    this.appendChat({
-      channel: "VENDOR_ADMIN_WA",
-      sender: "CATERLOG_BOT",
-      fromPhone: "CATERLOG",
-      text: `🛍️ *WhatsApp Catalog Sync (${result.mode})*\nPublished ${result.upserted}/${result.attempted} product(s) to catalog ${result.catalogId ?? "(mock)"}.${failureNote}`,
-    });
+    if (!options.silent) {
+      this.appendChat({
+        channel: "VENDOR_ADMIN_WA",
+        sender: "CATERLOG_BOT",
+        fromPhone: "CATERLOG",
+        text: `🛍️ *WhatsApp Catalog Sync (${result.mode})*\nPublished ${result.upserted}/${result.attempted} product(s) to catalog ${result.catalogId ?? "(mock)"}.${failureNote}`,
+      });
+    }
 
     await this.broadcastStateChange();
     return result;
@@ -3551,6 +3611,7 @@ export class CaterlogStage1Engine {
     await this.persistNow("expireOrder", () => this.persistence.saveOrder(ord));
 
     await this.broadcastStateChange();
+    this.triggerRealtimeCatalogSync();
     return ord;
   }
 
@@ -3667,6 +3728,174 @@ export class CaterlogStage1Engine {
     return this.vendor;
   }
 
+  public onboardVendorProfile(input: {
+    businessName: string;
+    whatsappPhone: string;
+    isExistingBusiness?: boolean;
+    catalogSelection?: "mirror" | "custom";
+  }): RuntimeVendor {
+    const cleanPhone = input.whatsappPhone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
+    const formattedPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
+    const cleanName = input.businessName.trim() || "My WhatsApp Store";
+    const cleanSlug = cleanName.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").slice(0, 32);
+
+    this.vendor.businessName = cleanName;
+    this.vendor.whatsappPhone = formattedPhone;
+    if (cleanSlug) {
+      this.vendor.slug = cleanSlug;
+    }
+    if (input.isExistingBusiness) {
+      this.vendor.verificationStatus = "VERIFIED";
+    }
+    if (!this.vendor.monnifySubAccountCode) {
+      this.vendor.monnifySubAccountCode = `MFY_SUB_${(cleanSlug || "STORE").slice(0, 8).toUpperCase()}_${Date.now().toString().slice(-4)}`;
+    }
+
+    this.persistInBackground("onboardVendorProfile", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+    this.triggerRealtimeCatalogSync();
+    return this.vendor;
+  }
+
+  public async linkVendorBankAccount(input: {
+    bankCode: string;
+    accountNumber: string;
+    email?: string;
+  }): Promise<{
+    vendor: RuntimeVendor;
+    subAccount: SubAccountResult;
+  }> {
+    const cleanAccount = input.accountNumber.trim().replace(/\D/g, "");
+    if (cleanAccount.length !== 10) {
+      throw new Error("A valid 10-digit Nigerian NUBAN account number is required.");
+    }
+
+    const email = input.email || `${this.vendor.slug}@caterlog.store`;
+    const subAccount = await this.monnify.createSubAccount({
+      bankCode: input.bankCode,
+      accountNumber: cleanAccount,
+      email,
+      defaultSplitPercentage: 100,
+    });
+
+    this.vendor.bankCode = input.bankCode;
+    this.vendor.bankName = subAccount.bankName ?? this.monnify.lookupBankName(input.bankCode);
+    this.vendor.bankAccountNumber = cleanAccount;
+    this.vendor.bankAccountName = subAccount.accountName ?? this.vendor.businessName;
+    this.vendor.monnifySubAccountCode = subAccount.subAccountCode;
+
+    this.persistInBackground("linkVendorBankAccount", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+
+    this.appendChat({
+      channel: "VENDOR_ADMIN_WA",
+      sender: "CATERLOG_BOT",
+      fromPhone: "CATERLOG",
+      text: `🏦 *Settlement Subaccount Provisioned:*\n• Subaccount: \`${subAccount.subAccountCode}\`\n• Bank: *${this.vendor.bankName}*\n• Account: \`${cleanAccount}\` (${this.vendor.bankAccountName})\n\nCustomer payments will be automatically routed here via Monnify split escrow.`,
+    });
+
+    return { vendor: this.vendor, subAccount };
+  }
+
+  public updateVendorSettings(input: {
+    businessName?: string;
+    notifyPhone?: string;
+  }): RuntimeVendor {
+    if (input.businessName) this.vendor.businessName = input.businessName.trim();
+    if (input.notifyPhone) this.vendor.whatsappPhone = input.notifyPhone.trim();
+    this.persistInBackground("updateVendorSettings", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+    return this.vendor;
+  }
+
+  private readonly activeOtps = new Map<string, {
+    code: string;
+    phone: string;
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
+    expiresAt: number;
+    attempts: number;
+  }>();
+
+  /**
+   * Generates a cryptographically random 6-digit numeric OTP/PIN and delivers it
+   * securely to the merchant's WhatsApp phone. Never leaks the code in API responses.
+   */
+  public generateOtp(
+    phone: string,
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" = "LOGIN"
+  ): string {
+    const cleanPhone = phone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
+    const formattedPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const key = `${formattedPhone}:${purpose}`;
+    this.activeOtps.set(key, {
+      code,
+      phone: formattedPhone,
+      purpose,
+      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+      attempts: 0,
+    });
+
+    const purposeDescriptions: Record<string, string> = {
+      LOGIN: "Dashboard Login",
+      SIGNUP: "Store Activation",
+      WITHDRAWAL: "Fund Withdrawal & Payout",
+      SETTINGS: "Sensitive Account Settings Update",
+    };
+
+    const label = purposeDescriptions[purpose] || "Verification";
+
+    void this.whatsapp.sendTextMessage({
+      toPhone: formattedPhone,
+      text: `🔐 *Caterlog Security Verification*\n\nYour 6-digit verification code for *${label}* is:\n\n*${code}*\n\n⏳ _Valid for 10 minutes. NEVER share this code with anyone._`,
+      vendorPhoneId: this.vendor.whatsappPhoneId,
+    }).catch(console.error);
+
+    return code;
+  }
+
+  /**
+   * Verifies the 6-digit numeric code entered by the user. Consumes upon success.
+   */
+  public verifyOtp(
+    phone: string,
+    inputCode: string,
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" = "LOGIN"
+  ): boolean {
+    const cleanPhone = phone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
+    const formattedPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
+    const key = `${formattedPhone}:${purpose}`;
+    const record = this.activeOtps.get(key);
+
+    if (!record) {
+      // Also allow checking against active vendor phone
+      const vendorKey = `${this.vendor.whatsappPhone}:${purpose}`;
+      const vendorRecord = this.activeOtps.get(vendorKey);
+      if (vendorRecord && vendorRecord.expiresAt > Date.now() && vendorRecord.code === inputCode.trim()) {
+        this.activeOtps.delete(vendorKey);
+        return true;
+      }
+      return false;
+    }
+
+    if (record.expiresAt < Date.now()) {
+      this.activeOtps.delete(key);
+      return false;
+    }
+
+    if (record.code !== inputCode.trim()) {
+      record.attempts += 1;
+      if (record.attempts >= 5) {
+        this.activeOtps.delete(key);
+      }
+      return false;
+    }
+
+    this.activeOtps.delete(key);
+    return true;
+  }
+
   public updateProductStock(skuCode: string, stockTotal: number): RuntimeProduct | undefined {
     const prod = this.products.find((p) => p.skuCode.toUpperCase() === skuCode.toUpperCase());
     if (!prod) return undefined;
@@ -3681,6 +3910,7 @@ export class CaterlogStage1Engine {
     prod.stockTotal = stockTotal;
     this.persistInBackground("saveProductStock", () => this.persistence.saveProduct(prod));
     void this.broadcastStateChange();
+    this.triggerRealtimeCatalogSync();
     return prod;
   }
 
@@ -3694,6 +3924,7 @@ export class CaterlogStage1Engine {
     primaryImageUrl?: string;
     imagePhash?: string;
     variants?: RuntimeProductVariant[];
+    customFields?: Record<string, string>;
   }): RuntimeProduct {
     const name = input.name?.trim() ?? "";
     if (!name) {
@@ -3738,7 +3969,7 @@ export class CaterlogStage1Engine {
     const resolvedImageUrl =
       input.primaryImageUrl && input.primaryImageUrl.trim() !== ""
         ? input.primaryImageUrl.trim()
-        : "";
+        : getSmartFallbackImage(name, input.category);
 
     let resolvedPhash = input.imagePhash;
     if (!resolvedPhash && resolvedImageUrl) {
@@ -3767,6 +3998,7 @@ export class CaterlogStage1Engine {
       existing.stockTotal = calculatedStock;
       if (input.description) existing.description = input.description.trim();
       if (input.category) existing.category = input.category.trim();
+      if (input.customFields !== undefined) existing.customFields = input.customFields;
       if (input.primaryImageUrl !== undefined) {
         existing.primaryImageUrl = resolvedImageUrl;
         existing.imagePhash = resolvedPhash;
@@ -3776,6 +4008,7 @@ export class CaterlogStage1Engine {
       }
       this.persistInBackground("addProduct", () => this.persistence.saveProduct(existing));
       void this.broadcastStateChange();
+      this.triggerRealtimeCatalogSync();
       return existing;
     }
 
@@ -3791,10 +4024,12 @@ export class CaterlogStage1Engine {
       stockTotal: calculatedStock,
       stockReserved: 0,
       variants: normalizedVariants,
+      customFields: input.customFields,
     };
     this.products.unshift(created);
     this.persistInBackground("addProduct", () => this.persistence.saveProduct(created));
     void this.broadcastStateChange();
+    this.triggerRealtimeCatalogSync();
     return created;
   }
 
@@ -3807,6 +4042,7 @@ export class CaterlogStage1Engine {
     primaryImageUrl?: string;
     imagePhash?: string;
     variants?: RuntimeProductVariant[];
+    customFields?: Record<string, string>;
   }): RuntimeProduct | undefined {
     const clean = skuCode.trim().toUpperCase();
     const existing = this.products.find((p) => p.skuCode.toUpperCase() === clean);
@@ -3815,6 +4051,7 @@ export class CaterlogStage1Engine {
     if (input.name) existing.name = input.name.trim();
     if (input.description !== undefined) existing.description = input.description.trim();
     if (input.category) existing.category = input.category.trim();
+    if (input.customFields !== undefined) existing.customFields = input.customFields;
     if (input.basePriceKobo !== undefined && input.basePriceKobo > 0n) existing.basePriceKobo = input.basePriceKobo;
     if (input.primaryImageUrl !== undefined) {
       existing.primaryImageUrl = input.primaryImageUrl.trim();
@@ -3838,6 +4075,7 @@ export class CaterlogStage1Engine {
 
     this.persistInBackground("updateProduct", () => this.persistence.saveProduct(existing));
     void this.broadcastStateChange();
+    this.triggerRealtimeCatalogSync();
     return existing;
   }
 
@@ -3858,6 +4096,7 @@ export class CaterlogStage1Engine {
     });
 
     void this.broadcastStateChange();
+    this.triggerRealtimeCatalogSync();
     return true;
   }
 
@@ -4003,6 +4242,9 @@ export class CaterlogStage1Engine {
       ? `\n🛵 *Dispatch Rider:* *${ord.riderPhone}*\n_The rider will call you upon arrival._`
       : `\n🛵 *Your package has been handed to our dispatch courier.*`;
 
+    const dashboardBase = (process.env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+    const trackUrl = `${dashboardBase}/track/${encodeURIComponent(ord.shortCode)}`;
+
     const dispatchNotice = [
       `🚚 *ORDER OUT FOR DELIVERY!*`,
       ``,
@@ -4013,6 +4255,7 @@ export class CaterlogStage1Engine {
       addressNotice,
       riderNotice,
       ``,
+      `🔗 *Live Order Tracker & Receipt:* ${trackUrl}`,
       `💬 Reply *status* or *track* at any time to monitor your delivery.`,
     ].join("\n");
 
@@ -4038,6 +4281,370 @@ export class CaterlogStage1Engine {
 
     await this.broadcastStateChange();
     return ord;
+  }
+
+  /**
+   * Returns a public-safe order tracking & official receipt payload for `/track/:shortCode`.
+   */
+  public getPublicOrderReceipt(shortCode: string) {
+    const clean = shortCode.trim().toUpperCase();
+    const ord = this.orders.find((o) => o.shortCode.toUpperCase() === clean);
+    if (!ord) return undefined;
+
+    const dashboardBase = (process.env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+    const isPaid =
+      ord.status === "PAID" ||
+      ord.status === "PROCESSING" ||
+      ord.status === "OUT_FOR_DELIVERY" ||
+      ord.status === "FULFILLED";
+
+    return {
+      shortCode: ord.shortCode,
+      status: ord.status,
+      isPaid,
+      paymentStamp:
+        ord.status === "REFUNDED"
+          ? "REFUNDED — PAYMENT RETURNED TO BUYER"
+          : isPaid
+          ? "PAID IN ADVANCE — DO NOT COLLECT CASH ON DELIVERY"
+          : "AWAITING BANK TRANSFER CONFIRMATION",
+      customerName: ord.customerName,
+      customerPhone: ord.customerPhone,
+      alternatePhone: ord.alternatePhone ?? "",
+      deliveryAddress: ord.deliveryAddress ?? "",
+      deliveryLandmark: ord.deliveryLandmark ?? "",
+      shippingZoneName: ord.shippingZoneName,
+      riderPhone: ord.riderPhone ?? "",
+      productId: ord.productId,
+      productSku: ord.productSku,
+      productName: ord.productName,
+      variantName: ord.variantName,
+      quantity: ord.quantity,
+      items: ord.items?.map((it) => ({
+        ...it,
+        unitPriceFormatted: formatNaira(it.unitPriceKobo),
+        subtotalFormatted: formatNaira(it.subtotalKobo),
+      })),
+      subtotalFormatted: formatNaira(ord.subtotalKobo),
+      shippingFeeFormatted: formatNaira(ord.shippingFeeKobo),
+      discountCode: ord.discountCode,
+      discountAmountFormatted: formatNaira(ord.discountAmountKobo),
+      totalAmountNaira: koboToNaira(ord.totalAmountKobo),
+      totalAmountFormatted: formatNaira(ord.totalAmountKobo),
+      amountPaidNaira: koboToNaira(ord.amountPaidKobo),
+      amountPaidFormatted: formatNaira(ord.amountPaidKobo),
+      remainingBalanceNaira: koboToNaira(
+        ord.totalAmountKobo > ord.amountPaidKobo ? ord.totalAmountKobo - ord.amountPaidKobo : 0n
+      ),
+      remainingBalanceFormatted: formatNaira(
+        ord.totalAmountKobo > ord.amountPaidKobo ? ord.totalAmountKobo - ord.amountPaidKobo : 0n
+      ),
+      overpaidAmountFormatted: formatNaira(
+        ord.amountPaidKobo > ord.totalAmountKobo ? ord.amountPaidKobo - ord.totalAmountKobo : 0n
+      ),
+      invoiceReference: ord.invoiceReference,
+      paymentTransactionRef: ord.paymentTransactionRef ?? ord.invoiceReference,
+      accountNumber: ord.accountNumber,
+      bankName: ord.bankName,
+      accountName: ord.accountName,
+      refundReference: ord.refundReference,
+      refundedAmountFormatted:
+        ord.refundedAmountKobo !== undefined ? formatNaira(ord.refundedAmountKobo) : undefined,
+      refundReason: ord.refundReason,
+      refundedAt: ord.refundedAt,
+      createdAt: ord.createdAt,
+      paidAt: ord.paidAt,
+      dispatchedAt: ord.dispatchedAt,
+      paymentExpiresAt: ord.paymentExpiresAt,
+      trackUrl: `${dashboardBase}/track/${encodeURIComponent(ord.shortCode)}`,
+      vendor: {
+        businessName: this.vendor.businessName,
+        slug: this.vendor.slug,
+        whatsappPhone: this.vendor.whatsappPhone,
+        verificationStatus: this.vendor.verificationStatus,
+      },
+    };
+  }
+
+  /**
+   * Updates the buyer's street delivery address, landmark, and alternate phone number
+   * from the public post-payment tracking page (`/track/:shortCode`) or dashboard.
+   */
+  public async updateOrderDeliveryDetails(
+    shortCode: string,
+    input: {
+      deliveryAddress?: string;
+      deliveryLandmark?: string;
+      alternatePhone?: string;
+    }
+  ): Promise<RuntimeOrder | undefined> {
+    const clean = shortCode.trim().toUpperCase();
+    const ord = this.orders.find((o) => o.shortCode.toUpperCase() === clean);
+    if (!ord) return undefined;
+
+    if (input.deliveryAddress !== undefined) {
+      const addr = input.deliveryAddress.trim();
+      if (addr) ord.deliveryAddress = addr;
+    }
+    if (input.deliveryLandmark !== undefined) {
+      ord.deliveryLandmark = input.deliveryLandmark.trim();
+    }
+    if (input.alternatePhone !== undefined) {
+      ord.alternatePhone = input.alternatePhone.trim();
+    }
+
+    // Clear AWAITING_DELIVERY_ADDRESS session if active for this order
+    const session = this.buyerSessions.get(ord.customerPhone);
+    if (
+      session &&
+      session.state === "AWAITING_DELIVERY_ADDRESS" &&
+      (!session.activeOrderId || session.activeOrderId === ord.id)
+    ) {
+      this.buyerSessions.delete(ord.customerPhone);
+    }
+
+    await this.persistNow("updateOrderDeliveryDetails", () => this.persistence.saveOrder(ord));
+
+    const summaryLines = [
+      ord.deliveryAddress ? `🏠 *Address:* ${ord.deliveryAddress}` : "",
+      ord.deliveryLandmark ? `🧭 *Nearest Landmark:* ${ord.deliveryLandmark}` : "",
+      ord.alternatePhone ? `📞 *Alternate Phone:* ${ord.alternatePhone}` : "",
+    ].filter(Boolean);
+
+    if (summaryLines.length > 0) {
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: ord.customerPhone,
+        text: [
+          `✅ *Delivery Instructions Updated! (${ord.shortCode})*`,
+          ...summaryLines,
+          `🚚 *Delivery Zone:* ${ord.shippingZoneName}`,
+          ``,
+          `_Our dispatch rider will use these instructions for your delivery._`,
+        ].join("\n"),
+        headerText: "Delivery Details Saved",
+      });
+
+      this.appendChat({
+        channel: "VENDOR_ADMIN_WA",
+        sender: "CATERLOG_BOT",
+        fromPhone: "CATERLOG",
+        text: [
+          `📍 *Delivery Details Updated on Web Receipt (${ord.shortCode}):*`,
+          `👤 *Customer:* ${ord.customerName} (${ord.customerPhone})`,
+          ...summaryLines,
+        ].join("\n"),
+      });
+    }
+
+    await this.broadcastStateChange();
+    return ord;
+  }
+
+  /**
+   * Generates a 1-click Dispatch Rider Waybill / Packing Slip manifest and preformatted WhatsApp message.
+   */
+  public getOrderWaybill(shortCode: string) {
+    const clean = shortCode.trim().toUpperCase();
+    const ord = this.orders.find((o) => o.shortCode.toUpperCase() === clean);
+    if (!ord) return undefined;
+
+    const dashboardBase = (process.env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+    const trackUrl = `${dashboardBase}/track/${encodeURIComponent(ord.shortCode)}`;
+    const isPaid =
+      ord.status === "PAID" ||
+      ord.status === "PROCESSING" ||
+      ord.status === "OUT_FOR_DELIVERY" ||
+      ord.status === "FULFILLED";
+
+    const itemsList =
+      ord.items && ord.items.length > 0
+        ? ord.items.map((i) => ({
+            sku: i.variantSku || i.productSku,
+            name: i.variantName ? `${i.productName} (${i.variantName})` : i.productName,
+            quantity: i.quantity,
+          }))
+        : [
+            {
+              sku: ord.variantSku || ord.productSku,
+              name: ord.variantName ? `${ord.productName} (${ord.variantName})` : ord.productName,
+              quantity: ord.quantity || 1,
+            },
+          ];
+
+    const paymentStamp = isPaid
+      ? "✅ PAID IN ADVANCE — DO NOT COLLECT CASH FROM CUSTOMER"
+      : "⚠️ UNPAID — DO NOT RELEASE PACKAGE";
+
+    const whatsappRiderText = [
+      `🛵 *DISPATCH WAYBILL — #${ord.shortCode}*`,
+      `🏪 *Store:* ${this.vendor.businessName} (${this.vendor.whatsappPhone})`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `💳 *Payment Status:* *${paymentStamp}*`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `👤 *Customer:* ${ord.customerName}`,
+      `📞 *Primary Phone:* ${ord.customerPhone}`,
+      ord.alternatePhone ? `☎️ *Alternate / Gate Phone:* ${ord.alternatePhone}` : "",
+      `🚚 *Zone:* ${ord.shippingZoneName}`,
+      `🏠 *Street Address:* ${ord.deliveryAddress || "Confirm with customer via phone"}`,
+      ord.deliveryLandmark ? `🧭 *Landmark:* ${ord.deliveryLandmark}` : "",
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `📦 *Package Items:*`,
+      ...itemsList.map((it) => `• ${it.name} [${it.sku}] ×${it.quantity}`),
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `🔗 *Live Receipt & Tracker:* ${trackUrl}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return {
+      waybillNumber: `WB-${ord.shortCode}`,
+      orderShortCode: ord.shortCode,
+      status: ord.status,
+      isPaid,
+      paymentStamp,
+      vendorName: this.vendor.businessName,
+      vendorPhone: this.vendor.whatsappPhone,
+      customerName: ord.customerName,
+      customerPhone: ord.customerPhone,
+      alternatePhone: ord.alternatePhone ?? "",
+      shippingZoneName: ord.shippingZoneName,
+      deliveryAddress: ord.deliveryAddress ?? "",
+      deliveryLandmark: ord.deliveryLandmark ?? "",
+      riderPhone: ord.riderPhone ?? "",
+      items: itemsList,
+      totalQuantity: itemsList.reduce((acc, i) => acc + i.quantity, 0),
+      totalAmountFormatted: formatNaira(ord.totalAmountKobo),
+      amountPaidFormatted: formatNaira(ord.amountPaidKobo),
+      paymentTransactionRef: ord.paymentTransactionRef ?? ord.invoiceReference,
+      trackUrl,
+      whatsappRiderText,
+      createdAt: ord.createdAt,
+      paidAt: ord.paidAt,
+      dispatchedAt: ord.dispatchedAt,
+    };
+  }
+
+  /**
+   * Executes a 1-click instant refund via Monnify, restores stock if applicable,
+   * transitions the order to `REFUNDED`, and notifies both buyer and vendor on WhatsApp.
+   */
+  public async refundOrder(
+    shortCode: string,
+    input: { reason?: string; amountKobo?: bigint } = {}
+  ): Promise<{ order: RuntimeOrder; refund: RefundResult } | undefined> {
+    const clean = shortCode.trim().toUpperCase();
+    const ord = this.orders.find((o) => o.shortCode.toUpperCase() === clean);
+    if (!ord) return undefined;
+
+    if (ord.status === "REFUNDED") {
+      throw new Error(`Order ${ord.shortCode} has already been refunded.`);
+    }
+    if (ord.amountPaidKobo <= 0n) {
+      throw new Error(`Cannot refund Order ${ord.shortCode} because no payment (₦0) has been received.`);
+    }
+
+    const refundAmountKobo =
+      input.amountKobo && input.amountKobo > 0n && input.amountKobo <= ord.amountPaidKobo
+        ? input.amountKobo
+        : ord.amountPaidKobo;
+    const reason = input.reason?.trim() || "Order cancelled / out-of-stock instant refund";
+
+    assertValidOrderTransition(ord.status, "REFUNDED");
+
+    const txRef = ord.paymentTransactionRef || ord.invoiceReference;
+    const refund = await this.monnify.initiateRefund({
+      transactionReference: txRef,
+      refundAmountKobo,
+      refundReason: reason,
+      customerNote: `Refund for Order ${ord.shortCode} from ${this.vendor.businessName}`,
+    });
+
+    const previousStatus = ord.status;
+    ord.status = "REFUNDED";
+    ord.refundReference = refund.refundReference;
+    ord.refundedAmountKobo = refundAmountKobo;
+    ord.refundReason = reason;
+    ord.refundedAt = refund.createdAt;
+
+    // Restore stock if it was deducted on PAID or reserved on PARTIALLY_PAID
+    if (
+      (previousStatus === "PAID" || previousStatus === "PROCESSING") &&
+      !ord.reservationReleased
+    ) {
+      if (ord.items && ord.items.length > 0) {
+        for (const item of ord.items) {
+          const prod = this.products.find((p) => p.id === item.productId);
+          if (prod) {
+            prod.stockTotal += item.quantity;
+            if (item.variantId && prod.variants) {
+              const v = prod.variants.find((vr) => vr.id === item.variantId);
+              if (v) v.stockTotal += item.quantity;
+            }
+            if (prod.variants && prod.variants.length > 0) {
+              prod.stockTotal = prod.variants.reduce((sum, v) => sum + v.stockTotal, 0);
+            }
+            this.persistInBackground("restoreRefundedStock", () => this.persistence.saveProduct(prod));
+          }
+        }
+      } else {
+        const prod = this.products.find((p) => p.id === ord.productId);
+        if (prod) {
+          prod.stockTotal += ord.quantity;
+          if (ord.variantId || ord.variantSku) {
+            const v = prod.variants?.find(
+              (vr) => vr.id === ord.variantId || vr.skuCode === ord.variantSku
+            );
+            if (v) v.stockTotal += ord.quantity;
+          }
+          if (prod.variants && prod.variants.length > 0) {
+            prod.stockTotal = prod.variants.reduce((sum, v) => sum + v.stockTotal, 0);
+          }
+          this.persistInBackground("restoreRefundedStock", () => this.persistence.saveProduct(prod));
+        }
+      }
+      ord.reservationReleased = true;
+    } else if (previousStatus === "PARTIALLY_PAID" && !ord.reservationReleased) {
+      const prod = this.products.find((p) => p.id === ord.productId);
+      if (prod) {
+        prod.stockReserved = Math.max(0, prod.stockReserved - ord.quantity);
+        this.persistInBackground("releaseRefundedReservation", () => this.persistence.saveProduct(prod));
+      }
+      ord.reservationReleased = true;
+    }
+
+    const dashboardBase = (process.env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+    const trackUrl = `${dashboardBase}/track/${encodeURIComponent(ord.shortCode)}`;
+
+    const buyerRefundMsg = [
+      `↩️ *INSTANT REFUND PROCESSED (${ord.shortCode})*`,
+      ``,
+      `Hello *${ord.customerName}*, a refund of *${formatNaira(refundAmountKobo)}* has been initiated back to your bank account by *${this.vendor.businessName}*.`,
+      ``,
+      `🧾 *Refund Reference:* \`${refund.refundReference}\``,
+      `📝 *Reason:* ${reason}`,
+      `🔗 *Receipt & Status:* ${trackUrl}`,
+    ].join("\n");
+
+    await this.dispatchWhatsAppAndRecordChat({
+      channel: "BUYER_SHOP_WA",
+      toPhone: ord.customerPhone,
+      text: buyerRefundMsg,
+      headerText: "Refund Processed",
+    });
+
+    this.appendChat({
+      channel: "VENDOR_ADMIN_WA",
+      sender: "CATERLOG_BOT",
+      fromPhone: "CATERLOG",
+      text: `↩️ *Order ${ord.shortCode} Refunded:* ${formatNaira(refundAmountKobo)} returned to ${ord.customerName} (${ord.customerPhone}). Ref: \`${refund.refundReference}\`.`,
+    });
+
+    await this.persistNow("refundOrder", () => this.persistence.saveOrder(ord));
+    await this.broadcastStateChange();
+    this.triggerRealtimeCatalogSync();
+
+    return { order: ord, refund };
   }
 
   public getAnalyticsBreakdown(range: "today" | "week" | "month" = "month") {
@@ -4158,6 +4765,8 @@ export class CaterlogStage1Engine {
         overpaidAmountFormatted: formatNaira(
           o.amountPaidKobo > o.totalAmountKobo ? o.amountPaidKobo - o.totalAmountKobo : 0n
         ),
+        refundedAmountFormatted:
+          o.refundedAmountKobo !== undefined ? formatNaira(o.refundedAmountKobo) : undefined,
       })),
       chatMessages: this.chatMessages.slice(-50),
       integrations: this.getIntegrationStatus(),

@@ -13,9 +13,12 @@ interface ProductsViewProps {
   onAddProduct: (input: {
     skuCode?: string;
     name: string;
+    description?: string;
+    category?: string;
     priceNaira: number;
     stockTotal: number;
     primaryImageUrl?: string;
+    customFields?: Record<string, string>;
     variants?: Array<{
       id?: string;
       name: string;
@@ -28,9 +31,12 @@ interface ProductsViewProps {
     sku: string,
     input: {
       name?: string;
+      description?: string;
+      category?: string;
       priceNaira?: number;
       stockTotal?: number;
       primaryImageUrl?: string;
+      customFields?: Record<string, string>;
       variants?: Array<{
         id?: string;
         name: string;
@@ -81,35 +87,6 @@ export function ProductsView({
   // Tabs: 'all' | 'my-inventory' | 'reselling' | 'exceptions' | 'mirror-wizard'
   const [activeTab, setActiveTab] = useState<"all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard">(initialTab);
   const [resellingList, setResellingList] = useState<ResellingItem[]>(INITIAL_RESELLING);
-
-  // WhatsApp catalog sync state
-  const [syncingCatalog, setSyncingCatalog] = useState(false);
-  const [syncToast, setSyncToast] = useState<string | null>(null);
-
-  const handleSyncCatalog = async () => {
-    if (!onSyncWhatsAppCatalog) return;
-    setSyncingCatalog(true);
-    try {
-      const res = await onSyncWhatsAppCatalog();
-      if (res) {
-        const parts = [`${res.upserted}/${res.attempted} product(s) synced`];
-        if (res.deleted > 0) parts.push(`${res.deleted} deleted`);
-        const failMsg =
-          res.failed && res.failed.length > 0
-            ? ` ⚠️ ${res.failed.length} item(s) failed (${res.failed.map((f) => f.skuCode).join(", ")})`
-            : "";
-        setSyncToast(
-          `${res.failed && res.failed.length > 0 ? "⚠️" : "✓"} WhatsApp Catalog Sync: ${parts.join(", ")} (${res.mode} mode).${failMsg}`
-        );
-        setTimeout(() => setSyncToast(null), 5000);
-      }
-    } catch (err) {
-      setSyncToast(`⚠️ Catalog sync failed: ${err instanceof Error ? err.message : String(err)}`);
-      setTimeout(() => setSyncToast(null), 5000);
-    } finally {
-      setSyncingCatalog(false);
-    }
-  };
 
   // Reselling state
   const [searchReselling, setSearchReselling] = useState("");
@@ -328,15 +305,10 @@ export function ProductsView({
             </p>
           </div>
           <div className="flex items-center gap-2 self-start sm:self-center">
-            <button
-              onClick={handleSyncCatalog}
-              disabled={syncingCatalog}
-              className="px-3.5 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-60"
-              title="Push product pricing and stock updates to WhatsApp Business Catalog"
-            >
-              <span className={syncingCatalog ? "animate-spin" : ""}>🔄</span>
-              <span>{syncingCatalog ? "Syncing..." : "Sync WhatsApp Catalog"}</span>
-            </button>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50/80 border border-emerald-200/60 rounded-lg text-emerald-800 text-[11px] font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Real-Time Sync Active</span>
+            </div>
             <button
               onClick={() => {
                 if (onNavigateToNetwork) onNavigateToNetwork("catalog");
@@ -349,13 +321,6 @@ export function ProductsView({
             </button>
           </div>
         </div>
-
-        {syncToast && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2 animate-in fade-in">
-            <span>✓</span>
-            <span>{syncToast}</span>
-          </div>
-        )}
 
         {/* Tab Strip */}
         <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
@@ -612,15 +577,10 @@ export function ProductsView({
           <p className="text-sm text-gray-500 mt-0.5">Manage your digital inventory and live WhatsApp catalog.</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-center">
-          <button
-            onClick={handleSyncCatalog}
-            disabled={syncingCatalog}
-            className="px-3.5 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-60"
-            title="Push product pricing and stock updates to WhatsApp Business Catalog"
-          >
-            <span className={syncingCatalog ? "animate-spin" : ""}>🔄</span>
-            <span>{syncingCatalog ? "Syncing..." : "Sync WhatsApp Catalog"}</span>
-          </button>
+          <div className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50/80 border border-emerald-200/60 rounded-lg text-emerald-800 text-xs font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>WhatsApp Catalog Live Sync</span>
+          </div>
           <button
             onClick={() => {
               setEditingProduct(null);
@@ -633,13 +593,6 @@ export function ProductsView({
           </button>
         </div>
       </div>
-
-      {syncToast && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2 animate-in fade-in">
-          <span>✓</span>
-          <span>{syncToast}</span>
-        </div>
-      )}
 
       {/* Tab Strip */}
       <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
@@ -775,7 +728,14 @@ export function ProductsView({
                     <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-700 transition-colors">
                       {p.name}
                     </h3>
-                    <div className="text-[11px] font-mono text-gray-400 mt-0.5">{p.skuCode}</div>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <span className="text-[11px] font-mono text-gray-400">{p.skuCode}</span>
+                      {p.category && (
+                        <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                          {p.category}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="font-bold text-emerald-800 text-sm">
@@ -837,6 +797,21 @@ export function ProductsView({
                   </div>
                 )}
 
+                {/* Custom Fields / Attributes Chips */}
+                {p.customFields && Object.keys(p.customFields).length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {Object.entries(p.customFields).map(([key, val]) => (
+                      <span
+                        key={key}
+                        className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-gray-50 text-gray-700 border border-gray-200"
+                      >
+                        <span className="font-semibold text-gray-500">{key}:</span>
+                        <span className="font-medium text-gray-900">{val}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between pt-2 border-t border-gray-50 text-xs">
                   <span className="text-gray-500">Total stock available:</span>
                   <span className="font-bold text-gray-900">{p.availableStock} units</span>
@@ -860,10 +835,13 @@ export function ProductsView({
           if (editingProduct && onUpdateProduct) {
             await onUpdateProduct(editingProduct.skuCode, {
               name: data.name,
+              description: data.description,
+              category: data.category,
               priceNaira: data.priceNaira,
               stockTotal: data.stockTotal,
               primaryImageUrl: data.primaryImageUrl,
               variants: data.variants,
+              customFields: data.customFields,
             });
           } else if (editingProduct) {
             await onUpdateStock(editingProduct.skuCode, data.stockTotal);
@@ -871,10 +849,13 @@ export function ProductsView({
             await onAddProduct({
               name: data.name,
               skuCode: data.skuCode,
+              description: data.description,
+              category: data.category,
               priceNaira: data.priceNaira,
               stockTotal: data.stockTotal,
               primaryImageUrl: data.primaryImageUrl,
               variants: data.variants,
+              customFields: data.customFields,
             });
           }
           return true;

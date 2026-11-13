@@ -11,6 +11,31 @@ interface ProductVariant {
   stock: number;
 }
 
+interface CustomFieldItem {
+  id: string;
+  name: string;
+  value: string;
+}
+
+export const PRESET_CATEGORIES = [
+  "Fashion & Apparel",
+  "Shoes, Bags & Footwear",
+  "Beauty, Skincare & Cosmetics",
+  "Hair, Wigs & Extensions",
+  "Jewelry, Watches & Accessories",
+  "Phones, Gadgets & Computers",
+  "Electronics & Home Appliances",
+  "Food, Groceries & Catering",
+  "Kitchenware & Cookware",
+  "Home, Living & Decor",
+  "Health, Fitness & Wellness",
+  "Baby, Kids & Toys",
+  "Perfumes & Fragrances",
+  "Books, Stationery & Crafts",
+  "Automotive & Tools",
+  "Other / Custom Category",
+];
+
 interface ProductEditorModalProps {
   product?: ProductItem | null;
   isOpen: boolean;
@@ -31,8 +56,13 @@ export function ProductEditorModal({
 
   const [name, setName] = useState(product?.name || "");
   const [sku, setSku] = useState(product?.skuCode || `SKU-${Date.now().toString().slice(-4)}`);
-  const [category, setCategory] = useState(product?.category || "Kitchenware & Drinkware");
+  const [category, setCategory] = useState(product?.category || "Fashion & Apparel");
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [customCategoryText, setCustomCategoryText] = useState("");
   const [description, setDescription] = useState(product?.description || "");
+
+  // Custom Fields (Key-Value attributes like Color, Size, Brand, Material)
+  const [customFields, setCustomFields] = useState<CustomFieldItem[]>([]);
 
   // Pricing & Margins
   const [wholesaleCost, setWholesaleCost] = useState(product ? Math.round(product.basePriceNaira * 0.75) : 7500);
@@ -85,7 +115,16 @@ export function ProductEditorModal({
     if (product) {
       setName(product.name);
       setSku(product.skuCode);
-      setCategory(product.category || "Kitchenware & Drinkware");
+      const isPreset = PRESET_CATEGORIES.includes(product.category);
+      if (isPreset && product.category !== "Other / Custom Category") {
+        setCategory(product.category);
+        setIsCustomCategory(false);
+        setCustomCategoryText("");
+      } else {
+        setCategory(product.category || "Other / Custom Category");
+        setIsCustomCategory(true);
+        setCustomCategoryText(product.category === "Other / Custom Category" ? "" : (product.category || ""));
+      }
       setDescription(product.description || "");
       setSellingPrice(product.basePriceNaira);
       setWholesaleCost(Math.round(product.basePriceNaira * 0.75));
@@ -106,16 +145,30 @@ export function ProductEditorModal({
         setHasVariants(false);
         setVariants([]);
       }
+      if (product.customFields) {
+        setCustomFields(
+          Object.entries(product.customFields).map(([name, value], i) => ({
+            id: `cf-${i}-${Date.now()}`,
+            name,
+            value,
+          }))
+        );
+      } else {
+        setCustomFields([]);
+      }
     } else if (isOpen) {
       setName("");
       setSku(`SKU-${Date.now().toString().slice(-4)}`);
-      setCategory("Kitchenware & Drinkware");
+      setCategory("Fashion & Apparel");
+      setIsCustomCategory(false);
+      setCustomCategoryText("");
       setDescription("");
       setSellingPrice(10000);
       setWholesaleCost(7500);
       setStockTotal(10);
       setHasVariants(false);
       setVariants([]);
+      setCustomFields([]);
       setImages([]);
     }
   }, [product, isOpen]);
@@ -151,17 +204,46 @@ export function ProductEditorModal({
     setVariants(variants.filter((v) => v.id !== id));
   };
 
+  const handleAddCustomField = () => {
+    setCustomFields([
+      ...customFields,
+      { id: `cf-${Date.now()}`, name: "", value: "" },
+    ]);
+  };
+
+  const handleUpdateCustomField = (id: string, name: string, value: string) => {
+    setCustomFields(
+      customFields.map((cf) => (cf.id === id ? { ...cf, name, value } : cf))
+    );
+  };
+
+  const handleRemoveCustomField = (id: string) => {
+    setCustomFields(customFields.filter((cf) => cf.id !== id));
+  };
+
   const handleSave = async () => {
+    const finalCategory = isCustomCategory
+      ? (customCategoryText.trim() || "General")
+      : category;
+
+    const customFieldsRecord: Record<string, string> = {};
+    for (const cf of customFields) {
+      if (cf.name.trim() && cf.value.trim()) {
+        customFieldsRecord[cf.name.trim()] = cf.value.trim();
+      }
+    }
+
     await onSave({
       skuCode: sku,
       name,
-      category,
+      category: finalCategory,
       description,
       priceNaira: sellingPrice,
       wholesaleCost,
       stockTotal: hasVariants ? variants.reduce((acc, v) => acc + v.stock, 0) : stockTotal,
       primaryImageUrl: images[0],
       variants: hasVariants ? variants : [],
+      customFields: Object.keys(customFieldsRecord).length > 0 ? customFieldsRecord : undefined,
       isPublished,
     });
     onClose();
@@ -309,15 +391,36 @@ export function ProductEditorModal({
               Category
             </label>
             <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              value={isCustomCategory ? "Other / Custom Category" : category}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "Other / Custom Category") {
+                  setIsCustomCategory(true);
+                  setCategory("Other / Custom Category");
+                } else {
+                  setIsCustomCategory(false);
+                  setCategory(val);
+                }
+              }}
               className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-900 font-medium focus:outline-none focus:border-emerald-500 cursor-pointer"
             >
-              <option value="Kitchenware & Drinkware">Kitchenware & Drinkware</option>
-              <option value="Electronics & Tech">Electronics & Tech</option>
-              <option value="Home & Living">Home & Living</option>
-              <option value="Fitness & Health">Fitness & Health</option>
+              {PRESET_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
             </select>
+            {isCustomCategory && (
+              <div className="mt-2 animate-in fade-in">
+                <input
+                  type="text"
+                  placeholder="Enter custom category name (e.g. Traditional Fabrics, Beaded Bags)..."
+                  value={customCategoryText}
+                  onChange={(e) => setCustomCategoryText(e.target.value)}
+                  className="w-full bg-emerald-50/50 border border-emerald-300 rounded-xl px-3 py-2 text-xs text-gray-900 font-medium focus:outline-none focus:border-emerald-600 placeholder:text-gray-400"
+                />
+              </div>
+            )}
           </div>
 
           <div className="sm:col-span-2">
@@ -331,6 +434,63 @@ export function ProductEditorModal({
               className="w-full bg-white border border-gray-200 rounded-xl p-3 text-xs text-gray-900 focus:outline-none focus:border-emerald-500 leading-relaxed"
             />
           </div>
+        </div>
+
+        {/* Section 2.5: Custom Attributes & Specifications */}
+        <div className="bg-gray-50/60 border border-gray-200/80 rounded-2xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
+                <span>🏷️</span>
+                <span>Custom Attributes & Specifications</span>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Add custom fields (e.g. Color, Material, Size, Brand, Gender, Warranty) for buyers and your AI Co-Pilot.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddCustomField}
+              className="text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1 rounded-xl transition-colors cursor-pointer"
+            >
+              + Add Custom Field
+            </button>
+          </div>
+
+          {customFields.length === 0 ? (
+            <div className="text-center py-4 border border-dashed border-gray-200 rounded-xl text-xs text-gray-400">
+              No custom fields added yet. Tap <strong>+ Add Custom Field</strong> to add attributes like Color, Size, or Material.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {customFields.map((cf) => (
+                <div key={cf.id} className="flex items-center gap-2 animate-in fade-in">
+                  <input
+                    type="text"
+                    placeholder="Field name (e.g. Color, Brand, Material)"
+                    value={cf.name}
+                    onChange={(e) => handleUpdateCustomField(cf.id, e.target.value, cf.value)}
+                    className="w-1/3 bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-semibold focus:outline-none focus:border-emerald-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Value (e.g. Burgundy, Nike, Genuine Leather)"
+                    value={cf.value}
+                    onChange={(e) => handleUpdateCustomField(cf.id, cf.name, e.target.value)}
+                    className="flex-1 bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCustomField(cf.id)}
+                    className="text-gray-400 hover:text-rose-600 p-2 text-sm cursor-pointer"
+                    title="Remove Field"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Section 3: Pricing & Margin Calculator */}

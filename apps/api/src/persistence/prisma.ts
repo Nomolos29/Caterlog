@@ -31,6 +31,7 @@ interface DbOrderRow {
   overpaidAmountKobo: bigint;
   status: string;
   riderPhone: string | null;
+  deliveryAddress: string | null;
   reservationReleased: boolean;
   paymentExpiresAt: Date | null;
   createdAt: Date;

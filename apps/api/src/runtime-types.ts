@@ -17,6 +17,11 @@ export interface RuntimeVendor {
   copilotMode: DomainCopilotMode;
   copilotIdleSeconds: number;
   reservationTtlMinutes: number;
+  bankCode?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
+  monnifySubAccountCode?: string;
 }
 
 export interface RuntimeProductVariant {
@@ -40,6 +45,7 @@ export interface RuntimeProduct {
   stockTotal: number;
   stockReserved: number;
   variants?: RuntimeProductVariant[];
+  customFields?: Record<string, string>;
 }
 
 export interface RuntimeShippingZone {
@@ -114,6 +120,13 @@ export interface RuntimeOrder {
   accountName: string;
   riderPhone?: string;
   deliveryAddress?: string;
+  deliveryLandmark?: string;
+  alternatePhone?: string;
+  paymentTransactionRef?: string;
+  refundReference?: string;
+  refundedAmountKobo?: bigint;
+  refundReason?: string;
+  refundedAt?: Date;
   reservationReleased?: boolean;
   paymentExpiresAt: Date;
   createdAt: Date;

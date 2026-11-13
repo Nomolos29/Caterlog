@@ -2,6 +2,14 @@
 
 import React, { useState, useEffect } from "react";
 
+export const NIGERIAN_STATES = [
+  "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno",
+  "Cross River", "Delta", "Ebonyi", "Edo", "Ekiti", "Enugu", "FCT - Abuja", "Gombe",
+  "Imo", "Jigawa", "Kaduna", "Kano", "Katsina", "Kebbi", "Kogi", "Kwara", "Lagos",
+  "Nasarawa", "Niger", "Ogun", "Ondo", "Osun", "Oyo", "Plateau", "Rivers", "Sokoto",
+  "Taraba", "Yobe", "Zamfara"
+];
+
 interface MarketBoostViewProps {
   initialTab?: "visibility" | "setup" | "subscription";
   vendorName?: string;
@@ -26,6 +34,14 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
   }, [vendorName]);
   const [category, setCategory] = useState("Home & living");
   const [location, setLocation] = useState("Lagos, Nigeria");
+
+  // Geographic visibility & Interstate coverage settings
+  const [vendorState, setVendorState] = useState("Lagos");
+  const [vendorCity, setVendorCity] = useState("Ikeja");
+  const [shippingScope, setShippingScope] = useState<"LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE">("LOCAL_STATE");
+  const [allowInterstate, setAllowInterstate] = useState(false);
+  const [coveredStates, setCoveredStates] = useState<string[]>(["Lagos"]);
+
   const [description, setDescription] = useState(
     "Everyday drinkware, kitchen essentials and storage for independent shops. Live inventory, clear wholesale costs and supplier-managed fulfillment."
   );
@@ -41,6 +57,73 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
   const [featSeasonal, setFeatSeasonal] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
+
+  // Sync state and city into location string
+  useEffect(() => {
+    setLocation(`${vendorCity ? `${vendorCity}, ` : ""}${vendorState}, Nigeria`);
+  }, [vendorState, vendorCity]);
+
+  // Adjust interstate permissions when shipping scope changes
+  const handleScopeChange = (scope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE") => {
+    setShippingScope(scope);
+    if (scope === "LOCAL_STATE") {
+      setAllowInterstate(false);
+      setCoveredStates([vendorState]);
+    } else if (scope === "NATIONWIDE") {
+      setAllowInterstate(true);
+      setCoveredStates([...NIGERIAN_STATES]);
+    } else if (scope === "SELECTED_STATES") {
+      setAllowInterstate(true);
+      if (!coveredStates.includes(vendorState)) {
+        setCoveredStates([vendorState]);
+      }
+    }
+  };
+
+  const toggleCoveredState = (stateName: string) => {
+    if (stateName === vendorState && shippingScope !== "NATIONWIDE") {
+      // Cannot remove base state
+      return;
+    }
+    if (coveredStates.includes(stateName)) {
+      setCoveredStates(coveredStates.filter((s) => s !== stateName));
+    } else {
+      setCoveredStates([...coveredStates, stateName]);
+    }
+  };
+
+  const selectSouthWestStates = () => {
+    const sw = ["Lagos", "Ogun", "Oyo", "Osun", "Ondo", "Ekiti"];
+    setCoveredStates(Array.from(new Set([vendorState, ...sw])));
+  };
+
+  const selectMajorHubs = () => {
+    const hubs = ["Lagos", "FCT - Abuja", "Rivers", "Kano", "Oyo"];
+    setCoveredStates(Array.from(new Set([vendorState, ...hubs])));
+  };
+
+  // Helper text for visibility badge
+  const getVisibilityBadge = () => {
+    if (shippingScope === "LOCAL_STATE") {
+      return {
+        label: `📍 ${vendorState} Only (No Interstate)`,
+        color: "bg-amber-50 text-amber-800 border-amber-200",
+        tooltip: "Only resellers in your base state can mirror your catalog."
+      };
+    }
+    if (shippingScope === "SELECTED_STATES") {
+      return {
+        label: `🗺️ ${coveredStates.length} States Covered`,
+        color: "bg-blue-50 text-blue-800 border-blue-200",
+        tooltip: `Visible to resellers in: ${coveredStates.slice(0, 4).join(", ")}${coveredStates.length > 4 ? ` +${coveredStates.length - 4} more` : ""}`
+      };
+    }
+    return {
+      label: `🌐 Nationwide Coverage`,
+      color: "bg-emerald-50 text-emerald-800 border-emerald-200",
+      tooltip: "Visible to all resellers across Nigeria."
+    };
+  };
 
   // Subscription checkout form states
   const [billingEmail, setBillingEmail] = useState("billing@aroko.example");
@@ -353,7 +436,7 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-500 mb-1">Category</label>
                   <select
@@ -364,19 +447,42 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                     <option>Home &amp; living</option>
                     <option>Kitchenware</option>
                     <option>Storage &amp; Organization</option>
+                    <option>Electronics &amp; Gadgets</option>
+                    <option>Fashion &amp; Apparel</option>
+                    <option>Beauty &amp; Personal Care</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-gray-500 mb-1">Location</label>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-1">Base State (HQ / Warehouse)</label>
                   <select
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
+                    value={vendorState}
+                    onChange={(e) => {
+                      const newState = e.target.value;
+                      setVendorState(newState);
+                      if (shippingScope === "LOCAL_STATE") {
+                        setCoveredStates([newState]);
+                      } else if (!coveredStates.includes(newState)) {
+                        setCoveredStates([...coveredStates, newState]);
+                      }
+                    }}
+                    className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white font-medium text-gray-900"
                   >
-                    <option>Lagos, Nigeria</option>
-                    <option>Abuja, Nigeria</option>
-                    <option>Ibadan, Nigeria</option>
+                    {NIGERIAN_STATES.map((st) => (
+                      <option key={st} value={st}>
+                        {st}
+                      </option>
+                    ))}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-500 mb-1">City / Hub Area</label>
+                  <input
+                    type="text"
+                    value={vendorCity}
+                    onChange={(e) => setVendorCity(e.target.value)}
+                    placeholder="e.g. Ikeja, Trade Fair, Alaba"
+                    className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
+                  />
                 </div>
               </div>
 
@@ -389,6 +495,189 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                   className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg resize-none focus:outline-none focus:border-emerald-600"
                 />
               </div>
+            </div>
+
+            {/* Geographic Visibility & Interstate Mirroring Scope */}
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                    <span>📍</span>
+                    <span>Geographic Visibility &amp; Interstate Mirroring Scope</span>
+                  </h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Define which regions can discover your catalogs. Restrict visibility if you cannot ship interstate.
+                  </p>
+                </div>
+                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border self-start sm:self-center ${getVisibilityBadge().color}`}>
+                  {getVisibilityBadge().label}
+                </span>
+              </div>
+
+              {/* Scope Selector Options */}
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-700 mb-2">Delivery &amp; Reseller Discovery Reach</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleScopeChange("LOCAL_STATE")}
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      shippingScope === "LOCAL_STATE"
+                        ? "border-emerald-600 bg-emerald-50/50 shadow-2xs ring-1 ring-emerald-600"
+                        : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="font-bold text-gray-900 flex items-center justify-between">
+                      <span>🏢 Local State Only</span>
+                      {shippingScope === "LOCAL_STATE" && <span className="text-emerald-700 text-xs font-bold">✓</span>}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                      Only resellers in <strong>{vendorState}</strong> can view &amp; mirror your products. No interstate orders.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleScopeChange("SELECTED_STATES")}
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      shippingScope === "SELECTED_STATES"
+                        ? "border-emerald-600 bg-emerald-50/50 shadow-2xs ring-1 ring-emerald-600"
+                        : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="font-bold text-gray-900 flex items-center justify-between">
+                      <span>🗺️ Selected States</span>
+                      {shippingScope === "SELECTED_STATES" && <span className="text-emerald-700 text-xs font-bold">✓</span>}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                      Choose specific states reachable by your preferred interstate logistics &amp; haulage partners.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleScopeChange("NATIONWIDE")}
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      shippingScope === "NATIONWIDE"
+                        ? "border-emerald-600 bg-emerald-50/50 shadow-2xs ring-1 ring-emerald-600"
+                        : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="font-bold text-gray-900 flex items-center justify-between">
+                      <span>🌐 Nationwide</span>
+                      {shippingScope === "NATIONWIDE" && <span className="text-emerald-700 text-xs font-bold">✓</span>}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                      Visible to all resellers across Nigeria (36 States + FCT). Full wholesale national distribution.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Interstate Mirroring Toggle & Guardrail */}
+              <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-gray-900 text-xs">Allow Interstate Resellers to Mirror Catalog</div>
+                    <p className="text-[11px] text-gray-500">
+                      When turned off, resellers registered outside your delivery area cannot mirror your inventory.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (shippingScope === "LOCAL_STATE" && !allowInterstate) {
+                        setShippingScope("SELECTED_STATES");
+                        setAllowInterstate(true);
+                      } else {
+                        setAllowInterstate(!allowInterstate);
+                      }
+                    }}
+                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
+                      allowInterstate ? "bg-[#0d5c3a]" : "bg-gray-300"
+                    }`}
+                  >
+                    <div
+                      className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                        allowInterstate ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {!allowInterstate ? (
+                  <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-lg text-amber-900 text-[11px] flex items-start gap-2">
+                    <span className="text-amber-700 text-sm">🔒</span>
+                    <div>
+                      <strong className="font-semibold">Interstate Mirroring Blocked:</strong> Only verified merchants operating in <strong>{vendorState}</strong> can mirror your inventory. This protects you from interstate haulage delays, transit damages, and failed order fulfillment disputes.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-lg text-emerald-900 text-[11px] flex items-start gap-2">
+                    <span className="text-emerald-700 text-sm">✓</span>
+                    <div>
+                      <strong className="font-semibold">Interstate Mirroring Enabled:</strong> Resellers in your designated states can mirror your wholesale catalog and fulfill orders through your warehouse dispatch desk.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* State Picker for SELECTED_STATES */}
+              {shippingScope === "SELECTED_STATES" && (
+                <div className="space-y-3 pt-1 border-t border-gray-100">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label className="block text-[11px] font-semibold text-gray-700">
+                      Covered States ({coveredStates.length} of {NIGERIAN_STATES.length} selected)
+                    </label>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={selectSouthWestStates}
+                        className="px-2 py-1 text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 rounded cursor-pointer"
+                      >
+                        + South-West Hubs
+                      </button>
+                      <button
+                        type="button"
+                        onClick={selectMajorHubs}
+                        className="px-2 py-1 text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 rounded cursor-pointer"
+                      >
+                        + Major Hubs
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCoveredStates([vendorState])}
+                        className="px-2 py-1 text-[10px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 rounded cursor-pointer"
+                      >
+                        Reset to Base
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-2 border border-gray-200 rounded-xl bg-gray-50/40">
+                    {NIGERIAN_STATES.map((st) => {
+                      const isSelected = coveredStates.includes(st);
+                      const isBase = st === vendorState;
+                      return (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => toggleCoveredState(st)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                            isBase
+                              ? "bg-emerald-800 text-white font-bold cursor-default"
+                              : isSelected
+                              ? "bg-emerald-600 text-white shadow-2xs"
+                              : "bg-white border border-gray-200 text-gray-700 hover:border-gray-400"
+                          }`}
+                        >
+                          {st} {isBase && "(HQ)"} {isSelected && !isBase && "✓"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Wholesale terms */}
@@ -542,10 +831,20 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                   </span>
                 </div>
                 <p className="text-[11px] text-gray-500">{location} · {category}</p>
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getVisibilityBadge().color}`}>
+                    {getVisibilityBadge().label}
+                  </span>
+                  {!allowInterstate && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-200">
+                      🔒 Interstate Mirroring Blocked
+                    </span>
+                  )}
+                </div>
                 <p className="text-gray-700 text-xs line-clamp-3">{description}</p>
                 <div className="flex gap-2">
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    Open to resellers
+                    Open to verified resellers
                   </span>
                 </div>
                 <div className="divide-y divide-gray-100 text-[11px] pt-1">
@@ -924,6 +1223,16 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                   {listingPublished ? "Published" : "Draft"}
                 </span>
               </div>
+              <div className="py-2 flex justify-between items-center">
+                <span className="text-gray-500">Delivery Reach</span>
+                <span className="font-semibold text-gray-900 text-right">{getVisibilityBadge().label}</span>
+              </div>
+              <div className="py-2 flex justify-between items-center">
+                <span className="text-gray-500">Interstate Mirroring</span>
+                <span className={`font-semibold ${allowInterstate ? "text-emerald-700" : "text-amber-800"}`}>
+                  {allowInterstate ? "Allowed ✅" : "Blocked 🔒"}
+                </span>
+              </div>
               <div className="py-2 flex justify-between">
                 <span className="text-gray-500">Catalog access</span>
                 <span className="font-semibold text-gray-900">Open catalogs only</span>
@@ -1053,11 +1362,28 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                   <div className="text-base font-bold text-gray-900">{businessName}</div>
                   <div className="text-xs text-gray-500">{location} · {category}</div>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                  Verified
-                </span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                    Verified
+                  </span>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getVisibilityBadge().color}`}>
+                    {getVisibilityBadge().label}
+                  </span>
+                </div>
               </div>
               <p className="text-xs text-gray-700">{description}</p>
+              <div className="p-2.5 rounded-lg bg-white border border-gray-200 text-xs space-y-1">
+                <div className="font-semibold text-gray-900">Geographic Fulfillment Scope:</div>
+                <div className="text-gray-600 text-[11px]">
+                  {shippingScope === "LOCAL_STATE" ? (
+                    <span>📍 Restricted to <strong>{vendorState}</strong> only. Interstate mirroring is disabled.</span>
+                  ) : shippingScope === "SELECTED_STATES" ? (
+                    <span>🗺️ Delivers to <strong>{coveredStates.length} States:</strong> {coveredStates.join(", ")}</span>
+                  ) : (
+                    <span>🌐 Nationwide fulfillment across all 36 States + FCT.</span>
+                  )}
+                </div>
+              </div>
               <div className="text-xs font-semibold text-emerald-700">
                 {startingPrice} starting wholesale price · {moq} MOQ
               </div>

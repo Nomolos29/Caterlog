@@ -2,6 +2,8 @@ import type {
   Discount,
   MonnifySimulationResult,
   Order,
+  OrderWaybill,
+  PublicOrderReceipt,
   VendorState,
   WhatsAppSimulationResult,
 } from "./types";
@@ -95,6 +97,7 @@ export const api = {
     priceNaira: number | string;
     stockTotal?: number;
     category?: string;
+    customFields?: Record<string, string>;
     primaryImageUrl?: string;
     variants?: any[];
   }): Promise<VendorState> {
@@ -110,6 +113,7 @@ export const api = {
       name?: string;
       description?: string;
       category?: string;
+      customFields?: Record<string, string>;
       priceNaira?: number | string;
       stockTotal?: number;
       primaryImageUrl?: string;
@@ -118,6 +122,24 @@ export const api = {
   ): Promise<VendorState> {
     return request<VendorState>(`/api/v1/vendor/products/${encodeURIComponent(skuCode)}`, {
       method: "PUT",
+      ...jsonBody(input),
+    });
+  },
+
+  linkBankAccount(input: {
+    bankCode: string;
+    accountNumber: string;
+    email?: string;
+  }): Promise<{
+    status: string;
+    subAccountCode: string;
+    bankName: string;
+    accountNumber: string;
+    accountName: string;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/bank", {
+      method: "POST",
       ...jsonBody(input),
     });
   },
@@ -181,6 +203,48 @@ export const api = {
     );
   },
 
+  getOrderWaybill(shortCode: string): Promise<{ waybill: OrderWaybill }> {
+    return request<{ waybill: OrderWaybill }>(
+      `/api/v1/vendor/orders/${encodeURIComponent(shortCode)}/waybill`
+    );
+  },
+
+  refundOrder(
+    shortCode: string,
+    input: { reason?: string; amountNaira?: number | string } = {}
+  ): Promise<{
+    status: string;
+    refundReference: string;
+    refundAmountFormatted: string;
+    refundStatus: string;
+    state: VendorState;
+  }> {
+    return request(
+      `/api/v1/vendor/orders/${encodeURIComponent(shortCode)}/refund`,
+      { method: "POST", ...jsonBody(input) }
+    );
+  },
+
+  getPublicOrderReceipt(shortCode: string): Promise<{ receipt: PublicOrderReceipt }> {
+    return request<{ receipt: PublicOrderReceipt }>(
+      `/api/v1/public/orders/${encodeURIComponent(shortCode)}`
+    );
+  },
+
+  updatePublicOrderDelivery(
+    shortCode: string,
+    input: {
+      deliveryAddress?: string;
+      deliveryLandmark?: string;
+      alternatePhone?: string;
+    }
+  ): Promise<{ status: string; receipt: PublicOrderReceipt }> {
+    return request<{ status: string; receipt: PublicOrderReceipt }>(
+      `/api/v1/public/orders/${encodeURIComponent(shortCode)}/delivery`,
+      { method: "PATCH", ...jsonBody(input) }
+    );
+  },
+
   simulateTransfer(
     orderShortCode: string,
     amountNaira: number,
@@ -231,6 +295,126 @@ export const api = {
     }>("/api/v1/vendor/catalog/sync", {
       method: "POST",
       ...jsonBody({ deleteMissing }),
+    });
+  },
+
+  requestOtp(
+    phone: string,
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" = "LOGIN"
+  ): Promise<{
+    status: string;
+    destinationPhone: string;
+    purpose: string;
+    expiresInSeconds: number;
+    isNewVendor?: boolean;
+  }> {
+    return request("/api/v1/auth/request-otp", {
+      method: "POST",
+      ...jsonBody({ phone, purpose }),
+    });
+  },
+
+  verifyOtp(input: {
+    phone: string;
+    code: string;
+    purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
+    businessName?: string;
+    isExistingBusiness?: boolean;
+    catalogSelection?: "mirror" | "custom";
+  }): Promise<{
+    authenticated: boolean;
+    token?: string;
+    vendor: VendorState["vendor"];
+    state: VendorState;
+  }> {
+    return request("/api/v1/auth/verify-otp", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  withdrawFunds(input: {
+    amountNaira: number;
+    bankName: string;
+    accountNumber: string;
+    securityCode: string;
+  }): Promise<{
+    status: string;
+    amountNaira: number;
+    bankName: string;
+    accountNumber: string;
+    reference: string;
+    message: string;
+    state?: VendorState;
+  }> {
+    return request("/api/v1/vendor/withdraw", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  updateSecureSettings(input: {
+    securityCode: string;
+    businessName?: string;
+    notifyPhone?: string;
+  }): Promise<{
+    status: string;
+    vendor: VendorState["vendor"];
+    state: VendorState;
+    message: string;
+  }> {
+    return request("/api/v1/vendor/settings/secure", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  requestWhatsAppOtp(
+    phone: string,
+    isSignup = false
+  ): Promise<{
+    status: string;
+    destinationPhone: string;
+    expiresInSeconds: number;
+    token?: string;
+    loginUrl?: string;
+    isNewVendor?: boolean;
+  }> {
+    return request("/api/v1/auth/whatsapp-otp", {
+      method: "POST",
+      ...jsonBody({ phone, isSignup }),
+    });
+  },
+
+  verifyMagicLinkToken(
+    token: string
+  ): Promise<{
+    authenticated: boolean;
+    vendor: VendorState["vendor"];
+    state: VendorState;
+  }> {
+    return request("/api/v1/auth/verify", {
+      method: "POST",
+      ...jsonBody({ token }),
+    });
+  },
+
+  onboardVendor(input: {
+    phone: string;
+    businessName: string;
+    isExistingBusiness?: boolean;
+    catalogSelection?: "mirror" | "custom";
+    cacNumber?: string;
+  }): Promise<{
+    status: string;
+    token: string;
+    loginUrl?: string;
+    vendor: VendorState["vendor"];
+    state: VendorState;
+  }> {
+    return request("/api/v1/auth/onboard", {
+      method: "POST",
+      ...jsonBody(input),
     });
   },
 };

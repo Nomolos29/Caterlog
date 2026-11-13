@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { nairaToKobo } from "@caterlog/commerce-core";
 import { CaterlogStage1Engine } from "./runtime-engine.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
 import { InlineJobScheduler } from "./jobs/inline.ts";
@@ -1383,7 +1384,6 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
 
     // 3. Payment is verified and delivery address provided
     await engine.applyVerifiedPayment({
-      orderShortCode: order.shortCode,
       providerTransactionRef: "TX_TRACK_1",
       paymentReference: order.invoiceReference,
       invoiceReference: order.invoiceReference,
@@ -1454,6 +1454,192 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
       (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("Order Not Found")
     );
     assert.ok(trackUnknownMsg);
+  });
+
+  it("automatically syncs catalog in real time and displays product image when requested via WhatsApp", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Vendor adds new product via WhatsApp with photo URL
+    const photoUrl = "https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=600&q=80";
+    const addResult = await engine.handleVendorWhatsAppKeyword(
+      `Tote Bag, #42000, stock: 7, ${photoUrl}`
+    );
+    assert.strictEqual(addResult.commandType, "QUICK_ADD_PRODUCT");
+
+    const toteBag = engine.products.find((p) => p.name === "Tote Bag");
+    assert.ok(toteBag, "Tote Bag should be added to products");
+    assert.strictEqual(toteBag.primaryImageUrl, photoUrl);
+    assert.strictEqual(toteBag.stockTotal, 7);
+
+    // 2. Buyer inquires about the newly added Tote Bag on WhatsApp
+    await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: "+2348077665544",
+      buyerName: "Adaobi Nnamdi",
+      text: "Do you have the Tote Bag?",
+      simulateFastForwardIdleTimer: true,
+    });
+
+    // 3. Verify the WhatsApp bot reply displays the product image
+    const buyerReply = engine.chatMessages.slice().reverse().find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("Tote Bag")
+    );
+    assert.ok(buyerReply, "Buyer should receive a reply about Tote Bag");
+    assert.strictEqual(
+      buyerReply.imageUrl,
+      photoUrl,
+      "WhatsApp reply must include the Tote Bag primary image"
+    );
+  });
+
+  it("creates a product with custom category and custom attributes, and links vendor settlement bank subaccount", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Create product with category and custom fields
+    const product = engine.addProduct({
+      skuCode: "ANK-BAG-01",
+      name: "Handmade Ankara Bag",
+      category: "Fashion & Apparel",
+      basePriceKobo: nairaToKobo(18500),
+      stockTotal: 12,
+      customFields: {
+        Material: "100% Cotton Ankara",
+        Color: "Indigo / Gold",
+        Origin: "Lagos, Nigeria",
+      },
+    });
+
+    assert.equal(product.skuCode, "ANK-BAG-01");
+    assert.equal(product.category, "Fashion & Apparel");
+    assert.deepEqual(product.customFields, {
+      Material: "100% Cotton Ankara",
+      Color: "Indigo / Gold",
+      Origin: "Lagos, Nigeria",
+    });
+
+    // 2. Link vendor bank account and provision subaccount
+    const bankRes = await engine.linkVendorBankAccount({
+      bankCode: "058",
+      accountNumber: "0234567890",
+    });
+
+    assert.ok(bankRes.subAccount.subAccountCode.startsWith("MFY_SUB_058_7890"));
+    assert.equal(engine.vendor.monnifySubAccountCode, bankRes.subAccount.subAccountCode);
+    assert.equal(engine.vendor.bankName, "Guaranty Trust Bank (GTBank)");
+    assert.equal(engine.vendor.bankAccountNumber, "0234567890");
+
+    // 3. Serialized state preserves custom fields and subaccount
+    const state = engine.serializeState();
+    const serializedProd = state.products.find((p) => p.skuCode === "ANK-BAG-01");
+    assert.ok(serializedProd?.customFields);
+    assert.equal(serializedProd.customFields.Material, "100% Cotton Ankara");
+    assert.equal(state.vendor.monnifySubAccountCode, bankRes.subAccount.subAccountCode);
+  });
+
+  it("supports MVP 1 Post-Payment Web Tracker (/track/:code), Buyer Landmark & Alternate Phone Sync, 1-Click Rider Waybill, and 1-Click Instant Refund with Stock Restoration", async () => {
+    const engine = new CaterlogStage1Engine();
+    const buyerPhone = "+2348066778899";
+
+    const shoeBefore = engine.products.find((p) => p.skuCode === "SHOE-01")!;
+    const initialStockTotal = shoeBefore.stockTotal;
+
+    // 1. Buyer places an order on WhatsApp
+    const inquiry = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Zainab Lawal",
+      text: "I want SHOE-01 delivered to Lekki",
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.ok(inquiry.createdOrder);
+    const order = inquiry.createdOrder;
+
+    // 2. Reconcile Monnify payment & verify the WhatsApp receipt contains the /track/:shortCode companion link
+    const txRef = "MNFY_MVP1_TRACK_001";
+    engine.monnify.seedMockVerifiedTransfer({
+      providerTransactionRef: txRef,
+      paymentReference: order.invoiceReference,
+      invoiceReference: order.invoiceReference,
+      paymentStatus: "PAID",
+      amountPaidKobo: order.totalAmountKobo,
+      payerName: "Zainab Lawal",
+      paymentMethod: "ACCOUNT_TRANSFER",
+      serverVerifiedAt: new Date(),
+      rawResponse: {},
+    });
+    const payload = JSON.stringify({ eventData: { transactionReference: txRef } });
+    await engine.reconcileMonnifyWebhook({
+      rawBody: payload,
+      signatureHeader: engine.monnify.signPayloadForTesting(payload),
+      providerTransactionRef: txRef,
+    });
+
+    assert.equal(order.status, "PAID");
+    assert.equal(order.paymentTransactionRef, txRef);
+    assert.equal(shoeBefore.stockTotal, initialStockTotal - order.quantity);
+
+    const paymentReceiptMsg = engine.chatMessages.find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("Payment Confirmed!")
+    );
+    assert.ok(paymentReceiptMsg);
+    assert.ok(
+      paymentReceiptMsg.text.includes(`/track/${order.shortCode}`),
+      "WhatsApp payment receipt must include the /track/:orderCode companion web link"
+    );
+
+    // 3. Buyer opens /track/:orderCode and submits Street Address, Prominent Landmark, and Alternate Gate Phone
+    const publicBefore = engine.getPublicOrderReceipt(order.shortCode);
+    assert.ok(publicBefore);
+    assert.equal(publicBefore.status, "PAID");
+    assert.equal(publicBefore.paymentTransactionRef, txRef);
+
+    const updatedOrder = await engine.updateOrderDeliveryDetails(order.shortCode, {
+      deliveryAddress: "22 Fola Osibo Street, Lekki Phase 1",
+      deliveryLandmark: "Yellow gate opposite Ebeano Supermarket",
+      alternatePhone: "08091112233",
+    });
+
+    assert.ok(updatedOrder);
+    assert.equal(updatedOrder.deliveryAddress, "22 Fola Osibo Street, Lekki Phase 1");
+    assert.equal(updatedOrder.deliveryLandmark, "Yellow gate opposite Ebeano Supermarket");
+    assert.equal(updatedOrder.alternatePhone, "08091112233");
+
+    // Verify buyer's AWAITING_DELIVERY_ADDRESS session was automatically satisfied & cleared
+    const sessionAfterWebUpdate = engine.buyerSessions.get(buyerPhone);
+    assert.equal(sessionAfterWebUpdate, undefined);
+
+    // 4. Generate 1-Click Dispatch Rider Waybill and verify landmark, alt phone, and paid-in-advance stamp
+    const waybill = engine.getOrderWaybill(order.shortCode);
+    assert.ok(waybill);
+    assert.equal(waybill.waybillNumber, `WB-${order.shortCode}`);
+    assert.equal(waybill.deliveryLandmark, "Yellow gate opposite Ebeano Supermarket");
+    assert.equal(waybill.alternatePhone, "08091112233");
+    assert.ok(waybill.paymentStamp.includes("PAID IN ADVANCE"));
+    assert.ok(waybill.whatsappRiderText.includes("Yellow gate opposite Ebeano Supermarket"));
+    assert.ok(waybill.whatsappRiderText.includes("08091112233"));
+
+    // 5. Vendor triggers 1-Click Instant Refund -> Monnify refund initiated, stock restored, order marked REFUNDED
+    const refundRes = await engine.refundOrder(order.shortCode, {
+      reason: "Customer requested swap to flat sandals",
+    });
+
+    assert.ok(refundRes);
+    assert.equal(refundRes.order.status, "REFUNDED");
+    assert.ok(refundRes.refund.refundReference.startsWith("MFY_RFD_"));
+    assert.equal(refundRes.order.refundReference, refundRes.refund.refundReference);
+    assert.equal(refundRes.order.refundReason, "Customer requested swap to flat sandals");
+
+    // Verify inventory stock was automatically restored to initial level
+    assert.equal(
+      shoeBefore.stockTotal,
+      initialStockTotal,
+      "Product stock must be restored automatically after instant refund"
+    );
+
+    // Verify buyer received official WhatsApp refund receipt
+    const buyerRefundMsg = engine.chatMessages.find(
+      (m) => m.channel === "BUYER_SHOP_WA" && m.text.includes("INSTANT REFUND PROCESSED")
+    );
+    assert.ok(buyerRefundMsg);
+    assert.ok(buyerRefundMsg.text.includes(refundRes.refund.refundReference));
   });
 });
 

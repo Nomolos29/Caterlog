@@ -40,6 +40,11 @@ export interface Vendor {
   copilotMode: CopilotMode;
   copilotIdleSeconds: number;
   reservationTtlMinutes: number;
+  bankCode?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
+  monnifySubAccountCode?: string;
 }
 
 export interface ProductVariant {
@@ -68,6 +73,7 @@ export interface Product {
   stockReserved: number;
   availableStock: number;
   variants?: ProductVariant[];
+  customFields?: Record<string, string>;
 }
 
 export interface ShippingZone {
@@ -146,6 +152,13 @@ export interface Order {
   accountName: string;
   riderPhone?: string;
   deliveryAddress?: string;
+  deliveryLandmark?: string;
+  alternatePhone?: string;
+  paymentTransactionRef?: string;
+  refundReference?: string;
+  refundedAmountFormatted?: string;
+  refundReason?: string;
+  refundedAt?: string;
   reservationReleased?: boolean;
   paymentExpiresAt: string;
   createdAt: string;
@@ -161,6 +174,84 @@ export interface Order {
   remainingBalanceNaira: number;
   remainingBalanceFormatted: string;
   overpaidAmountFormatted: string;
+}
+
+export interface PublicOrderReceipt {
+  shortCode: string;
+  status: OrderStatus;
+  isPaid: boolean;
+  paymentStamp: string;
+  customerName: string;
+  customerPhone: string;
+  alternatePhone: string;
+  deliveryAddress: string;
+  deliveryLandmark: string;
+  shippingZoneName: string;
+  riderPhone: string;
+  productId: string;
+  productSku: string;
+  productName: string;
+  variantName?: string;
+  quantity: number;
+  items?: OrderItemRecord[];
+  subtotalFormatted: string;
+  shippingFeeFormatted: string;
+  discountCode?: string;
+  discountAmountFormatted: string;
+  totalAmountNaira: number;
+  totalAmountFormatted: string;
+  amountPaidNaira: number;
+  amountPaidFormatted: string;
+  remainingBalanceNaira: number;
+  remainingBalanceFormatted: string;
+  overpaidAmountFormatted: string;
+  invoiceReference: string;
+  paymentTransactionRef: string;
+  accountNumber: string;
+  bankName: string;
+  accountName: string;
+  refundReference?: string;
+  refundedAmountFormatted?: string;
+  refundReason?: string;
+  refundedAt?: string;
+  createdAt: string;
+  paidAt?: string;
+  dispatchedAt?: string;
+  paymentExpiresAt: string;
+  trackUrl: string;
+  vendor: {
+    businessName: string;
+    slug: string;
+    whatsappPhone: string;
+    verificationStatus: "VERIFIED" | "PENDING" | "REJECTED";
+  };
+}
+
+export interface OrderWaybill {
+  waybillNumber: string;
+  orderShortCode: string;
+  status: OrderStatus;
+  isPaid: boolean;
+  paymentStamp: string;
+  vendorName: string;
+  vendorPhone: string;
+  customerName: string;
+  customerPhone: string;
+  alternatePhone: string;
+  shippingZoneName: string;
+  deliveryAddress: string;
+  deliveryLandmark: string;
+  riderPhone: string;
+  items: Array<{ sku: string; name: string; quantity: number }>;
+  totalQuantity: number;
+  totalAmountFormatted: string;
+  amountPaidFormatted: string;
+  paymentTransactionRef: string;
+  trackUrl: string;
+  whatsappRiderText: string;
+  createdAt: string;
+  paidAt?: string;
+  dispatchedAt?: string;
 }
 
 export interface Analytics {

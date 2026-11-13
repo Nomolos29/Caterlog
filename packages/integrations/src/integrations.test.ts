@@ -327,5 +327,64 @@ describe("Layer 1 Integrations — Monnify & WhatsApp Cloud Adapters", () => {
     // Assert 4: Unified dispatcher chose interactive buttons
     assert.equal(outbox[3]?.kind, "INTERACTIVE_BUTTONS");
   });
+
+  it("provisions a vendor subaccount and maps settlement bank details", async () => {
+    const monnify = new MonnifyPaymentAdapter({
+      baseUrl: "https://sandbox.monnify.com",
+      apiKey: "MK_TEST_KEY",
+      secretKey: "SK_TEST_SECRET",
+      contractCode: "1234567890",
+      sandboxMock: true,
+    });
+
+    const sub = await monnify.createSubAccount({
+      bankCode: "058",
+      accountNumber: "0123456789",
+      email: "amaka@luxury.shoes",
+    });
+
+    assert.ok(sub.subAccountCode.startsWith("MFY_SUB_058_6789"));
+    assert.equal(sub.bankCode, "058");
+    assert.equal(sub.bankName, "Guaranty Trust Bank (GTBank)");
+    assert.equal(sub.accountNumber, "0123456789");
+    assert.equal(sub.defaultSplitPercentage, 100);
+  });
+
+  it("enforces fail-closed HMAC-SHA512 webhook verification in live mode and supports instant Monnify refunds", async () => {
+    const liveWithPlaceholderSecret = new MonnifyPaymentAdapter({
+      mode: "live",
+      baseUrl: "https://api.monnify.com",
+      apiKey: "MK_LIVE_REAL_KEY",
+      secretKey: "test_secret_key",
+      contractCode: "1234567890",
+    });
+
+    const payload = JSON.stringify({ eventType: "SUCCESSFUL_TRANSACTION" });
+    const sig = liveWithPlaceholderSecret.signPayloadForTesting(payload);
+    // Must fail-closed when mode === "live" and secretKey is a placeholder/test secret
+    assert.equal(liveWithPlaceholderSecret.verifyWebhookSignature(payload, sig), false);
+    assert.equal(liveWithPlaceholderSecret.verifyWebhookSignature(payload, ""), false);
+
+    // Mock refund test
+    const mockMonnify = new MonnifyPaymentAdapter({
+      mode: "mock",
+      baseUrl: "https://sandbox.monnify.com",
+      apiKey: "MK_TEST",
+      secretKey: "SK_TEST",
+      contractCode: "1234567890",
+    });
+
+    const refund = await mockMonnify.initiateRefund({
+      transactionReference: "MNFY|2026|TX99",
+      refundAmountKobo: nairaToKobo(28500),
+      refundReason: "Customer requested different size",
+      customerNote: "Refund for Order ORD-101",
+    });
+
+    assert.ok(refund.refundReference.startsWith("MFY_RFD_"));
+    assert.equal(refund.transactionReference, "MNFY|2026|TX99");
+    assert.equal(refund.refundAmountKobo, nairaToKobo(28500));
+    assert.equal(refund.refundStatus, "COMPLETED");
+  });
 });
 

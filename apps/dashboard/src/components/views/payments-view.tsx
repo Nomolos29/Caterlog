@@ -1,14 +1,17 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
-import type { OrderItem } from "@/lib/types";
+import type { OrderItem, VendorProfile } from "@/lib/types";
 import { EmptyState } from "../ui/empty-state";
+import { api } from "@/lib/api";
 
 interface PaymentsViewProps {
   initialTab?: "splits" | "accounts" | "detail" | "rules";
   initialOrderCode?: string;
   orders?: OrderItem[];
+  vendor?: VendorProfile;
   onNavigateToOrder?: (orderCode: string) => void;
+  onSimulateTransfer?: (orderCode: string, amountNaira: number) => Promise<void>;
 }
 
 interface TransactionItem {
@@ -63,15 +66,85 @@ const buildTransactions = (orders: OrderItem[] = []): TransactionItem[] => {
     });
 };
 
+const BANK_NAME_TO_CODE: Record<string, string> = {
+  "Guaranty Trust Bank": "058",
+  "GTBank": "058",
+  "Access Bank": "044",
+  "Zenith Bank": "057",
+  "First Bank of Nigeria": "011",
+  "United Bank for Africa (UBA)": "033",
+  "Moniepoint MFB": "50515",
+  "Kuda Bank": "50211",
+  "OPay": "999992",
+  "PalmPay": "999991",
+  "Wema Bank": "035",
+  "FCMB": "214",
+  "Providus Bank": "101",
+};
+
 export function PaymentsView({
   initialTab = "splits",
   initialOrderCode,
   orders = [],
+  vendor,
   onNavigateToOrder,
+  onSimulateTransfer,
 }: PaymentsViewProps) {
   // Tabs: 'splits' | 'accounts' | 'detail' | 'rules'
   const [activeTab, setActiveTab] = useState<"splits" | "accounts" | "detail" | "rules">(initialTab);
   const [selectedOrderCode, setSelectedOrderCode] = useState<string | null>(initialOrderCode || null);
+
+  // Fund Withdrawal State with 6-Digit WhatsApp PIN
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("50000");
+  const [withdrawBank, setWithdrawBank] = useState("Wema Bank");
+  const [withdrawAccount, setWithdrawAccount] = useState("0123456789");
+  const [withdrawPin, setWithdrawPin] = useState("");
+  const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+  const [withdrawSuccess, setWithdrawSuccess] = useState<string | null>(null);
+  const [codeSentNotice, setCodeSentNotice] = useState<string | null>(null);
+
+  const handleRequestWithdrawalPin = async () => {
+    setCodeSentNotice(null);
+    setWithdrawError(null);
+    try {
+      const res = await api.requestOtp(vendor?.whatsappPhone || "+2348031234567", "WITHDRAWAL");
+      setCodeSentNotice(`🔐 6-digit PIN sent to your WhatsApp (${res.destinationPhone})!`);
+    } catch (err) {
+      setWithdrawError(err instanceof Error ? err.message : "Failed to send WhatsApp code.");
+    }
+  };
+
+  const handleExecuteWithdrawal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWithdrawError(null);
+    const cleanPin = withdrawPin.replace(/\D/g, "");
+    if (cleanPin.length !== 6) {
+      setWithdrawError("Please enter the 6-digit WhatsApp verification code.");
+      return;
+    }
+    setWithdrawSubmitting(true);
+    try {
+      const res = await api.withdrawFunds({
+        amountNaira: Number(withdrawAmount) || 0,
+        bankName: withdrawBank,
+        accountNumber: withdrawAccount,
+        securityCode: cleanPin,
+      });
+      setWithdrawSuccess(`✓ Dispatched payout of ₦${Number(withdrawAmount).toLocaleString()}! Reference: ${res.reference}`);
+      setTimeout(() => {
+        setShowWithdrawModal(false);
+        setWithdrawPin("");
+        setWithdrawSuccess(null);
+        setCodeSentNotice(null);
+      }, 2500);
+    } catch (err) {
+      setWithdrawError(err instanceof Error ? err.message : "Withdrawal failed.");
+    } finally {
+      setWithdrawSubmitting(false);
+    }
+  };
 
   // Derive transactions dynamically from orders and allow in-memory updates for detail flows
   const [transactions, setTransactions] = useState<TransactionItem[]>(() => buildTransactions(orders));
@@ -197,14 +270,23 @@ export function PaymentsView({
     }
   };
 
-  const handleValidateAccount = () => {
+  const handleValidateAccount = async () => {
+    if (accountNumber.length !== 10) return;
     setAccountValidating(true);
-    setTimeout(() => {
+    try {
+      const code = BANK_NAME_TO_CODE[bankSelect] || "50515";
+      const res = await api.linkBankAccount({
+        bankCode: code,
+        accountNumber,
+      });
+      setReplacementValidated(true);
+      setGatewayTimeoutResolved(true);
+      alert(`✅ Settlement account verified! Monnify subaccount provisioned: ${res.subAccountCode}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to link settlement account.");
+    } finally {
       setAccountValidating(false);
-      if (accountNumber.length === 10) {
-        setReplacementValidated(true);
-      }
-    }, 800);
+    }
   };
 
   const handleRetryGateway = () => {
@@ -755,18 +837,22 @@ export function PaymentsView({
             </button>
           </div>
 
-          {/* Reseller · Nia Stores */}
+          {/* Reseller · Store Settlement Account */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-gray-900">Reseller · Nia Stores</h3>
+              <h3 className="text-sm font-bold text-gray-900">
+                Settlement · {vendor?.businessName || "My Store"}
+              </h3>
               <span
                 className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                  replacementValidated
+                  replacementValidated || vendor?.monnifySubAccountCode
                     ? "bg-emerald-100 text-emerald-800"
                     : "bg-amber-100 text-amber-800"
                 }`}
               >
-                {replacementValidated ? "Verified & Ready" : "Update pending"}
+                {replacementValidated || vendor?.monnifySubAccountCode
+                  ? "Verified & Ready"
+                  : "Setup Required"}
               </span>
             </div>
 
@@ -783,18 +869,23 @@ export function PaymentsView({
                   onChange={(e) => setBankSelect(e.target.value)}
                   className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-emerald-600"
                 >
-                  <option>Example bank</option>
-                  <option>Access Bank</option>
-                  <option>Zenith Bank</option>
-                  <option>GTBank</option>
-                  <option>First Bank of Nigeria</option>
-                  <option>Kuda Bank</option>
+                  <option value="Moniepoint MFB">Moniepoint MFB</option>
+                  <option value="GTBank">Guaranty Trust Bank (GTBank)</option>
+                  <option value="Access Bank">Access Bank</option>
+                  <option value="Zenith Bank">Zenith Bank</option>
+                  <option value="First Bank of Nigeria">First Bank of Nigeria</option>
+                  <option value="United Bank for Africa (UBA)">United Bank for Africa (UBA)</option>
+                  <option value="OPay">OPay Digital Services</option>
+                  <option value="PalmPay">PalmPay</option>
+                  <option value="Kuda Bank">Kuda Microfinance Bank</option>
+                  <option value="Wema Bank">Wema Bank (ALAT)</option>
+                  <option value="FCMB">FCMB</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-[11px] font-semibold text-gray-500 mb-1">
-                  Replacement account number
+                  10-Digit Settlement Account Number
                 </label>
                 <input
                   type="text"
@@ -805,10 +896,10 @@ export function PaymentsView({
                   className={`w-full text-xs px-3 py-2 border rounded-lg focus:outline-none ${
                     accountNumber.length === 10
                       ? "border-emerald-500 text-gray-900"
-                      : "border-rose-300 text-rose-900"
+                      : "border-gray-200 text-gray-900"
                   }`}
                 />
-                {accountNumber.length !== 10 && (
+                {accountNumber.length > 0 && accountNumber.length !== 10 && (
                   <p className="text-[11px] text-rose-600 mt-1">
                     Enter a 10-digit Nigerian account number ({accountNumber.length}/10 digits).
                   </p>
@@ -823,22 +914,24 @@ export function PaymentsView({
                   }`}
                 >
                   {accountNumber.length === 10
-                    ? "✓ Nia Stores & Goods Ltd (Matched)"
-                    : "Waiting for valid number"}
+                    ? `✓ ${vendor?.businessName || "Store Account"} (Matched)`
+                    : "Waiting for 10-digit number"}
                 </span>
               </div>
             </div>
 
             <p className="text-[11px] text-gray-400">
-              Current account •••• 0142 and subaccount SUB-NS-001 remain active until the replacement is verified.
+              Active account: {vendor?.bankName || "Moniepoint MFB"} ••••{" "}
+              {vendor?.bankAccountNumber ? vendor.bankAccountNumber.slice(-4) : "4567"}{" "}
+              (Subaccount: <span className="font-mono font-bold text-gray-600">{vendor?.monnifySubAccountCode || "SUB-NS-001"}</span>) receives instant split disbursements.
             </p>
 
             <button
               onClick={handleValidateAccount}
-              disabled={accountValidating}
-              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
+              disabled={accountValidating || accountNumber.length !== 10}
+              className="px-4 py-2 border border-emerald-600 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-800 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
             >
-              {accountValidating ? "Validating NUBAN..." : "Validate & retry"}
+              {accountValidating ? "Provisioning Subaccount..." : "Verify & Link Settlement Account"}
             </button>
           </div>
         </div>
@@ -1091,12 +1184,21 @@ export function PaymentsView({
                   {transactions.length} confirmed orders · Filtered period
                 </div>
               </div>
-              <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
-                <div className="text-xs text-gray-500 font-medium">Store settlements</div>
-                <div className="text-3xl font-extrabold text-gray-900 mt-1">
-                  ₦{totalSettled.toLocaleString()}
+              <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="text-xs text-gray-500 font-medium">Store settlements</div>
+                  <div className="text-3xl font-extrabold text-gray-900 mt-1">
+                    ₦{totalSettled.toLocaleString()}
+                  </div>
+                  <div className="text-[11px] text-gray-400 mt-2">Verified bank settlements</div>
                 </div>
-                <div className="text-[11px] text-gray-400 mt-2">Verified bank settlements</div>
+                <button
+                  type="button"
+                  onClick={() => setShowWithdrawModal(true)}
+                  className="mt-3 w-full py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>💸 Withdraw Funds</span>
+                </button>
               </div>
               <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
                 <div className="text-xs text-gray-500 font-medium">Processing fees</div>
@@ -1125,6 +1227,94 @@ export function PaymentsView({
                 </button>
               </div>
             )}
+
+            {/* Test Payment Console for Pending Orders */}
+            {(() => {
+              const pendingOrders = orders.filter(
+                (o) => o.status === "PENDING_PAYMENT" || o.status === "PARTIALLY_PAID"
+              );
+              if (pendingOrders.length === 0 || !onSimulateTransfer) return null;
+
+              return (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl shadow-xs space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">⚡</span>
+                      <div>
+                        <h4 className="text-xs font-bold text-emerald-950">
+                          Payment Integration Test Console ({pendingOrders.length} Order{pendingOrders.length > 1 ? "s" : ""} Awaiting Bank Transfer)
+                        </h4>
+                        <p className="text-[11px] text-emerald-800 mt-0.5">
+                          Simulate verified customer bank transfers to verify real-time Monnify webhook reconciliation, inventory deduction, and WhatsApp notifications.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold px-2.5 py-1 bg-emerald-200/70 text-emerald-900 rounded-full self-start sm:self-auto">
+                      Test Mode Ready
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                    {pendingOrders.map((ord) => {
+                      const dueNaira =
+                        Number(
+                          BigInt(ord.totalAmountKobo) -
+                            (ord.amountPaidKobo ? BigInt(ord.amountPaidKobo) : 0n)
+                        ) / 100;
+                      return (
+                        <div
+                          key={ord.id}
+                          className="bg-white border border-emerald-200 rounded-xl p-3 flex flex-col justify-between gap-2 shadow-2xs"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono font-bold text-gray-900 text-xs">
+                                {ord.shortCode}
+                              </span>
+                              <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                                {ord.status}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-gray-500 mt-1">
+                              Customer: <strong className="text-gray-800">{ord.customerName}</strong>
+                            </div>
+                            <div className="text-[11px] text-gray-500">
+                              NUBAN: <span className="font-mono font-bold text-gray-800">{ord.accountNumber || "Dynamic"}</span> ({ord.bankName || "Moniepoint"})
+                            </div>
+                            <div className="text-xs font-bold text-emerald-900 mt-1">
+                              Due: {ord.totalAmountFormatted || `₦${dueNaira.toLocaleString()}`}
+                            </div>
+                          </div>
+
+                          <div className="flex gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => void onSimulateTransfer(ord.shortCode, dueNaira)}
+                              className="flex-1 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-semibold rounded-lg transition-colors cursor-pointer text-center active:scale-95 shadow-2xs"
+                            >
+                              ⚡ Pay ₦{dueNaira.toLocaleString()}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void onSimulateTransfer(
+                                  ord.shortCode,
+                                  Math.max(100, Math.round(dueNaira * 0.5))
+                                )
+                              }
+                              className="px-2 py-1.5 border border-amber-300 hover:bg-amber-50 text-amber-800 text-[10px] font-semibold rounded-lg transition-colors cursor-pointer active:scale-95"
+                              title="Simulate partial payment (forgot delivery fee)"
+                            >
+                              ½ Partial
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </>
         );
       })()}
@@ -1343,6 +1533,154 @@ export function PaymentsView({
             </div>
           </div>
         </>
+      )}
+
+      {/* 6-Digit PIN Fund Withdrawal Modal */}
+      {showWithdrawModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-gray-100 animate-in fade-in zoom-in-95">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm">
+                  💸
+                </span>
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm">Withdraw Funds</h3>
+                  <p className="text-[11px] text-gray-500">Disburse settlement balance to your Nigerian bank</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowWithdrawModal(false);
+                  setWithdrawError(null);
+                  setWithdrawSuccess(null);
+                  setCodeSentNotice(null);
+                }}
+                className="text-gray-400 hover:text-gray-600 p-1 text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {withdrawError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium rounded-xl">
+                {withdrawError}
+              </div>
+            )}
+
+            {withdrawSuccess && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium rounded-xl flex items-center gap-2">
+                <span>✓</span>
+                <span>{withdrawSuccess}</span>
+              </div>
+            )}
+
+            {codeSentNotice && (
+              <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 text-xs font-medium rounded-xl flex items-center gap-2">
+                <span>📩</span>
+                <span>{codeSentNotice}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleExecuteWithdrawal} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                  Withdrawal Amount (₦)
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-xs text-gray-500 font-bold">₦</span>
+                  <input
+                    type="number"
+                    required
+                    min={1000}
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600 font-bold text-gray-900"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                    Bank Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={withdrawBank}
+                    onChange={(e) => setWithdrawBank(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600 text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                    Account Number
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={withdrawAccount}
+                    onChange={(e) => setWithdrawAccount(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600 font-mono text-gray-900"
+                  />
+                </div>
+              </div>
+
+              {/* 6-Digit WhatsApp PIN Input */}
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase">
+                    6-Digit WhatsApp Security Code
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleRequestWithdrawalPin}
+                    className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 underline cursor-pointer"
+                  >
+                    Request Code on WhatsApp
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  maxLength={6}
+                  required
+                  value={withdrawPin}
+                  onChange={(e) => setWithdrawPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="••••••"
+                  className="w-full px-3 py-2.5 text-center text-lg font-mono font-bold tracking-[0.4em] bg-white border border-gray-300 rounded-lg focus:outline-none focus:border-emerald-600"
+                />
+                <p className="text-[10px] text-gray-500">
+                  A 6-digit confirmation code will be sent to your verified store phone on WhatsApp.
+                </p>
+              </div>
+
+              <div className="flex gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowWithdrawModal(false)}
+                  className="px-4 py-2.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={withdrawSubmitting || withdrawPin.length !== 6}
+                  className="flex-1 py-2.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {withdrawSubmitting ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Authorizing Payout...</span>
+                    </>
+                  ) : (
+                    <span>Confirm &amp; Disburse Payout →</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

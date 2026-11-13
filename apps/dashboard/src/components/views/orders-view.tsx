@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import type { OrderItem } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { OrderItem, OrderWaybill } from "@/lib/types";
 import { FilterIcon, ExportIcon } from "../icons";
 import { EmptyState } from "../ui/empty-state";
 
@@ -12,6 +13,7 @@ interface OrdersViewProps {
   onSelectOrder: (order: OrderItem | null) => void;
   onSimulateTransfer?: (orderCode: string, amountNaira: number) => Promise<void>;
   onMarkDispatched?: (orderCode: string, riderPhone?: string) => Promise<void>;
+  onRefundOrder?: (orderCode: string, reason?: string) => Promise<void>;
   onNavigateToPayments?: (tab?: string, subId?: string) => void;
   onNavigateToSettings?: (tab?: string, subId?: string) => void;
 }
@@ -23,6 +25,7 @@ export function OrdersView({
   onSelectOrder,
   onSimulateTransfer,
   onMarkDispatched,
+  onRefundOrder,
   onNavigateToPayments,
   onNavigateToSettings,
 }: OrdersViewProps) {
@@ -37,10 +40,25 @@ export function OrdersView({
   const [supplierStatus, setSupplierStatus] = useState("Preparing · Not yet dispatched");
   const [supplierRequested, setSupplierRequested] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
+  const [waybillData, setWaybillData] = useState<OrderWaybill | null>(null);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [riderPhoneInput, setRiderPhoneInput] = useState("");
   const [isDispatching, setIsDispatching] = useState(false);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refundReasonInput, setRefundReasonInput] = useState("");
+  const [isRefunding, setIsRefunding] = useState(false);
+
+  useEffect(() => {
+    if (showPrintModal && selectedOrder) {
+      void api
+        .getOrderWaybill(selectedOrder.shortCode)
+        .then((res) => setWaybillData(res.waybill))
+        .catch(() => setWaybillData(null));
+    } else {
+      setWaybillData(null);
+    }
+  }, [showPrintModal, selectedOrder]);
 
   const filteredOrders = orders.filter((o) => {
     if (statusFilter === "PENDING_PAYMENT" && o.status !== "PENDING_PAYMENT" && o.status !== "PARTIALLY_PAID") return false;
@@ -78,6 +96,20 @@ export function OrdersView({
       alert(err instanceof Error ? err.message : String(err));
     } finally {
       setIsDispatching(false);
+    }
+  };
+
+  const handleRefundSubmit = async () => {
+    if (!selectedOrder || !onRefundOrder) return;
+    setIsRefunding(true);
+    try {
+      await onRefundOrder(selectedOrder.shortCode, refundReasonInput.trim() || undefined);
+      setShowRefundModal(false);
+      setRefundReasonInput("");
+    } catch {
+      // Error alerted in parent handler
+    } finally {
+      setIsRefunding(false);
     }
   };
 
@@ -152,6 +184,8 @@ export function OrdersView({
                     ? "bg-emerald-50 text-emerald-900 border-emerald-300"
                     : selectedOrder.status === "PENDING_PAYMENT"
                     ? "bg-amber-50 text-amber-800 border-amber-200"
+                    : selectedOrder.status === "REFUNDED"
+                    ? "bg-rose-50 text-rose-800 border-rose-200"
                     : selectedOrder.status === "EXPIRED"
                     ? "bg-rose-50 text-rose-800 border-rose-200"
                     : "bg-gray-100 text-gray-700 border-gray-200"
@@ -165,6 +199,8 @@ export function OrdersView({
                   ? "✅ Delivered"
                   : selectedOrder.status === "PENDING_PAYMENT"
                   ? "🟡 Awaiting Payment"
+                  : selectedOrder.status === "REFUNDED"
+                  ? `↩️ Refunded${selectedOrder.refundReference ? ` · Ref: ${selectedOrder.refundReference}` : ""}`
                   : selectedOrder.status === "EXPIRED"
                   ? "🛑 Expired"
                   : selectedOrder.status}
@@ -172,10 +208,18 @@ export function OrdersView({
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                 WhatsApp order
               </span>
+              <a
+                href={`/track/${selectedOrder.shortCode}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-all"
+              >
+                🔗 Customer Live Receipt (/track/{selectedOrder.shortCode}) ↗
+              </a>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
             {(selectedOrder.status === "PAID" || selectedOrder.status === "PROCESSING") && (
               <button
                 onClick={() => {
@@ -202,20 +246,24 @@ export function OrdersView({
             )}
             <button
               onClick={() => setShowPrintModal(true)}
-              className="px-3.5 py-1.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+              className="px-3.5 py-1.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
             >
-              Print slip
+              <span>📦</span>
+              <span>Rider Waybill / Print Slip</span>
             </button>
-            <button
-              onClick={() => {
-                if (onNavigateToPayments) {
-                  onNavigateToPayments("detail", selectedOrder.shortCode);
-                }
-              }}
-              className="px-3.5 py-1.5 border border-rose-300 hover:border-rose-500 hover:bg-rose-50 text-rose-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
-            >
-              Review refund
-            </button>
+            {selectedOrder.status !== "REFUNDED" &&
+              (selectedOrder.status === "PAID" ||
+                selectedOrder.status === "PARTIALLY_PAID" ||
+                selectedOrder.status === "PROCESSING" ||
+                selectedOrder.status === "OUT_FOR_DELIVERY") && (
+                <button
+                  onClick={() => setShowRefundModal(true)}
+                  className="px-3.5 py-1.5 border border-rose-300 hover:border-rose-500 hover:bg-rose-50 text-rose-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                >
+                  <span>↩️</span>
+                  <span>Issue Instant Refund</span>
+                </button>
+              )}
           </div>
         </div>
 
@@ -397,6 +445,21 @@ export function OrdersView({
               </div>
 
               <div className="flex flex-wrap gap-2 pt-1">
+                {(selectedOrder.status === "PENDING_PAYMENT" || selectedOrder.status === "PARTIALLY_PAID") && onSimulateTransfer && (
+                  <button
+                    onClick={() => {
+                      const amountNaira = Number(
+                        BigInt(selectedOrder.totalAmountKobo) -
+                          (selectedOrder.amountPaidKobo ? BigInt(selectedOrder.amountPaidKobo) : 0n)
+                      ) / 100;
+                      void onSimulateTransfer(selectedOrder.shortCode, amountNaira);
+                    }}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  >
+                    <span>⚡</span>
+                    <span>Simulate Bank Transfer (Test Payment)</span>
+                  </button>
+                )}
                 {(selectedOrder.status === "PAID" || selectedOrder.status === "PROCESSING") && (
                   <button
                     onClick={() => {
@@ -532,14 +595,29 @@ export function OrdersView({
 
             {/* Customer & Delivery card */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">Customer & Delivery</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-gray-900">Customer & Delivery</h3>
+                <a
+                  href={`/track/${selectedOrder.shortCode}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] font-semibold text-emerald-700 hover:underline"
+                >
+                  Open Live Tracker ↗
+                </a>
+              </div>
               <div>
                 <div className="font-bold text-gray-900 text-sm">{selectedOrder.customerName}</div>
                 <div className="text-[11px] text-gray-400 mt-0.5">
                   WhatsApp · {selectedOrder.customerPhone}
                 </div>
+                {selectedOrder.alternatePhone && (
+                  <div className="text-[11px] text-emerald-800 font-semibold mt-0.5">
+                    📞 Alternate / Gate Phone: {selectedOrder.alternatePhone}
+                  </div>
+                )}
               </div>
-              <div className="pt-2 border-t border-gray-100 space-y-1.5">
+              <div className="pt-2 border-t border-gray-100 space-y-2">
                 <div className="flex items-center justify-between text-gray-500">
                   <span>Zone:</span>
                   <span className="font-semibold text-gray-900">{selectedOrder.shippingZoneName || "Standard Delivery"}</span>
@@ -553,9 +631,17 @@ export function OrdersView({
                   }`}>
                     {selectedOrder.deliveryAddress
                       ? `🏠 ${selectedOrder.deliveryAddress}`
-                      : "⏳ Awaiting buyer street address via WhatsApp"}
+                      : "⏳ Awaiting buyer street address via WhatsApp or /track link"}
                   </div>
                 </div>
+                {selectedOrder.deliveryLandmark && (
+                  <div className="text-gray-500">
+                    <span className="text-[11px] font-medium text-gray-700">Prominent Landmark / Gate Directions:</span>
+                    <div className="mt-1 p-2.5 rounded-lg text-xs leading-relaxed bg-blue-50 text-blue-950 border border-blue-200 font-medium">
+                      🧭 {selectedOrder.deliveryLandmark}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -565,34 +651,30 @@ export function OrdersView({
               <div className="divide-y divide-gray-100">
                 <div className="py-2 flex justify-between">
                   <span className="text-gray-500">Gateway reference</span>
-                  <span className="font-semibold text-gray-900">GW-1042</span>
+                  <span className="font-semibold text-gray-900 font-mono">
+                    {selectedOrder.paymentTransactionRef || "GW-1042"}
+                  </span>
                 </div>
                 <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Supplier</span>
-                  <span className="font-semibold text-gray-900">₦16,000</span>
+                  <span className="text-gray-500">Amount verified</span>
+                  <span className="font-bold text-emerald-700">
+                    {selectedOrder.amountPaidFormatted || selectedOrder.totalAmountFormatted}
+                  </span>
                 </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Gross rep margin</span>
-                  <span className="font-semibold text-gray-900">₦4,000</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Fee · Nia pays</span>
-                  <span className="font-semibold text-rose-600">-₦300</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Net rep earnings</span>
-                  <span className="font-bold text-emerald-700 text-sm">₦3,700</span>
-                </div>
-              </div>
-
-              <div className="p-2.5 bg-amber-50 text-amber-800 text-[11px] font-semibold rounded-lg text-center">
-                Recipient payout needs attention
+                {selectedOrder.status === "REFUNDED" && (
+                  <div className="py-2 flex justify-between text-rose-700">
+                    <span>Refunded ({selectedOrder.refundReference || "Processed"})</span>
+                    <span className="font-bold">
+                      -{selectedOrder.refundedAmountFormatted || selectedOrder.amountPaidFormatted}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <button
                 onClick={() => {
                   if (onNavigateToPayments) {
-                    onNavigateToPayments("detail", "CT-1042");
+                    onNavigateToPayments("detail", selectedOrder.shortCode);
                   }
                 }}
                 className="w-full py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
@@ -603,41 +685,182 @@ export function OrdersView({
           </div>
         </div>
 
-        {/* Printable Slip Modal */}
+        {/* 1-Click Dispatch Rider Waybill / Packing Slip Modal */}
         {showPrintModal && (
           <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl">
               <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="font-bold text-gray-900 text-sm">Fulfillment Pickup Slip</h3>
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm">
+                    📦 Dispatch Rider Waybill & Packing Slip
+                  </h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Print for package box or forward directly to dispatch rider on WhatsApp
+                  </p>
+                </div>
                 <button onClick={() => setShowPrintModal(false)} className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer">
                   ✕
                 </button>
               </div>
-              <div className="font-mono text-xs space-y-2 text-gray-800 p-4 bg-gray-50 rounded-xl">
-                <div className="text-center font-bold text-sm">CATERLOG FULFILLMENT SLIP</div>
-                <div className="text-center text-[10px] text-gray-500">Nia Stores × Aroko Wholesale</div>
+              <div className="font-mono text-xs space-y-2 text-gray-800 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <div className="text-center font-bold text-sm">
+                  {waybillData?.waybillNumber || `WB-${selectedOrder.shortCode}`} · CATERLOG WAYBILL
+                </div>
+                <div className="text-center text-[10px] text-gray-500">
+                  {waybillData?.vendorName || "Nia Stores"} · Order #{selectedOrder.shortCode}
+                </div>
                 <div className="border-t border-dashed my-2" />
-                <div>ORDER: {selectedOrder.shortCode}</div>
-                <div>CUSTOMER: {selectedOrder.customerName} ({selectedOrder.customerPhone})</div>
-                <div>ITEM: {selectedOrder.productName} (AW-FL750)</div>
-                <div>QTY: {selectedOrder.quantity || 2} UNITS</div>
-                <div>TOTAL PAID: {selectedOrder.totalAmountFormatted}</div>
-                <div>NUBAN REF: {selectedOrder.accountNumber} ({selectedOrder.bankName})</div>
+                <div>
+                  <span className="font-bold">BUYER:</span> {selectedOrder.customerName}
+                </div>
+                <div>
+                  <span className="font-bold">PRIMARY PHONE:</span> {selectedOrder.customerPhone}
+                </div>
+                {(waybillData?.alternatePhone || selectedOrder.alternatePhone) && (
+                  <div>
+                    <span className="font-bold">ALT / GATE PHONE:</span>{" "}
+                    {waybillData?.alternatePhone || selectedOrder.alternatePhone}
+                  </div>
+                )}
+                <div>
+                  <span className="font-bold">ZONE:</span>{" "}
+                  {selectedOrder.shippingZoneName || "Standard Delivery"}
+                </div>
+                <div>
+                  <span className="font-bold">ADDRESS:</span>{" "}
+                  {selectedOrder.deliveryAddress || "Pending buyer street address"}
+                </div>
+                {(waybillData?.deliveryLandmark || selectedOrder.deliveryLandmark) && (
+                  <div>
+                    <span className="font-bold">LANDMARK:</span>{" "}
+                    {waybillData?.deliveryLandmark || selectedOrder.deliveryLandmark}
+                  </div>
+                )}
                 <div className="border-t border-dashed my-2" />
-                <div className="text-center text-[10px] text-emerald-800 font-bold">✓ PAYMENT SERVER VERIFIED · READY FOR PICKUP</div>
+                <div className="font-bold">ITEMS ({selectedOrder.quantity || 1} units):</div>
+                {waybillData?.items && waybillData.items.length > 0 ? (
+                  waybillData.items.map((it, idx) => (
+                    <div key={idx}>
+                      • {it.name} ({it.sku}) ×{it.quantity}
+                    </div>
+                  ))
+                ) : (
+                  <div>
+                    • {selectedOrder.productName} ×{selectedOrder.quantity || 1}
+                  </div>
+                )}
+                <div className="border-t border-dashed my-2" />
+                <div className="p-2 rounded bg-emerald-100/80 text-center text-[11px] text-emerald-900 font-bold">
+                  {waybillData?.paymentStamp ||
+                    (selectedOrder.status === "PAID" ||
+                    selectedOrder.status === "PROCESSING" ||
+                    selectedOrder.status === "OUT_FOR_DELIVERY" ||
+                    selectedOrder.status === "FULFILLED"
+                      ? "✅ PAID IN ADVANCE — DO NOT COLLECT CASH FROM CUSTOMER"
+                      : `⚠️ COLLECT ON DELIVERY / PENDING: ${selectedOrder.totalAmountFormatted}`)}
+                </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <a
+                  href={`https://wa.me/${(selectedOrder.riderPhone || "").replace(/\D/g, "")}?text=${encodeURIComponent(
+                    waybillData?.whatsappRiderText ||
+                      `📦 *DISPATCH WAYBILL #WB-${selectedOrder.shortCode}*\n👤 *Buyer:* ${selectedOrder.customerName}\n📞 *Phone:* ${selectedOrder.customerPhone}${
+                        selectedOrder.alternatePhone ? `\n📞 *Alt Phone:* ${selectedOrder.alternatePhone}` : ""
+                      }\n🏠 *Address:* ${selectedOrder.deliveryAddress || selectedOrder.shippingZoneName || "Standard"}${
+                        selectedOrder.deliveryLandmark ? `\n🧭 *Landmark:* ${selectedOrder.deliveryLandmark}` : ""
+                      }\n🛍️ *Item:* ${selectedOrder.productName} ×${selectedOrder.quantity}\n💳 *Payment:* PAID IN ADVANCE — DO NOT COLLECT CASH`
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg text-center shadow-2xs transition-all cursor-pointer"
+                >
+                  📲 Send Waybill to Rider on WhatsApp
+                </a>
                 <button
                   onClick={() => window.print()}
-                  className="flex-1 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+                  className="py-2.5 px-4 bg-gray-900 hover:bg-black text-white text-xs font-semibold rounded-lg shadow-2xs transition-all cursor-pointer active:scale-95"
                 >
-                  Print Slip
+                  🖨️ Print Slip
                 </button>
                 <button
                   onClick={() => setShowPrintModal(false)}
-                  className="px-4 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+                  className="px-4 py-2.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg transition-all cursor-pointer"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 1-Click Instant Refund Modal */}
+        {showRefundModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center border-b pb-3">
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm">
+                    ↩️ Issue Instant Refund · Order #{selectedOrder.shortCode}
+                  </h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Reverses payment via Monnify, restores inventory stock, and sends buyer a WhatsApp refund receipt.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowRefundModal(false)}
+                  className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-3.5 bg-rose-50/70 rounded-xl border border-rose-200 space-y-1.5 text-xs text-rose-950">
+                <div className="flex justify-between">
+                  <span className="text-rose-700">Customer:</span>
+                  <span className="font-bold">{selectedOrder.customerName} ({selectedOrder.customerPhone})</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-rose-700">Refund Amount:</span>
+                  <span className="font-black text-sm">
+                    {selectedOrder.amountPaidFormatted && selectedOrder.amountPaidFormatted !== "₦0"
+                      ? selectedOrder.amountPaidFormatted
+                      : selectedOrder.totalAmountFormatted}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-rose-700">Stock Action:</span>
+                  <span className="font-semibold">+{selectedOrder.quantity} unit(s) restored to catalog</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 text-xs">
+                <label className="block text-gray-700 font-semibold">
+                  Reason for Refund (Sent to Buyer on WhatsApp)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Out of requested color / Buyer requested cancellation"
+                  value={refundReasonInput}
+                  onChange={(e) => setRefundReasonInput(e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-rose-600 bg-white"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleRefundSubmit}
+                  disabled={isRefunding}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-semibold rounded-lg shadow-2xs transition-all cursor-pointer active:scale-95"
+                >
+                  {isRefunding ? "Processing Monnify Refund..." : "↩️ Confirm & Refund Customer Now"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRefundModal(false)}
+                  className="px-4 py-2.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+                >
+                  Cancel
                 </button>
               </div>
             </div>

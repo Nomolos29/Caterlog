@@ -536,10 +536,10 @@ export function ChatDrawer({
                 sales
               </button>
               <button
-                onClick={() => onSendVendorKeyword("sync catalog")}
-                className="px-2 py-1 bg-emerald-50 border border-emerald-300 rounded text-emerald-800 hover:bg-emerald-100 font-medium cursor-pointer"
+                onClick={() => onSendVendorKeyword("products")}
+                className="px-2 py-1 bg-white border border-gray-200 rounded text-emerald-700 hover:bg-emerald-50 font-mono cursor-pointer"
               >
-                🛍️ sync catalog
+                products
               </button>
               <button
                 onClick={() => onSendVendorKeyword("stock")}

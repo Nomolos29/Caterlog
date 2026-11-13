@@ -26,9 +26,19 @@ export function Dashboard() {
   const [authSession, setAuthSession] = useState<{
     email: string;
     businessName: string;
-  } | null>({
-    email: "owner@niastores.example",
-    businessName: "Nia Stores",
+  } | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("caterlog_auth");
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {}
+      }
+    }
+    return {
+      email: "owner@niastores.example",
+      businessName: "Nia Stores",
+    };
   });
   const [state, setState] = useState<VendorState | null>(null);
   const [currentView, setCurrentView] = useState<NavView>("overview");
@@ -64,6 +74,32 @@ export function Dashboard() {
 
   useEffect(() => {
     void loadState();
+  }, [loadState]);
+
+  // Check URL for 1-tap WhatsApp Magic Link Token (?token=...)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    if (token) {
+      void (async () => {
+        try {
+          const res = await api.verifyMagicLinkToken(token);
+          if (res.authenticated) {
+            const user = {
+              email: `${res.vendor.whatsappPhone.replace(/\D/g, "")}@caterlog.store`,
+              businessName: res.vendor.businessName,
+            };
+            setAuthSession(user);
+            localStorage.setItem("caterlog_auth", JSON.stringify(user));
+            window.history.replaceState({}, document.title, window.location.pathname);
+            void loadState();
+          }
+        } catch (err) {
+          console.error("Token verification failed:", err);
+        }
+      })();
+    }
   }, [loadState]);
 
   // Real-time synchronization over Server-Sent Events (SSE)
@@ -114,19 +150,25 @@ export function Dashboard() {
   const handleAddProduct = async (input: {
     skuCode?: string;
     name: string;
+    description?: string;
+    category?: string;
     priceNaira: number;
     stockTotal: number;
     primaryImageUrl?: string;
     variants?: any[];
+    customFields?: Record<string, string>;
   }) => {
     try {
       const next = await api.addProduct({
         skuCode: input.skuCode || `ITEM-${Date.now().toString().slice(-4)}`,
         name: input.name,
+        description: input.description,
+        category: input.category,
         priceNaira: input.priceNaira,
         stockTotal: input.stockTotal,
         primaryImageUrl: input.primaryImageUrl,
         variants: input.variants,
+        customFields: input.customFields,
       });
       setState(next);
       return true;
@@ -146,6 +188,7 @@ export function Dashboard() {
       stockTotal?: number;
       primaryImageUrl?: string;
       variants?: any[];
+      customFields?: Record<string, string>;
     }
   ) => {
     try {
@@ -195,6 +238,16 @@ export function Dashboard() {
       setState(next);
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleRefundOrder = async (orderCode: string, reason?: string) => {
+    try {
+      const res = await api.refundOrder(orderCode, { reason });
+      if (res.state) setState(res.state);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      throw err;
     }
   };
 
@@ -457,6 +510,7 @@ export function Dashboard() {
               onSelectOrder={handleSelectOrder}
               onSimulateTransfer={handleSimulateTransfer}
               onMarkDispatched={handleMarkDispatched}
+              onRefundOrder={handleRefundOrder}
               onNavigateToPayments={() => setCurrentView("payments")}
               onNavigateToSettings={() => setCurrentView("settings")}
             />
@@ -498,7 +552,9 @@ export function Dashboard() {
           {currentView === "payments" && (
             <PaymentsView
               orders={state.orders}
+              vendor={state.vendor}
               initialOrderCode={selectedOrder?.shortCode}
+              onSimulateTransfer={handleSimulateTransfer}
               onNavigateToOrder={(code) => {
                 const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
                 if (target) {

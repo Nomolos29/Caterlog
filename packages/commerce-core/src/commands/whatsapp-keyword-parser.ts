@@ -34,6 +34,7 @@ export type VendorWhatsAppCommand =
       priceKobo: bigint;
       stockTotal: number;
       variants?: ParsedProductVariant[];
+      imageUrl?: string;
     }
   | { type: "LIST_ORDERS"; status: "PENDING_PAYMENT" | "PAID" }
   | { type: "REMIND_ORDER"; shortCode: string }
@@ -104,43 +105,75 @@ const SALES_ALIASES = new Set([
  * Detects and extracts an explicit SKU from product addition text
  * (e.g. "SKU: SHOE-01", "SHOE-03: Nike Air", "Nike Air (SHOE-03)", or "[SHOE-03]").
  */
-export function extractExplicitSku(text: string): { skuCode?: string; cleanText: string } {
+export function extractExplicitSku(text: string): {
+  skuCode?: string;
+  cleanText: string;
+} {
   // 1. Explicit "SKU: SHOE-01" or "SKU SHOE-01"
   const skuLabelMatch = text.match(/\bSKU\s*[:#-]?\s*([A-Za-z0-9_-]{2,32})\b/i);
   if (skuLabelMatch && skuLabelMatch[1]) {
-    const cleanText = text.replace(skuLabelMatch[0], "").replace(/^[,\s:-]+|[,\s:-]+$/g, "").trim();
+    const cleanText = text
+      .replace(skuLabelMatch[0], "")
+      .replace(/^[,\s:-]+|[,\s:-]+$/g, "")
+      .trim();
     return { skuCode: skuLabelMatch[1].toUpperCase(), cleanText };
   }
   // 2. Leading SKU code like "SHOE-03: Name" or "HEEL01: Name"
-  const leadingSkuMatch = text.match(/^([A-Za-z0-9]{2,10}(?:-[A-Za-z0-9]{1,10})?)\s*[:]\s*(.+)$/);
-  if (leadingSkuMatch && leadingSkuMatch[1] && leadingSkuMatch[2] && !isNigerianPriceToken(leadingSkuMatch[1])) {
-    return { skuCode: leadingSkuMatch[1].toUpperCase(), cleanText: leadingSkuMatch[2].trim() };
+  const leadingSkuMatch = text.match(
+    /^([A-Za-z0-9]{2,10}(?:-[A-Za-z0-9]{1,10})?)\s*[:]\s*(.+)$/,
+  );
+  if (
+    leadingSkuMatch &&
+    leadingSkuMatch[1] &&
+    leadingSkuMatch[2] &&
+    !isNigerianPriceToken(leadingSkuMatch[1])
+  ) {
+    return {
+      skuCode: leadingSkuMatch[1].toUpperCase(),
+      cleanText: leadingSkuMatch[2].trim(),
+    };
   }
   // 3. Parenthesized or bracketed SKU: "Name (SHOE-03)" or "[SHOE-03] Name"
-  const bracketMatch = text.match(/\[([A-Za-z0-9_-]{2,20})\]|\(([A-Za-z0-9_-]{2,20})\)/);
+  const bracketMatch = text.match(
+    /\[([A-Za-z0-9_-]{2,20})\]|\(([A-Za-z0-9_-]{2,20})\)/,
+  );
   if (bracketMatch) {
     const candidate = (bracketMatch[1] || bracketMatch[2] || "").trim();
     if (!/^\d+$/.test(candidate) && !isNigerianPriceToken(candidate)) {
-      const cleanText = text.replace(bracketMatch[0], "").replace(/\s{2,}/g, " ").trim();
+      const cleanText = text
+        .replace(bracketMatch[0], "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
       return { skuCode: candidate.toUpperCase(), cleanText };
     }
   }
   return { cleanText: text };
 }
 
-export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppCommand {
+export function parseVendorWhatsAppCommand(
+  rawText: string,
+): VendorWhatsAppCommand {
   const trimmed = rawText.trim();
   const lower = trimmed.toLowerCase();
   const tokens = trimmed.split(/\s+/);
   const firstWord = (tokens[0] ?? "").toLowerCase();
 
   // 1. Dashboard Magic Link
-  if (firstWord === "dashboard" || firstWord === "dash" || firstWord === "login" || firstWord === "web") {
+  if (
+    firstWord === "dashboard" ||
+    firstWord === "dash" ||
+    firstWord === "login" ||
+    firstWord === "web"
+  ) {
     return { type: "OPEN_DASHBOARD" };
   }
 
   // 2. Help / Menu
-  if (firstWord === "help" || firstWord === "menu" || firstWord === "commands") {
+  if (
+    firstWord === "help" ||
+    firstWord === "menu" ||
+    firstWord === "commands"
+  ) {
     return { type: "HELP_MENU" };
   }
 
@@ -152,10 +185,18 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
     lower === "sync whatsapp catalog" ||
     lower === "sync products" ||
     lower === "sync inventory" ||
-    (firstWord === "sync" && (tokens[1]?.toLowerCase() === "catalog" || tokens[1]?.toLowerCase() === "whatsapp" || tokens[1]?.toLowerCase() === "products" || tokens.length === 1)) ||
-    (firstWord === "catalog" && (tokens[1]?.toLowerCase() === "sync" || tokens[1]?.toLowerCase() === "publish"))
+    (firstWord === "sync" &&
+      (tokens[1]?.toLowerCase() === "catalog" ||
+        tokens[1]?.toLowerCase() === "whatsapp" ||
+        tokens[1]?.toLowerCase() === "products" ||
+        tokens.length === 1)) ||
+    (firstWord === "catalog" &&
+      (tokens[1]?.toLowerCase() === "sync" ||
+        tokens[1]?.toLowerCase() === "publish"))
   ) {
-    const deleteMissing = !tokens.some((t) => t.toLowerCase() === "keep" || t.toLowerCase() === "nodelete");
+    const deleteMissing = !tokens.some(
+      (t) => t.toLowerCase() === "keep" || t.toLowerCase() === "nodelete",
+    );
     return { type: "SYNC_CATALOG", deleteMissing };
   }
 
@@ -189,21 +230,29 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
       return { type: "LIST_SHIPPING" };
     }
     const subAction = (tokens[1] ?? "").toLowerCase();
-    if (subAction === "delete" || subAction === "remove" || subAction === "del") {
+    if (
+      subAction === "delete" ||
+      subAction === "remove" ||
+      subAction === "del"
+    ) {
       const code = Number.parseInt((tokens[2] ?? "").replace(/^#/, ""), 10);
       if (Number.isInteger(code) && code > 0) {
         return { type: "DELETE_SHIPPING", code };
       }
     }
 
-    const startIdx = subAction === "add" || subAction === "set" || subAction === "to" ? 2 : 1;
+    const startIdx =
+      subAction === "add" || subAction === "set" || subAction === "to" ? 2 : 1;
     const priceToken = tokens[tokens.length - 1] ?? "";
     const nameTokens = tokens.slice(startIdx, tokens.length - 1);
 
     if (nameTokens.length > 0 && isNigerianPriceToken(priceToken)) {
       return {
         type: "UPSERT_SHIPPING",
-        name: nameTokens.join(" ").replace(/[-:]+$/, "").trim(),
+        name: nameTokens
+          .join(" ")
+          .replace(/[-:]+$/, "")
+          .trim(),
         feeKobo: nairaToKobo(priceToken),
       };
     }
@@ -229,7 +278,8 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
       };
     }
 
-    const hasVerb = subAction === "add" || subAction === "create" || subAction === "set";
+    const hasVerb =
+      subAction === "add" || subAction === "create" || subAction === "set";
     const codeToken = (hasVerb ? tokens[2] : tokens[1]) ?? "";
     const valToken = (hasVerb ? tokens[3] : tokens[2]) ?? "";
     if (codeToken && valToken) {
@@ -267,7 +317,10 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
 
   // 6b. Delete / Remove Product (`delete SHOE-01`, `remove SHOE-01`, `del SHOE-01`, `product delete SHOE-01`)
   if (
-    (firstWord === "delete" || firstWord === "del" || firstWord === "remove" || firstWord === "rm") &&
+    (firstWord === "delete" ||
+      firstWord === "del" ||
+      firstWord === "remove" ||
+      firstWord === "rm") &&
     tokens[1] &&
     !SHIPPING_ALIASES.has((tokens[1] ?? "").toLowerCase()) &&
     !DISCOUNT_ALIASES.has((tokens[1] ?? "").toLowerCase())
@@ -276,14 +329,20 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
   }
   if (
     (firstWord === "product" || firstWord === "prod") &&
-    (tokens[1]?.toLowerCase() === "delete" || tokens[1]?.toLowerCase() === "del" || tokens[1]?.toLowerCase() === "remove") &&
+    (tokens[1]?.toLowerCase() === "delete" ||
+      tokens[1]?.toLowerCase() === "del" ||
+      tokens[1]?.toLowerCase() === "remove") &&
     tokens[2]
   ) {
     return { type: "DELETE_PRODUCT", skuCode: tokens[2].toUpperCase() };
   }
 
   // 7. Pending & Paid Orders (`pending`, `paid`, `remind 882`, `dispatch ORD-882 0803...`)
-  if (firstWord === "pending" || firstWord === "pendin" || lower === "pending orders") {
+  if (
+    firstWord === "pending" ||
+    firstWord === "pendin" ||
+    lower === "pending orders"
+  ) {
     return { type: "LIST_ORDERS", status: "PENDING_PAYMENT" };
   }
   if (firstWord === "paid" || lower === "paid orders") {
@@ -295,7 +354,12 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
       shortCode: normalizeOrderShortCode(tokens[1]),
     };
   }
-  if ((firstWord === "dispatch" || firstWord === "shipped" || firstWord === "sent") && tokens[1]) {
+  if (
+    (firstWord === "dispatch" ||
+      firstWord === "shipped" ||
+      firstWord === "sent") &&
+    tokens[1]
+  ) {
     return {
       type: "DISPATCH_ORDER",
       shortCode: normalizeOrderShortCode(tokens[1]),
@@ -304,8 +368,14 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
   }
 
   // 8. Co-Pilot Mode & Idle Timer (`mode copilot`, `mode copilot 90s`, `mode auto`, `mode off`)
-  if (firstWord === "mode" || firstWord === "copilot" || firstWord === "copolit") {
-    const modeArg = (firstWord.startsWith("cop") ? tokens[1] ?? "copilot" : tokens[1] ?? "").toLowerCase();
+  if (
+    firstWord === "mode" ||
+    firstWord === "copilot" ||
+    firstWord === "copolit"
+  ) {
+    const modeArg = (
+      firstWord.startsWith("cop") ? (tokens[1] ?? "copilot") : (tokens[1] ?? "")
+    ).toLowerCase();
     const timerArg = firstWord.startsWith("cop") ? tokens[1] : tokens[2];
 
     if (modeArg === "auto" || modeArg === "full" || modeArg === "full_auto") {
@@ -316,7 +386,9 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
     }
     if (modeArg === "copilot" || modeArg === "on" || /^\d+s?$/.test(modeArg)) {
       const rawSeconds = /^\d+s?$/.test(modeArg) ? modeArg : timerArg;
-      const parsedSec = rawSeconds ? Number.parseInt(rawSeconds.replace(/s(ecs?)?$/i, ""), 10) : undefined;
+      const parsedSec = rawSeconds
+        ? Number.parseInt(rawSeconds.replace(/s(ecs?)?$/i, ""), 10)
+        : undefined;
       return {
         type: "SET_COPILOT_MODE",
         mode: "COPILOT",
@@ -326,7 +398,10 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
   }
 
   // 9. Stock Reservation Hold Timer (`hold 20` or `hold 20m` or `timer 15`)
-  if ((firstWord === "hold" || firstWord === "timer" || firstWord === "ttl") && tokens[1]) {
+  if (
+    (firstWord === "hold" || firstWord === "timer" || firstWord === "ttl") &&
+    tokens[1]
+  ) {
     const mins = Number.parseInt(tokens[1].replace(/m(ins?)?$/i, ""), 10);
     if (Number.isInteger(mins) && mins >= 5 && mins <= 180) {
       return { type: "SET_RESERVATION_TTL", minutes: mins };
@@ -336,14 +411,26 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
   // 10. Vendor Customer Assistance & Co-Pilot Sync (`reply <msg>`, `reply <phone> <msg>`, `resume`)
   if (
     firstWord === "resume" ||
-    (firstWord === "copilot" && (tokens[1] === "on" || tokens[1] === "resume")) ||
+    (firstWord === "copilot" &&
+      (tokens[1] === "on" || tokens[1] === "resume")) ||
     lower.startsWith("hand back")
   ) {
-    const target = tokens[1] && tokens[1] !== "copilot" && tokens[1] !== "on" && tokens[1] !== "resume" ? tokens[1] : undefined;
+    const target =
+      tokens[1] &&
+      tokens[1] !== "copilot" &&
+      tokens[1] !== "on" &&
+      tokens[1] !== "resume"
+        ? tokens[1]
+        : undefined;
     return { type: "RESUME_COPILOT", targetPhoneOrQuery: target };
   }
 
-  if ((firstWord === "reply" || firstWord === "assist" || firstWord === "respond") && tokens.length > 1) {
+  if (
+    (firstWord === "reply" ||
+      firstWord === "assist" ||
+      firstWord === "respond") &&
+    tokens.length > 1
+  ) {
     const secondToken = tokens[1];
     const isPhoneLike = /^(?:\+?\d{4,15})$/.test(secondToken);
     if (isPhoneLike && tokens.length > 2) {
@@ -377,6 +464,19 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
     textToParse = skuInfo.cleanText;
   }
 
+  // Extract any inline image URL so it doesn't break variant/stock parsing
+  let extractedImageUrl: string | undefined = undefined;
+  const embeddedUrlMatch = textToParse.match(
+    /https?:\/\/[^\s,]+(?:\.[a-zA-Z0-9]+|\?[^\s,]*)/i,
+  );
+  if (embeddedUrlMatch) {
+    extractedImageUrl = embeddedUrlMatch[0];
+    textToParse = textToParse.replace(embeddedUrlMatch[0], "").trim();
+    textToParse = textToParse
+      .replace(/,\s*,/g, ",")
+      .replace(/^[,\s]+|[,\s]+$/g, "");
+  }
+
   const prefixMatch =
     textToParse.match(/^(?:add|new|create)\s+product\s+/i) ||
     textToParse.match(/^(?:product|prod)\s+(?:add|new|create)\s+/i);
@@ -386,7 +486,10 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
 
   // 10a. Multi-line caption format
   if (textToParse.includes("\n")) {
-    const lines = textToParse.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = textToParse
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (lines.length >= 2) {
       let name = lines[0] ?? "";
       let priceStr = "";
@@ -402,7 +505,9 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
           priceStr = line1;
           variantStartIdx = 2;
         } else {
-          const pMatch = line1.match(/(?:price\s*[:=]?\s*)?((?:#|₦|NGN|N)\s*[\d,]+|\b\d+k\b)/i);
+          const pMatch = line1.match(
+            /(?:price\s*[:=]?\s*)?((?:#|₦|NGN|N)\s*[\d,]+|\b\d+k\b)/i,
+          );
           if (pMatch && isNigerianPriceToken(pMatch[1])) {
             priceStr = pMatch[1];
             variantStartIdx = 2;
@@ -412,13 +517,21 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
 
       // Check if lines[1..N] are variants where each variation has its own price (e.g. "38: #20000 (5)")
       const varLinesOnly = parseProductVariants(lines.slice(1));
-      if (varLinesOnly.length > 0 && varLinesOnly.some((v) => v.priceKobo !== undefined)) {
-        const stockTotal = varLinesOnly.reduce((sum, v) => sum + v.stockTotal, 0);
-        const basePriceKobo = varLinesOnly.find((v) => v.priceKobo !== undefined)?.priceKobo ?? 0n;
+      if (
+        varLinesOnly.length > 0 &&
+        varLinesOnly.some((v) => v.priceKobo !== undefined)
+      ) {
+        const stockTotal = varLinesOnly.reduce(
+          (sum, v) => sum + v.stockTotal,
+          0,
+        );
+        const basePriceKobo =
+          varLinesOnly.find((v) => v.priceKobo !== undefined)?.priceKobo ?? 0n;
         return {
           type: "QUICK_ADD_PRODUCT",
           name,
           ...(explicitSku ? { skuCode: explicitSku } : {}),
+          ...(extractedImageUrl ? { imageUrl: extractedImageUrl } : {}),
           priceKobo: basePriceKobo,
           stockTotal,
           variants: varLinesOnly,
@@ -435,6 +548,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
             type: "QUICK_ADD_PRODUCT",
             name,
             ...(explicitSku ? { skuCode: explicitSku } : {}),
+            ...(extractedImageUrl ? { imageUrl: extractedImageUrl } : {}),
             priceKobo,
             stockTotal,
             variants,
@@ -446,7 +560,10 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
 
   // 10b. Comma-separated caption format
   if (textToParse.includes(",")) {
-    const parts = textToParse.split(/[,;\n]+(?![^(]*\))/).map((p) => p.trim()).filter(Boolean);
+    const parts = textToParse
+      .split(/[,;\n]+(?![^(]*\))/)
+      .map((p) => p.trim())
+      .filter(Boolean);
     if (parts.length >= 2) {
       let name = parts[0] ?? "";
       let priceStr = parts[1] ?? "";
@@ -468,6 +585,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
             type: "QUICK_ADD_PRODUCT",
             name,
             ...(explicitSku ? { skuCode: explicitSku } : {}),
+            ...(extractedImageUrl ? { imageUrl: extractedImageUrl } : {}),
             priceKobo,
             stockTotal: 1,
           };
@@ -476,16 +594,23 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
         const singleToken = remainderParts[0] ?? "";
         const isSimpleStock =
           remainderParts.length === 1 &&
-          /^(?:stock|qty|total|count)?\s*[:=-]?\s*\d+\s*(?:units?|pcs?|pieces?|items?)?$/i.test(singleToken) &&
-          !/(?:variations?|variants?|sizes?|colors?|options?|flavors?|:.*[a-zA-Z]|\(|@)/i.test(singleToken);
+          /^(?:stock|qty|total|count)?\s*[:=-]?\s*\d+\s*(?:units?|pcs?|pieces?|items?)?$/i.test(
+            singleToken,
+          ) &&
+          !/(?:variations?|variants?|sizes?|colors?|options?|flavors?|:.*[a-zA-Z]|\(|@)/i.test(
+            singleToken,
+          );
 
         if (isSimpleStock) {
           const stockMatch = singleToken.match(/(\d+)/);
-          const stockTotal = stockMatch ? Number.parseInt(stockMatch[1] ?? "1", 10) : 1;
+          const stockTotal = stockMatch
+            ? Number.parseInt(stockMatch[1] ?? "1", 10)
+            : 1;
           return {
             type: "QUICK_ADD_PRODUCT",
             name,
             ...(explicitSku ? { skuCode: explicitSku } : {}),
+            ...(extractedImageUrl ? { imageUrl: extractedImageUrl } : {}),
             priceKobo,
             stockTotal,
           };
@@ -498,6 +623,7 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
             type: "QUICK_ADD_PRODUCT",
             name,
             ...(explicitSku ? { skuCode: explicitSku } : {}),
+            ...(extractedImageUrl ? { imageUrl: extractedImageUrl } : {}),
             priceKobo,
             stockTotal,
             variants,
@@ -505,11 +631,14 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
         }
 
         const stockMatch = (singleToken || "stock 1").match(/(\d+)/);
-        const stockTotal = stockMatch ? Number.parseInt(stockMatch[1] ?? "1", 10) : 1;
+        const stockTotal = stockMatch
+          ? Number.parseInt(stockMatch[1] ?? "1", 10)
+          : 1;
         return {
           type: "QUICK_ADD_PRODUCT",
           name,
           ...(explicitSku ? { skuCode: explicitSku } : {}),
+          ...(extractedImageUrl ? { imageUrl: extractedImageUrl } : {}),
           priceKobo,
           stockTotal,
         };
@@ -519,14 +648,22 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
       // (e.g. "Zara Heel, 38: #20000 (5), 39: #25000 (3)" or "Zara Heel, sizes: 38 @ 20k (5), 39 @ 25k (3)")
       if (name) {
         const candidateVariants = parseProductVariants(parts.slice(1));
-        if (candidateVariants.length > 0 && candidateVariants.some((v) => v.priceKobo !== undefined)) {
-          const stockTotal = candidateVariants.reduce((sum, v) => sum + v.stockTotal, 0);
+        if (
+          candidateVariants.length > 0 &&
+          candidateVariants.some((v) => v.priceKobo !== undefined)
+        ) {
+          const stockTotal = candidateVariants.reduce(
+            (sum, v) => sum + v.stockTotal,
+            0,
+          );
           const basePriceKobo =
-            candidateVariants.find((v) => v.priceKobo !== undefined)?.priceKobo ?? 0n;
+            candidateVariants.find((v) => v.priceKobo !== undefined)
+              ?.priceKobo ?? 0n;
           return {
             type: "QUICK_ADD_PRODUCT",
             name,
             ...(explicitSku ? { skuCode: explicitSku } : {}),
+            ...(extractedImageUrl ? { imageUrl: extractedImageUrl } : {}),
             priceKobo: basePriceKobo,
             stockTotal,
             variants: candidateVariants,
@@ -550,23 +687,32 @@ export function parseVendorWhatsAppCommand(rawText: string): VendorWhatsAppComma
  */
 export function parseProductVariants(
   candidateStrings: string[],
-  defaultPriceKobo?: bigint
+  defaultPriceKobo?: bigint,
 ): ParsedProductVariant[] {
   const variants: ParsedProductVariant[] = [];
 
   for (const raw of candidateStrings) {
     if (!raw.trim()) continue;
-    const clean = raw.replace(/^(?:variations?|variants?|sizes?|colors?|options?|flavors?)\s*[:=-]?\s*/i, "").trim();
+    const clean = raw
+      .replace(
+        /^(?:variations?|variants?|sizes?|colors?|options?|flavors?)\s*[:=-]?\s*/i,
+        "",
+      )
+      .trim();
     if (!clean) continue;
 
-    const subTokens = clean.split(/[,;\n]+(?![^(]*\))/).map((s) => s.trim()).filter(Boolean);
+    const subTokens = clean
+      .split(/[,;\n]+(?![^(]*\))/)
+      .map((s) => s.trim())
+      .filter(Boolean);
     for (let token of subTokens) {
       token = token.replace(/^[•\-\*]\s*/, "").trim();
       if (!token) continue;
 
       // 1. Extract variant-specific price if present (e.g. "#20000", "20000", "@ 20k", "at #25,000", "₦18500", "N10000")
       let variantPriceKobo: bigint | undefined = undefined;
-      const priceRegex = /(?:@|at\s+|[:\-]\s*)?((?:#|₦|NGN|N)\s*[\d,]+|\b\d+k\b|(?<=[:@\s\-])\d{4,7}\b)/i;
+      const priceRegex =
+        /(?:@|at\s+|[:\-]\s*)?((?:#|₦|NGN|N)\s*[\d,]+|\b\d+k\b|(?<=[:@\s\-])\d{4,7}\b)/i;
       const priceMatch = token.match(priceRegex);
       if (priceMatch) {
         const candidatePrice = priceMatch[1].replace(/[,:;\s]+$/, "");
@@ -578,9 +724,13 @@ export function parseProductVariants(
 
       // 2. Extract stock count
       let stock = 1;
-      const parensMatch = token.match(/\(\s*(?:stock|qty|units?|pcs?)?[:\s,]*(\d+)\s*(?:units?|pcs?|items?)?\s*\)/i);
+      const parensMatch = token.match(
+        /\(\s*(?:stock|qty|units?|pcs?)?[:\s,]*(\d+)\s*(?:units?|pcs?|items?)?\s*\)/i,
+      );
       const multiMatch = token.match(/[x×*]\s*(\d+)\b/i);
-      const keywordMatch = token.match(/\b(?:stock|qty|total|count)\s*[:=]?\s*(\d+)\b/i) || token.match(/\b(\d+)\s*(?:units?|pcs?|items?|pieces?)\b/i);
+      const keywordMatch =
+        token.match(/\b(?:stock|qty|total|count)\s*[:=]?\s*(\d+)\b/i) ||
+        token.match(/\b(\d+)\s*(?:units?|pcs?|items?|pieces?)\b/i);
       const colonDashMatch = token.match(/[:=\-]\s*(\d+)\s*$/);
       const trailingNumMatch = token.match(/\s+(\d+)$/);
 
@@ -601,9 +751,15 @@ export function parseProductVariants(
         token = token.slice(0, trailingNumMatch.index).trim();
       }
 
-      const name = token.replace(/^[:=,\-@/() ]+|[:=,\-@/() ]+$/g, "").replace(/\s+/g, " ").trim();
+      const name = token
+        .replace(/^[:=,\-@/() ]+|[:=,\-@/() ]+$/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
       if (name) {
-        const skuSuffix = name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase();
+        const skuSuffix = name
+          .replace(/[^a-zA-Z0-9]/g, "")
+          .slice(0, 6)
+          .toUpperCase();
         variants.push({
           name,
           stockTotal: Number.isInteger(stock) && stock >= 0 ? stock : 1,

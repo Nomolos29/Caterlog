@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { CaterlogIcon, CheckIcon } from "../icons";
+import { CheckIcon } from "../icons";
+import { api } from "@/lib/api";
 
 interface AuthViewProps {
   initialMode?: "login" | "onboarding";
@@ -12,58 +13,277 @@ export function AuthView({
   initialMode = "login",
   onLoginSuccess,
 }: AuthViewProps) {
-  const [mode, setMode] = useState<"login" | "onboarding">(initialMode);
+  const [viewMode, setViewMode] = useState<"login" | "signup" | "otp_input">(
+    initialMode === "onboarding" ? "signup" : "login"
+  );
 
-  // Login form state
+  // Form states
+  const [loginMethod, setLoginMethod] = useState<"whatsapp" | "email">("whatsapp");
+  const [whatsappPhone, setWhatsappPhone] = useState("+234 803 123 4567");
   const [email, setEmail] = useState("owner@niastores.example");
   const [password, setPassword] = useState("••••••••");
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [loggingIn, setLoggingIn] = useState(false);
 
-  // Onboarding steps: 1 = Connect WhatsApp, 2 = Business Details, 3 = Catalog & Co-Pilot
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [phoneNumberId, setPhoneNumberId] = useState("104592837482");
-  const [businessName, setBusinessName] = useState("Nia Stores");
-  const [businessPhone, setBusinessPhone] = useState("+234 800 000 0142");
-  const [cacNumber, setCacNumber] = useState("RC-1928374");
+  // Signup states
+  const [sellerProfile, setSellerProfile] = useState<"existing" | "new">("existing");
+  const [signupPhone, setSignupPhone] = useState("+234 ");
+  const [businessName, setBusinessName] = useState("");
   const [catalogSelection, setCatalogSelection] = useState<"mirror" | "custom">("mirror");
-  const [copilotSetting, setCopilotSetting] = useState<"smart" | "full_auto">("smart");
 
-  const handleLogin = (e: React.FormEvent) => {
+  // OTP Verification state
+  const [otpCode, setOtpCode] = useState("");
+  const [otpTarget, setOtpTarget] = useState<{
+    phone: string;
+    maskedPhone: string;
+    purpose: "LOGIN" | "SIGNUP";
+    businessName?: string;
+    isExistingBusiness?: boolean;
+    catalogSelection?: "mirror" | "custom";
+  } | null>(null);
+
+  // Shared status states
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+
+  const formatPhone = (val: string) => {
+    let clean = val.replace(/[^\d+]/g, "");
+    if (clean.startsWith("0")) {
+      clean = "+234" + clean.slice(1);
+    }
+    return clean;
+  };
+
+  /* -------------------------------------------------------------------------- */
+  /* Action: Request 6-Digit OTP on WhatsApp for Login                          */
+  /* -------------------------------------------------------------------------- */
+  const handleRequestLoginOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password.trim()) {
-      setLoginError("Please enter your email and password.");
+    setErrorMessage(null);
+    setResendNotice(null);
+    const cleanPhone = formatPhone(whatsappPhone);
+
+    if (cleanPhone.length < 10) {
+      setErrorMessage("Please enter a valid WhatsApp number (e.g. 0803 123 4567).");
       return;
     }
-    setLoggingIn(true);
-    setTimeout(() => {
-      setLoggingIn(false);
-      onLoginSuccess({
-        email: email.trim(),
-        businessName: email.includes("nia") ? "Nia Stores" : "My WhatsApp Store",
-      });
-    }, 600);
-  };
 
-  const handleCompleteOnboarding = () => {
-    setLoggingIn(true);
-    setTimeout(() => {
-      setLoggingIn(false);
-      onLoginSuccess({
-        email: `${businessName.toLowerCase().replace(/\s+/g, "")}@example.com`,
-        businessName: businessName.trim() || "My WhatsApp Store",
+    setSubmitting(true);
+    try {
+      const res = await api.requestOtp(cleanPhone, "LOGIN");
+      setOtpTarget({
+        phone: cleanPhone,
+        maskedPhone: res.destinationPhone,
+        purpose: "LOGIN",
       });
-    }, 700);
+      setOtpCode("");
+      setViewMode("otp_input");
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to send WhatsApp security code.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   /* -------------------------------------------------------------------------- */
-  /* Screen: Login (Matches Figma 'Caterlog Auth & Setup.png')                   */
+  /* Action: Request 6-Digit OTP on WhatsApp for New Store Signup               */
   /* -------------------------------------------------------------------------- */
-  if (mode === "login") {
+  const handleStartStoreSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setResendNotice(null);
+    const cleanPhone = formatPhone(signupPhone);
+
+    if (cleanPhone.length < 10) {
+      setErrorMessage("Please enter a valid WhatsApp number (e.g. 0803 123 4567).");
+      return;
+    }
+
+    const effectiveName =
+      businessName.trim() ||
+      (sellerProfile === "existing" ? "WhatsApp Business Store" : "My WhatsApp Store");
+
+    setSubmitting(true);
+    try {
+      const res = await api.requestOtp(cleanPhone, "SIGNUP");
+      setOtpTarget({
+        phone: cleanPhone,
+        maskedPhone: res.destinationPhone,
+        purpose: "SIGNUP",
+        businessName: effectiveName,
+        isExistingBusiness: sellerProfile === "existing",
+        catalogSelection,
+      });
+      setOtpCode("");
+      setViewMode("otp_input");
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to send verification code.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* -------------------------------------------------------------------------- */
+  /* Action: Verify 6-Digit WhatsApp Code                                       */
+  /* -------------------------------------------------------------------------- */
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpTarget) return;
+    setErrorMessage(null);
+
+    const cleanCode = otpCode.replace(/\D/g, "");
+    if (cleanCode.length !== 6) {
+      setErrorMessage("Please enter all 6 digits of the code sent to your WhatsApp.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await api.verifyOtp({
+        phone: otpTarget.phone,
+        code: cleanCode,
+        purpose: otpTarget.purpose,
+        businessName: otpTarget.businessName,
+        isExistingBusiness: otpTarget.isExistingBusiness,
+        catalogSelection: otpTarget.catalogSelection,
+      });
+
+      if (res.authenticated) {
+        onLoginSuccess({
+          email: `${otpTarget.phone.replace(/\D/g, "")}@caterlog.store`,
+          businessName: res.vendor.businessName || otpTarget.businessName || "My WhatsApp Store",
+        });
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Invalid or expired 6-digit code.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* -------------------------------------------------------------------------- */
+  /* Action: Resend OTP Code                                                    */
+  /* -------------------------------------------------------------------------- */
+  const handleResendOtp = async () => {
+    if (!otpTarget) return;
+    setErrorMessage(null);
+    setResendNotice(null);
+    setSubmitting(true);
+    try {
+      await api.requestOtp(otpTarget.phone, otpTarget.purpose);
+      setResendNotice("A new 6-digit code has been delivered to your WhatsApp.");
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to resend code.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* -------------------------------------------------------------------------- */
+  /* Screen 1: 6-Digit Code Verification Screen (Strict WhatsApp PIN Input)     */
+  /* -------------------------------------------------------------------------- */
+  if (viewMode === "otp_input" && otpTarget) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-[440px] bg-white rounded-2xl border border-gray-200 p-6 sm:p-8 shadow-xs space-y-6 animate-in fade-in zoom-in-95 duration-150">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-emerald-50 border border-emerald-100 text-[#00c068] flex items-center justify-center text-xl shadow-xs">
+              🔒
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-gray-900">
+              Enter 6-Digit Security Code
+            </h1>
+            <p className="text-xs text-gray-500 leading-relaxed max-w-sm mx-auto">
+              We sent a 6-digit verification code to your WhatsApp:
+            </p>
+            <div className="inline-block px-3 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs font-mono font-bold text-gray-900">
+              {otpTarget.maskedPhone}
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium text-center">
+              {errorMessage}
+            </div>
+          )}
+
+          {resendNotice && (
+            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium text-center">
+              {resendNotice}
+            </div>
+          )}
+
+          <form onSubmit={handleVerifyOtp} className="space-y-4">
+            <div>
+              <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-600 text-center mb-2">
+                6-DIGIT WHATSAPP CODE
+              </label>
+              <input
+                type="text"
+                autoFocus
+                required
+                maxLength={6}
+                value={otpCode}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "").slice(0, 6);
+                  setOtpCode(val);
+                }}
+                placeholder="••••••"
+                className="w-full px-4 py-3.5 text-center text-2xl font-mono font-bold tracking-[0.5em] border border-gray-200 rounded-xl focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 text-gray-900 bg-gray-50/50"
+              />
+              <p className="text-[11px] text-gray-400 text-center mt-1.5">
+                Code expires in 10 minutes. Check your WhatsApp chat.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting || otpCode.length !== 6}
+              className="w-full py-3.5 bg-[#00c068] hover:bg-[#00ad5d] text-white font-bold text-xs rounded-xl shadow-xs transition-all active:scale-[0.99] cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {submitting ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Verifying Code...</span>
+                </>
+              ) : (
+                <span>Verify &amp; Enter Dashboard →</span>
+              )}
+            </button>
+          </form>
+
+          <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode(otpTarget.purpose === "SIGNUP" ? "signup" : "login");
+                setErrorMessage(null);
+                setResendNotice(null);
+              }}
+              className="text-gray-500 hover:text-gray-900 font-medium cursor-pointer"
+            >
+              ← Change phone number
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={handleResendOtp}
+              className="text-emerald-600 hover:text-emerald-700 font-bold cursor-pointer disabled:opacity-50"
+            >
+              Resend code
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Screen 2: Login Screen                                                     */
+  /* -------------------------------------------------------------------------- */
+  if (viewMode === "login") {
     return (
       <div className="min-h-screen bg-[#F8F9FA] flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-[440px] bg-white rounded-2xl border border-gray-200 p-6 sm:p-10 shadow-xs space-y-6">
-          {/* Logo badge */}
           <div className="flex flex-col items-center text-center">
             <div className="w-12 h-12 rounded-xl bg-[#00c068] text-white flex items-center justify-center font-black text-2xl shadow-xs mb-3">
               <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -72,89 +292,148 @@ export function AuthView({
               </svg>
             </div>
             <h1 className="text-xl font-bold tracking-tight text-gray-900">Caterlog</h1>
-            <p className="text-xs text-gray-500 mt-1">Manage your business on WhatsApp</p>
+            <p className="text-xs text-gray-500 mt-1">Smart commerce &amp; AI Co-Pilot on WhatsApp</p>
           </div>
 
-          {loginError && (
+          <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-xl text-xs font-semibold text-gray-600">
+            <button
+              type="button"
+              onClick={() => {
+                setLoginMethod("whatsapp");
+                setErrorMessage(null);
+              }}
+              className={`py-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                loginMethod === "whatsapp"
+                  ? "bg-white text-gray-900 shadow-xs font-bold"
+                  : "hover:text-gray-900"
+              }`}
+            >
+              <span>💬 WhatsApp PIN</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLoginMethod("email");
+                setErrorMessage(null);
+              }}
+              className={`py-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                loginMethod === "email"
+                  ? "bg-white text-gray-900 shadow-xs font-bold"
+                  : "hover:text-gray-900"
+              }`}
+            >
+              <span>✉️ Password</span>
+            </button>
+          </div>
+
+          {errorMessage && (
             <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
-              {loginError}
+              {errorMessage}
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-600 mb-1.5">
-                EMAIL
-              </label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@company.com"
-                className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 transition-all text-gray-900 font-medium"
-              />
-            </div>
+          {loginMethod === "whatsapp" ? (
+            <form onSubmit={handleRequestLoginOtp} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-600 mb-1.5">
+                  WHATSAPP PHONE NUMBER
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={whatsappPhone}
+                  onChange={(e) => setWhatsappPhone(e.target.value)}
+                  placeholder="e.g. 0803 123 4567 or +234..."
+                  className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 transition-all text-gray-900 font-mono font-medium"
+                />
+                <p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+                  We will send a 6-digit security code to your WhatsApp phone.
+                </p>
+              </div>
 
-            <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-600">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full py-3 bg-[#00c068] hover:bg-[#00ad5d] text-white font-bold text-xs rounded-lg shadow-xs transition-all active:scale-[0.98] cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Sending Code on WhatsApp...</span>
+                  </>
+                ) : (
+                  <span>Send 6-Digit Code on WhatsApp →</span>
+                )}
+              </button>
+            </form>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                onLoginSuccess({
+                  email,
+                  businessName: "Nia Stores",
+                });
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-600 mb-1.5">
+                  EMAIL
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@company.com"
+                  className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 text-gray-900 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-600 mb-1.5">
                   PASSWORD
                 </label>
-                <button
-                  type="button"
-                  onClick={() => alert("Password reset instructions sent to your merchant email.")}
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
-                >
-                  Forgot?
-                </button>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 text-gray-900 font-medium"
+                />
               </div>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 transition-all text-gray-900 font-medium"
-              />
-            </div>
 
-            <button
-              type="submit"
-              disabled={loggingIn}
-              className="w-full py-3 bg-[#00c068] hover:bg-[#00ad5d] text-white font-bold text-xs rounded-lg shadow-xs transition-all active:scale-[0.98] cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
-            >
-              {loggingIn ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Signing in...</span>
-                </>
-              ) : (
-                <span>Login</span>
-              )}
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="w-full py-3 bg-[#00c068] hover:bg-[#00ad5d] text-white font-bold text-xs rounded-lg shadow-xs transition-all cursor-pointer"
+              >
+                Sign In
+              </button>
+            </form>
+          )}
 
           <div className="pt-2 border-t border-gray-100 text-center">
             <p className="text-xs text-gray-600">
-              Don&apos;t have an account?{" "}
+              Don&apos;t have a store yet?{" "}
               <button
                 type="button"
-                onClick={() => setMode("onboarding")}
+                onClick={() => {
+                  setViewMode("signup");
+                  setErrorMessage(null);
+                }}
                 className="text-blue-600 hover:text-blue-700 font-bold cursor-pointer underline underline-offset-2 ml-1"
               >
-                Create an account
+                Create your store
               </button>
             </p>
           </div>
 
-          {/* Quick Demo Preload */}
           <div className="pt-2">
             <button
               type="button"
               onClick={() => {
-                setEmail("owner@niastores.example");
-                setPassword("password123");
                 onLoginSuccess({
                   email: "owner@niastores.example",
                   businessName: "Nia Stores",
@@ -171,11 +450,10 @@ export function AuthView({
   }
 
   /* -------------------------------------------------------------------------- */
-  /* Screen: 3-Step Vendor Onboarding (Matches 'Vendor Onboarding.png')          */
+  /* Screen 3: Sleek Modern Create Store                                        */
   /* -------------------------------------------------------------------------- */
   return (
     <div className="min-h-screen bg-[#F8F9FA] flex flex-col justify-between">
-      {/* Top Navbar */}
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -185,275 +463,167 @@ export function AuthView({
             <span className="font-bold text-gray-900 text-sm tracking-tight">Caterlog</span>
           </div>
 
-          <div className="flex items-center gap-4 text-xs">
-            <span className="font-bold tracking-wider uppercase text-gray-500 text-[11px]">
-              STEP {step} OF 3
-            </span>
-            <button
-              onClick={() => setMode("login")}
-              className="text-gray-600 hover:text-gray-900 font-semibold cursor-pointer"
-            >
-              Save &amp; Exit
-            </button>
-          </div>
-        </div>
-
-        {/* Progress Bar */}
-        <div className="w-full bg-gray-100 h-1">
-          <div
-            className="bg-[#00c068] h-1 transition-all duration-300"
-            style={{ width: step === 1 ? "33.3%" : step === 2 ? "66.6%" : "100%" }}
-          />
+          <button
+            onClick={() => setViewMode("login")}
+            className="text-xs text-gray-600 hover:text-gray-900 font-semibold cursor-pointer"
+          >
+            Already have an account? <span className="text-emerald-600 font-bold">Login →</span>
+          </button>
         </div>
       </header>
 
-      {/* Main Form Center Card */}
-      <main className="flex-1 flex items-center justify-center p-4 py-10">
-        <div className="w-full max-w-[520px] bg-white rounded-2xl border border-gray-200 p-8 sm:p-10 shadow-xs space-y-6 animate-in fade-in zoom-in-95 duration-150">
-          {/* Step 1: Connect WhatsApp */}
-          {step === 1 && (
-            <div className="space-y-6">
-              <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
-                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-              </div>
+      <main className="flex-1 flex items-center justify-center p-4 py-8">
+        <div className="w-full max-w-[500px] bg-white rounded-2xl border border-gray-200 p-6 sm:p-8 shadow-xs space-y-6 animate-in fade-in zoom-in-95 duration-150">
+          <div>
+            <span className="text-[10px] font-bold text-emerald-700 tracking-wider uppercase bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100">
+              Instant Setup
+            </span>
+            <h1 className="text-xl font-bold tracking-tight text-gray-900 mt-2">
+              Start selling on WhatsApp
+            </h1>
+            <p className="text-xs text-gray-500 mt-1">
+              Automated orders, 24/7 AI Co-Pilot, and verified bank transfers.
+            </p>
+          </div>
 
-              <div>
-                <h2 className="text-xl font-bold tracking-tight text-gray-900">Connect WhatsApp</h2>
-                <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
-                  Sync your business WhatsApp account to start receiving orders directly from customers.
-                </p>
-              </div>
+          <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-xl text-xs font-semibold text-gray-600">
+            <button
+              type="button"
+              onClick={() => setSellerProfile("existing")}
+              className={`py-2 px-2.5 rounded-lg transition-all cursor-pointer text-center ${
+                sellerProfile === "existing"
+                  ? "bg-white text-gray-900 shadow-xs font-bold"
+                  : "hover:text-gray-900"
+              }`}
+            >
+              Existing WhatsApp Store
+            </button>
+            <button
+              type="button"
+              onClick={() => setSellerProfile("new")}
+              className={`py-2 px-2.5 rounded-lg transition-all cursor-pointer text-center ${
+                sellerProfile === "new"
+                  ? "bg-white text-gray-900 shadow-xs font-bold"
+                  : "hover:text-gray-900"
+              }`}
+            >
+              New Seller / Reseller
+            </button>
+          </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Phone Number ID
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={phoneNumberId}
-                  onChange={(e) => setPhoneNumberId(e.target.value)}
-                  placeholder="e.g. 104592837482"
-                  className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 text-gray-900 font-mono font-medium"
-                />
-                <p className="text-[11px] text-gray-400 mt-1.5">
-                  Find this in your Facebook Developer Dashboard under WhatsApp Settings.
-                </p>
-              </div>
-
-              <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl text-xs text-blue-900 flex items-start gap-2.5 leading-relaxed">
-                <span className="text-blue-600 font-bold">ℹ</span>
-                <span>
-                  We use this ID to securely bridge your Caterlog catalog with your WhatsApp Business API.
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setStep(2)}
-                className="w-full py-3 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold text-xs rounded-lg shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
-              >
-                <span>Continue</span>
-                <span>→</span>
-              </button>
+          {errorMessage && (
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+              {errorMessage}
             </div>
           )}
 
-          {/* Step 2: Business Profile & KYC */}
-          {step === 2 && (
-            <div className="space-y-6">
-              <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
-                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 21h18M3 7v1a3 3 0 0 0 6 0V7m0 1a3 3 0 0 0 6 0V7m0 1a3 3 0 0 0 6 0V7H3l2-4h14l2 4M5 21V10.85M19 21V10.85M9 21v-4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v4" />
-                </svg>
-              </div>
-
-              <div>
-                <h2 className="text-xl font-bold tracking-tight text-gray-900">Business Details</h2>
-                <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
-                  Enter your store name and CAC registration for automated bank payouts &amp; verification.
-                </p>
-              </div>
-
-              <div className="space-y-3.5">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Store / Business Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={businessName}
-                    onChange={(e) => setBusinessName(e.target.value)}
-                    placeholder="e.g. Nia Stores"
-                    className="w-full px-3.5 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-medium"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    WhatsApp Customer Contact
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={businessPhone}
-                    onChange={(e) => setBusinessPhone(e.target.value)}
-                    placeholder="+234 800 000 0000"
-                    className="w-full px-3.5 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    CAC RC Number (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={cacNumber}
-                    onChange={(e) => setCacNumber(e.target.value)}
-                    placeholder="e.g. RC-1928374"
-                    className="w-full px-3.5 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="px-4 py-2.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold text-xs rounded-lg cursor-pointer"
-                >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStep(3)}
-                  className="flex-1 py-2.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold text-xs rounded-lg shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <span>Continue</span>
-                  <span>→</span>
-                </button>
-              </div>
+          <form onSubmit={handleStartStoreSignup} className="space-y-4">
+            <div>
+              <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-700 mb-1.5">
+                WHATSAPP PHONE NUMBER
+              </label>
+              <input
+                type="text"
+                required
+                value={signupPhone}
+                onChange={(e) => setSignupPhone(e.target.value)}
+                placeholder="e.g. 0803 123 4567 or +234..."
+                className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-mono font-medium text-gray-900"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                {sellerProfile === "existing"
+                  ? "We will send a 6-digit confirmation code to verify your WhatsApp Business number."
+                  : "We will send a 6-digit security code to verify your phone and activate your store."}
+              </p>
             </div>
-          )}
 
-          {/* Step 3: Catalog Sync & Sales Co-Pilot */}
-          {step === 3 && (
-            <div className="space-y-6">
-              <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
-                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0" />
-                </svg>
-              </div>
+            <div>
+              <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-700 mb-1.5">
+                STORE / BUSINESS NAME
+              </label>
+              <input
+                type="text"
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                placeholder={
+                  sellerProfile === "existing"
+                    ? "e.g. Nia Stores (or auto-pull from WhatsApp)"
+                    : "e.g. Kemi Luxury Closet"
+                }
+                className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-medium text-gray-900"
+              />
+            </div>
 
-              <div>
-                <h2 className="text-xl font-bold tracking-tight text-gray-900">Catalog &amp; Co-Pilot</h2>
-                <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
-                  Start with pre-verified supplier catalog products and configure your 24/7 AI selling assistant.
-                </p>
-              </div>
+            <div>
+              <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-700 mb-2">
+                STARTING INVENTORY
+              </label>
 
-              <div className="space-y-3">
-                <label
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div
                   onClick={() => setCatalogSelection("mirror")}
-                  className={`p-3.5 border rounded-xl flex items-start gap-3 cursor-pointer transition-colors ${
+                  className={`p-3 rounded-xl border transition-all cursor-pointer ${
                     catalogSelection === "mirror"
-                      ? "border-emerald-600 bg-emerald-50/40"
+                      ? "border-emerald-600 bg-emerald-50/50 shadow-2xs"
                       : "border-gray-200 hover:border-gray-300"
                   }`}
                 >
-                  <input
-                    type="radio"
-                    name="catalog"
-                    checked={catalogSelection === "mirror"}
-                    onChange={() => setCatalogSelection("mirror")}
-                    className="mt-0.5 text-emerald-600"
-                  />
-                  <div>
-                    <div className="text-xs font-bold text-gray-900">Mirror Verified Supplier Catalog (Recommended)</div>
-                    <p className="text-[11px] text-gray-500 mt-0.5">
-                      Instantly sync 4 popular kitchenware products from Aroko Wholesale with 20% margin.
-                    </p>
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-gray-900">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span>{sellerProfile === "existing" ? "Sync Existing Catalog" : "Wholesale Catalog"}</span>
                   </div>
-                </label>
-
-                <label
-                  onClick={() => setCatalogSelection("custom")}
-                  className={`p-3.5 border rounded-xl flex items-start gap-3 cursor-pointer transition-colors ${
-                    catalogSelection === "custom"
-                      ? "border-emerald-600 bg-emerald-50/40"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="catalog"
-                    checked={catalogSelection === "custom"}
-                    onChange={() => setCatalogSelection("custom")}
-                    className="mt-0.5 text-emerald-600"
-                  />
-                  <div>
-                    <div className="text-xs font-bold text-gray-900">Start with Custom Inventory</div>
-                    <p className="text-[11px] text-gray-500 mt-0.5">
-                      Upload your own product items, custom photos, and delivery zones manually.
-                    </p>
-                  </div>
-                </label>
-              </div>
-
-              <div className="p-3 bg-gray-50 rounded-xl text-xs space-y-1 text-gray-600">
-                <div className="font-semibold text-gray-900 flex items-center gap-1.5">
-                  <CheckIcon className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Meta WhatsApp Cloud Catalog Sync Enabled</span>
+                  <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+                    {sellerProfile === "existing"
+                      ? "Auto-imports your current WhatsApp Business items."
+                      : "4 ready-to-sell kitchenware items (20% margin)."}
+                  </p>
                 </div>
-                <p className="text-[11px] text-gray-500">
-                  Products are automatically mapped to Meta&apos;s product format for WhatsApp shopping.
-                </p>
-              </div>
 
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setStep(2)}
-                  className="px-4 py-2.5 border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold text-xs rounded-lg cursor-pointer"
+                <div
+                  onClick={() => setCatalogSelection("custom")}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                    catalogSelection === "custom"
+                      ? "border-emerald-600 bg-emerald-50/50 shadow-2xs"
+                      : "border-gray-200 hover:border-gray-300"
+                  }`}
                 >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  disabled={loggingIn}
-                  onClick={handleCompleteOnboarding}
-                  className="flex-1 py-2.5 bg-[#00c068] hover:bg-[#00ad5d] text-white font-bold text-xs rounded-lg shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  {loggingIn ? (
-                    <>
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Creating Store...</span>
-                    </>
-                  ) : (
-                    <span>Complete Setup &amp; Enter Dashboard →</span>
-                  )}
-                </button>
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-gray-900">
+                    <span className="w-2 h-2 rounded-full bg-gray-400" />
+                    <span>Custom Inventory</span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+                    Start with a fresh store and add your own items manually.
+                  </p>
+                </div>
               </div>
             </div>
-          )}
 
-          {/* Security footnote */}
-          <div className="pt-3 border-t border-gray-100 flex items-center justify-center gap-1.5 text-[11px] text-gray-400">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-3.5 bg-[#00c068] hover:bg-[#00ad5d] text-white font-bold text-xs rounded-xl shadow-xs transition-all active:scale-[0.99] cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              {submitting ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Sending Verification Code...</span>
+                </>
+              ) : (
+                <span>Continue &amp; Receive 6-Digit Code on WhatsApp →</span>
+              )}
+            </button>
+          </form>
+
+          <div className="pt-2 text-center text-[11px] text-gray-400 flex items-center justify-center gap-1.5">
             <span>🔒</span>
-            <span>Secure bank-level encryption for all business data</span>
+            <span>Bank-grade Monnify escrow &amp; official Meta Cloud integration</span>
           </div>
         </div>
       </main>
 
-      {/* Footer copyright */}
-      <footer className="py-4 text-center text-xs text-gray-400 border-t border-gray-100 bg-white">
-        © 2024 Caterlog Business. All rights reserved.
+      <footer className="py-3 text-center text-xs text-gray-400 border-t border-gray-100 bg-white">
+        © 2024 Caterlog Commerce. All rights reserved.
       </footer>
     </div>
   );
 }
-

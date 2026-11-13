@@ -23,7 +23,7 @@ const ALLOWED_TRANSITIONS: Record<DomainOrderStatus, readonly DomainOrderStatus[
   PROCESSING: ["OUT_FOR_DELIVERY", "FULFILLED", "REFUNDED"],
   OUT_FOR_DELIVERY: ["FULFILLED", "REFUNDED"],
   FULFILLED: ["REFUNDED"],
-  EXPIRED: ["PAID", "PARTIALLY_PAID"], // Handles late bank transfer arriving just after 15m timer
+  EXPIRED: ["PAID", "PARTIALLY_PAID", "REFUNDED"], // Handles late bank transfer arriving just after 15m timer
   CANCELLED: [],
   REFUNDED: [],
 };
