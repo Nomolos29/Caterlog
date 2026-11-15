@@ -309,6 +309,7 @@ export class CaterlogStage1Engine {
     id: "v-amaka-001",
     slug: "amaka-shoes",
     businessName: "Amaka Luxury Shoes",
+    role: "reseller",
     whatsappPhone: process.env.VENDOR_WHATSAPP_PHONE ?? "+2348031234567",
     whatsappPhoneId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "105992837465001",
     verificationStatus: "VERIFIED",
@@ -4073,6 +4074,7 @@ export class CaterlogStage1Engine {
 
   public updateVendorProfile(input: {
     businessName?: string;
+    role?: "reseller" | "supplier";
     whatsappPhone?: string;
     instagramHandle?: string;
     baseState?: string;
@@ -4080,6 +4082,9 @@ export class CaterlogStage1Engine {
   }): RuntimeVendor {
     if (typeof input.businessName === "string" && input.businessName.trim()) {
       this.vendor.businessName = input.businessName.trim();
+    }
+    if (input.role === "reseller" || input.role === "supplier") {
+      this.vendor.role = input.role;
     }
     if (typeof input.whatsappPhone === "string" && input.whatsappPhone.trim()) {
       const cleanPhone = input.whatsappPhone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
@@ -4103,6 +4108,7 @@ export class CaterlogStage1Engine {
   public onboardVendorProfile(input: {
     businessName: string;
     whatsappPhone: string;
+    role?: "reseller" | "supplier";
     isExistingBusiness?: boolean;
     catalogSelection?: "mirror" | "custom";
   }): RuntimeVendor {
@@ -4113,6 +4119,11 @@ export class CaterlogStage1Engine {
 
     this.vendor.businessName = cleanName;
     this.vendor.whatsappPhone = formattedPhone;
+    if (input.role === "reseller" || input.role === "supplier") {
+      this.vendor.role = input.role;
+    } else if (typeof input.isExistingBusiness === "boolean") {
+      this.vendor.role = input.isExistingBusiness ? "supplier" : "reseller";
+    }
     if (cleanSlug) {
       this.vendor.slug = cleanSlug;
     }

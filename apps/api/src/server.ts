@@ -322,6 +322,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           code?: string;
           purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
           businessName?: string;
+          role?: "reseller" | "supplier";
           isExistingBusiness?: boolean;
           catalogSelection?: "mirror" | "custom";
         };
@@ -343,9 +344,11 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           engine.onboardVendorProfile({
             businessName: body.businessName || "My WhatsApp Store",
             whatsappPhone: targetPhone,
+            role: body.role,
             isExistingBusiness: body.isExistingBusiness,
             catalogSelection: body.catalogSelection,
           });
+          await engine.flushPersistence();
         }
 
         const token = engine.createMagicLinkToken();
@@ -356,6 +359,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
             id: engine.vendor.id,
             slug: engine.vendor.slug,
             businessName: engine.vendor.businessName,
+            role: engine.vendor.role ?? "reseller",
             whatsappPhone: engine.vendor.whatsappPhone,
           },
           state: engine.serializeState(),
@@ -368,9 +372,11 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         const body = (rawBody ? JSON.parse(rawBody) : {}) as {
           phone?: string;
           businessName?: string;
+          role?: "reseller" | "supplier";
           isExistingBusiness?: boolean;
           catalogSelection?: "mirror" | "custom";
           cacNumber?: string;
+          skipOtp?: boolean;
         };
 
         if (!body.phone && !body.businessName) {
@@ -380,12 +386,16 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         const updatedVendor = engine.onboardVendorProfile({
           businessName: body.businessName || "My WhatsApp Store",
           whatsappPhone: body.phone || engine.vendor.whatsappPhone,
+          role: body.role,
           isExistingBusiness: body.isExistingBusiness,
           catalogSelection: body.catalogSelection,
         });
+        await engine.flushPersistence();
 
-        // Trigger 6-digit verification code to the vendor's WhatsApp phone
-        engine.generateOtp(updatedVendor.whatsappPhone, "SIGNUP");
+        // Trigger 6-digit verification code to the vendor's WhatsApp phone unless Email/Password signup already verified
+        if (!body.skipOtp) {
+          engine.generateOtp(updatedVendor.whatsappPhone, "SIGNUP");
+        }
 
         const masked = updatedVendor.whatsappPhone.replace(
           /(\+\d{3})\d+(\d{4})/,
@@ -393,12 +403,13 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         );
 
         return sendJson(res, 200, {
-          status: "otp_sent",
+          status: body.skipOtp ? "onboarded" : "otp_sent",
           destinationPhone: masked,
           vendor: {
             id: updatedVendor.id,
             slug: updatedVendor.slug,
             businessName: updatedVendor.businessName,
+            role: updatedVendor.role ?? "reseller",
             whatsappPhone: updatedVendor.whatsappPhone,
           },
           state: engine.serializeState(),
@@ -424,6 +435,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
             id: engine.vendor.id,
             slug: engine.vendor.slug,
             businessName: engine.vendor.businessName,
+            role: engine.vendor.role ?? "reseller",
             whatsappPhone: engine.vendor.whatsappPhone,
           },
           state: engine.serializeState(),
@@ -859,6 +871,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       if (req.method === "PATCH" && path === "/api/v1/vendor/profile") {
         const body = JSON.parse(await readRawBody(req)) as {
           businessName?: string;
+          role?: "reseller" | "supplier";
           whatsappPhone?: string;
           instagramHandle?: string;
           baseState?: string;

@@ -46,7 +46,16 @@ export function Dashboard() {
   const [currentView, setCurrentView] = useState<NavView>("overview");
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("setup");
   const [profileTab, setProfileTab] = useState<ProfileTabId>("profile");
+  const [productsTab, setProductsTab] = useState<"my-inventory" | "reselling" | "all" | "exceptions">("my-inventory");
+  const [editResellSku, setEditResellSku] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<"reseller" | "supplier">("reseller");
+
+  useEffect(() => {
+    const dbRole = state?.vendor?.role;
+    if (dbRole === "reseller" || dbRole === "supplier") {
+      setActiveWorkspace(dbRole);
+    }
+  }, [state?.vendor?.role]);
 
   useEffect(() => {
     if (activeWorkspace === "reseller") {
@@ -172,6 +181,9 @@ export function Dashboard() {
         initialMode="login"
         onLoginSuccess={(user) => {
           setAuthSession(user);
+          if (user.role === "reseller" || user.role === "supplier") {
+            setActiveWorkspace(user.role);
+          }
           void loadState();
         }}
       />
@@ -608,9 +620,11 @@ export function Dashboard() {
         pendingCount={state.analytics.pendingOrdersCount}
         onOpenNewOrder={() => setCurrentView("payment-links")}
         activeWorkspace={activeWorkspace}
-        onToggleWorkspace={() =>
-          setActiveWorkspace((prev) => (prev === "reseller" ? "supplier" : "reseller"))
-        }
+        onToggleWorkspace={() => {
+          const nextRole = activeWorkspace === "reseller" ? "supplier" : "reseller";
+          setActiveWorkspace(nextRole);
+          void api.updateProfile({ role: nextRole }).then(setState).catch(() => {});
+        }}
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
         vendorName={state.vendor.businessName}
@@ -626,9 +640,11 @@ export function Dashboard() {
           simulatorOpen={simulatorOpen}
           breadcrumb={getBreadcrumb()}
           activeWorkspace={activeWorkspace}
-          onToggleWorkspace={() =>
-            setActiveWorkspace((prev) => (prev === "reseller" ? "supplier" : "reseller"))
-          }
+          onToggleWorkspace={() => {
+            const nextRole = activeWorkspace === "reseller" ? "supplier" : "reseller";
+            setActiveWorkspace(nextRole);
+            void api.updateProfile({ role: nextRole }).then(setState).catch(() => {});
+          }}
           onOpenMobileNav={() => setMobileNavOpen(true)}
           orders={state.orders}
           products={state.products}
@@ -727,6 +743,9 @@ export function Dashboard() {
               suppliers={state.suppliers}
               resellerMirrors={state.resellerMirrors}
               workspaceRole={activeWorkspace}
+              initialTab={productsTab}
+              initialEditResellSku={editResellSku}
+              onConsumeEditResellSku={() => setEditResellSku(null)}
               onAddProduct={handleAddProduct}
               onUpdateProduct={handleUpdateProduct}
               onUpdateStock={handleUpdateStock}
@@ -743,7 +762,11 @@ export function Dashboard() {
               suppliers={state.suppliers}
               resellerMirrors={state.resellerMirrors}
               onMirrorSupplier={handleMirrorSupplier}
-              onMirrorProducts={() => setCurrentView("products")}
+              onMirrorProducts={(skus) => {
+                setProductsTab("reselling");
+                setEditResellSku(skus?.[0] ?? null);
+                setCurrentView("products");
+              }}
             />
           )}
 

@@ -7,7 +7,7 @@ import { authClient } from "@/lib/auth/client";
 
 interface AuthViewProps {
   initialMode?: "login" | "onboarding";
-  onLoginSuccess: (user: { email: string; businessName: string }) => void;
+  onLoginSuccess: (user: { email: string; businessName: string; role?: "reseller" | "supplier" }) => void;
 }
 
 export function AuthView({
@@ -21,12 +21,16 @@ export function AuthView({
   // Form states
   const [loginMethod, setLoginMethod] = useState<"whatsapp" | "email">("whatsapp");
   const [whatsappPhone, setWhatsappPhone] = useState("+234 803 123 4567");
-  const [email, setEmail] = useState("owner@niastores.example");
-  const [password, setPassword] = useState("••••••••");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   // Signup states
-  const [sellerProfile, setSellerProfile] = useState<"existing" | "new">("existing");
+  const [signupMethod, setSignupMethod] = useState<"whatsapp" | "email">("whatsapp");
+  const [sellerProfile, setSellerProfile] = useState<"existing" | "new">("new");
+  const [signupRole, setSignupRole] = useState<"reseller" | "supplier">("reseller");
   const [signupPhone, setSignupPhone] = useState("+234 ");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
   const [businessName, setBusinessName] = useState("");
   const [catalogSelection, setCatalogSelection] = useState<"mirror" | "custom">("mirror");
 
@@ -37,6 +41,7 @@ export function AuthView({
     maskedPhone: string;
     purpose: "LOGIN" | "SIGNUP";
     businessName?: string;
+    role?: "reseller" | "supplier";
     isExistingBusiness?: boolean;
     catalogSelection?: "mirror" | "custom";
   } | null>(null);
@@ -111,6 +116,7 @@ export function AuthView({
         maskedPhone: res.destinationPhone,
         purpose: "SIGNUP",
         businessName: effectiveName,
+        role: signupRole,
         isExistingBusiness: sellerProfile === "existing",
         catalogSelection,
       });
@@ -118,6 +124,57 @@ export function AuthView({
       setViewMode("otp_input");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to send verification code.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleEmailStoreSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    if (!signupEmail.trim() || !signupEmail.includes("@")) {
+      setErrorMessage("Please enter a valid email address.");
+      return;
+    }
+    if (signupPassword.length < 6) {
+      setErrorMessage("Password must be at least 6 characters.");
+      return;
+    }
+
+    const effectiveName =
+      businessName.trim() ||
+      (signupRole === "supplier" ? "WhatsApp Business Store" : "My Reseller Store");
+
+    setSubmitting(true);
+    try {
+      const signUpResult = await authClient.signUp.email({
+        email: signupEmail.trim(),
+        password: signupPassword,
+        name: effectiveName,
+      });
+      if (signUpResult?.error) {
+        setErrorMessage(signUpResult.error.message || "Could not create account. Please check your details.");
+        return;
+      }
+
+      const cleanPhone = formatPhone(signupPhone);
+      await api.onboardVendor({
+        businessName: effectiveName,
+        phone: cleanPhone.length >= 10 ? cleanPhone : undefined,
+        role: signupRole,
+        isExistingBusiness: sellerProfile === "existing",
+        catalogSelection,
+        skipOtp: true,
+      });
+
+      onLoginSuccess({
+        email: signupEmail.trim(),
+        businessName: effectiveName,
+        role: signupRole,
+      });
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Sign up failed. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -144,6 +201,7 @@ export function AuthView({
         code: cleanCode,
         purpose: otpTarget.purpose,
         businessName: otpTarget.businessName,
+        role: otpTarget.role,
         isExistingBusiness: otpTarget.isExistingBusiness,
         catalogSelection: otpTarget.catalogSelection,
       });
@@ -152,6 +210,7 @@ export function AuthView({
         onLoginSuccess({
           email: `${otpTarget.phone.replace(/\D/g, "")}@caterlog.store`,
           businessName: res.vendor.businessName || otpTarget.businessName || "My WhatsApp Store",
+          role: res.vendor.role ?? otpTarget.role,
         });
       }
     } catch (err) {
@@ -372,28 +431,34 @@ export function AuthView({
               onSubmit={async (e) => {
                 e.preventDefault();
                 setErrorMessage(null);
+                if (!email.trim() || !password) {
+                  setErrorMessage("Please enter your email and password.");
+                  return;
+                }
                 setSubmitting(true);
                 try {
                   const signInResult = await authClient.signIn.email({
-                    email,
+                    email: email.trim(),
                     password,
                   });
                   if (signInResult?.error) {
-                    await authClient.signUp.email({
-                      email,
-                      password,
-                      name: businessName.trim() || "Nia Stores",
-                    });
+                    setErrorMessage(
+                      signInResult.error.message ||
+                        "Invalid email or password. Please check your credentials or create an account."
+                    );
+                    return;
                   }
-                } catch {
-                  // Continue into dashboard if offline or using demo fallback
+                  onLoginSuccess({
+                    email: signInResult?.data?.user?.email || email.trim(),
+                    businessName: signInResult?.data?.user?.name || "Nia Stores",
+                  });
+                } catch (err) {
+                  setErrorMessage(
+                    err instanceof Error ? err.message : "Failed to sign in. Please try again."
+                  );
                 } finally {
                   setSubmitting(false);
                 }
-                onLoginSuccess({
-                  email,
-                  businessName: "Nia Stores",
-                });
               }}
               className="space-y-4"
             >
@@ -427,9 +492,17 @@ export function AuthView({
 
               <button
                 type="submit"
-                className="w-full py-3 bg-[#00c068] hover:bg-[#00ad5d] text-white font-bold text-xs rounded-lg shadow-xs transition-all cursor-pointer"
+                disabled={submitting}
+                className="w-full py-3 bg-[#00c068] hover:bg-[#00ad5d] text-white font-bold text-xs rounded-lg shadow-xs transition-all cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                Sign In
+                {submitting ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Signing In...</span>
+                  </>
+                ) : (
+                  <span>Sign In</span>
+                )}
               </button>
             </form>
           )}
@@ -506,28 +579,76 @@ export function AuthView({
             </p>
           </div>
 
+          <div>
+            <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-700 mb-2">
+              ACCOUNT ROLE
+            </label>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setSignupRole("reseller");
+                  setSellerProfile("new");
+                }}
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                  signupRole === "reseller"
+                    ? "border-emerald-600 bg-emerald-50/50 shadow-2xs"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                <div className="font-bold text-xs text-gray-900">Dropshipper / Reseller</div>
+                <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">
+                  Mirror supplier catalogs &amp; sell without holding inventory.
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSignupRole("supplier");
+                  setSellerProfile("existing");
+                }}
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                  signupRole === "supplier"
+                    ? "border-emerald-600 bg-emerald-50/50 shadow-2xs"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                <div className="font-bold text-xs text-gray-900">Vendor / Supplier</div>
+                <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">
+                  Manage your own stock, Market Boost &amp; reseller network.
+                </p>
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-xl text-xs font-semibold text-gray-600">
             <button
               type="button"
-              onClick={() => setSellerProfile("existing")}
+              onClick={() => {
+                setSignupMethod("whatsapp");
+                setErrorMessage(null);
+              }}
               className={`py-2 px-2.5 rounded-lg transition-all cursor-pointer text-center ${
-                sellerProfile === "existing"
+                signupMethod === "whatsapp"
                   ? "bg-white text-gray-900 shadow-xs font-bold"
                   : "hover:text-gray-900"
               }`}
             >
-              Existing WhatsApp Store
+              💬 WhatsApp PIN
             </button>
             <button
               type="button"
-              onClick={() => setSellerProfile("new")}
+              onClick={() => {
+                setSignupMethod("email");
+                setErrorMessage(null);
+              }}
               className={`py-2 px-2.5 rounded-lg transition-all cursor-pointer text-center ${
-                sellerProfile === "new"
+                signupMethod === "email"
                   ? "bg-white text-gray-900 shadow-xs font-bold"
                   : "hover:text-gray-900"
               }`}
             >
-              New Seller / Reseller
+              ✉️ Email &amp; Password
             </button>
           </div>
 
@@ -537,23 +658,58 @@ export function AuthView({
             </div>
           )}
 
-          <form onSubmit={handleStartStoreSignup} className="space-y-4">
+          <form
+            onSubmit={signupMethod === "whatsapp" ? handleStartStoreSignup : handleEmailStoreSignup}
+            className="space-y-4"
+          >
+            {signupMethod === "email" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-700 mb-1.5">
+                    EMAIL ADDRESS
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={signupEmail}
+                    onChange={(e) => setSignupEmail(e.target.value)}
+                    placeholder="name@company.com"
+                    className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-medium text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-700 mb-1.5">
+                    PASSWORD
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={signupPassword}
+                    onChange={(e) => setSignupPassword(e.target.value)}
+                    placeholder="Min. 6 characters"
+                    className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-medium text-gray-900"
+                  />
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-[11px] font-bold tracking-wider uppercase text-gray-700 mb-1.5">
-                WHATSAPP PHONE NUMBER
+                WHATSAPP PHONE NUMBER {signupMethod === "email" ? "(OPTIONAL)" : ""}
               </label>
               <input
                 type="text"
-                required
+                required={signupMethod === "whatsapp"}
                 value={signupPhone}
                 onChange={(e) => setSignupPhone(e.target.value)}
                 placeholder="e.g. 0803 123 4567 or +234..."
                 className="w-full px-3.5 py-2.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 font-mono font-medium text-gray-900"
               />
               <p className="text-[11px] text-gray-400 mt-1">
-                {sellerProfile === "existing"
-                  ? "We will send a 6-digit confirmation code to verify your WhatsApp Business number."
-                  : "We will send a 6-digit security code to verify your phone and activate your store."}
+                {signupMethod === "whatsapp"
+                  ? "We will send a 6-digit security code to verify your WhatsApp number."
+                  : "Used for WhatsApp order alerts & AI Co-Pilot notifications."}
               </p>
             </div>
 
@@ -626,10 +782,14 @@ export function AuthView({
               {submitting ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Sending Verification Code...</span>
+                  <span>{signupMethod === "whatsapp" ? "Sending Verification Code..." : "Creating Your Store..."}</span>
                 </>
               ) : (
-                <span>Continue &amp; Receive 6-Digit Code on WhatsApp →</span>
+                <span>
+                  {signupMethod === "whatsapp"
+                    ? "Continue & Receive 6-Digit Code on WhatsApp →"
+                    : "Create Store & Enter Dashboard →"}
+                </span>
               )}
             </button>
           </form>

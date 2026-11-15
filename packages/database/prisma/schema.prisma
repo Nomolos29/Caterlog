@@ -59,6 +59,7 @@ model Vendor {
   id                     String             @id @default(uuid()) @db.Uuid
   slug                   String             @unique
   businessName           String
+  role                   String             @default("reseller") // "reseller" | "supplier"
   whatsappPhone          String             @unique
   whatsappPhoneId        String?            @unique
   wabaId                 String?

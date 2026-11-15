@@ -365,6 +365,7 @@ export function NetworkView({
     type: "success" | "error" | "warning";
     title: string;
     message: string;
+    pendingMirroredSkus?: string[];
   } | null>(null);
 
   // Reseller operating location & Geographic visibility filters
@@ -453,18 +454,17 @@ export function NetworkView({
     }
     setMirroring(true);
     try {
-      const mirroredCount = selectedProductSkus.length;
+      const mirroredSkus = [...selectedProductSkus];
+      const mirroredCount = mirroredSkus.length;
       if (selectedSupplier && onMirrorSupplier) {
-        await onMirrorSupplier(selectedSupplier.slug, selectedProductSkus);
-      }
-      if (onMirrorProducts) {
-        onMirrorProducts(selectedProductSkus);
+        await onMirrorSupplier(selectedSupplier.slug, mirroredSkus);
       }
       setSelectedProductSkus([]);
       setMirrorModal({
         type: "success",
         title: "Products Mirrored to Store",
-        message: `${mirroredCount} product${mirroredCount === 1 ? "" : "s"} from ${selectedSupplier?.name || "supplier"} synced to your catalog and Reselling inventory.`,
+        message: `${mirroredCount} product${mirroredCount === 1 ? "" : "s"} from ${selectedSupplier?.name || "supplier"} synced to your catalog and Reselling inventory. Set your retail selling price next.`,
+        pendingMirroredSkus: mirroredSkus,
       });
     } catch (err) {
       setMirrorModal({
@@ -543,9 +543,24 @@ export function NetworkView({
                 <p className="text-xs text-gray-600 mt-1 leading-relaxed">{mirrorModal.message}</p>
               </div>
             </div>
-            <div className="flex justify-end pt-1">
+            <div className="flex justify-end gap-2 pt-1">
+              {mirrorModal.type === "success" && (
+                <button
+                  onClick={() => setMirrorModal(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 cursor-pointer transition-colors"
+                >
+                  Stay in Network
+                </button>
+              )}
               <button
-                onClick={() => setMirrorModal(null)}
+                onClick={() => {
+                  const skus = mirrorModal.pendingMirroredSkus;
+                  const isSuccess = mirrorModal.type === "success";
+                  setMirrorModal(null);
+                  if (isSuccess && skus && skus.length > 0 && onMirrorProducts) {
+                    onMirrorProducts(skus);
+                  }
+                }}
                 className={`px-5 py-2 rounded-xl text-xs font-semibold text-white cursor-pointer transition-colors ${
                   mirrorModal.type === "success"
                     ? "bg-[#0d5c3a] hover:bg-[#0b4b2f]"
@@ -554,7 +569,7 @@ export function NetworkView({
                     : "bg-amber-600 hover:bg-amber-700"
                 }`}
               >
-                Got it
+                {mirrorModal.type === "success" ? "Set Retail Price →" : "Got it"}
               </button>
             </div>
           </div>

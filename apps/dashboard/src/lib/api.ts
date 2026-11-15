@@ -98,6 +98,7 @@ export const api = {
 
   updateProfile(input: {
     businessName?: string;
+    role?: "reseller" | "supplier";
     whatsappPhone?: string;
     instagramHandle?: string;
     baseState?: string;
@@ -338,6 +339,7 @@ export const api = {
     code: string;
     purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
     businessName?: string;
+    role?: "reseller" | "supplier";
     isExistingBusiness?: boolean;
     catalogSelection?: "mirror" | "custom";
   }): Promise<{
@@ -419,14 +421,16 @@ export const api = {
   },
 
   onboardVendor(input: {
-    phone: string;
+    phone?: string;
     businessName: string;
+    role?: "reseller" | "supplier";
     isExistingBusiness?: boolean;
     catalogSelection?: "mirror" | "custom";
     cacNumber?: string;
+    skipOtp?: boolean;
   }): Promise<{
     status: string;
-    token: string;
+    token?: string;
     loginUrl?: string;
     vendor: VendorState["vendor"];
     state: VendorState;

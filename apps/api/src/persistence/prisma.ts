@@ -247,6 +247,7 @@ export class PrismaPersistenceStore implements PersistenceStore {
         id: vendor.id,
         slug: vendor.slug,
         businessName: vendor.businessName,
+        role: (vendor.role === "supplier" ? "supplier" : "reseller") as "reseller" | "supplier",
         whatsappPhone: vendor.whatsappPhone,
         whatsappPhoneId: vendor.whatsappPhoneId ?? "",
         verificationStatus: mapVerificationStatus(vendor.verificationStatus),
@@ -520,6 +521,7 @@ export class PrismaPersistenceStore implements PersistenceStore {
         where: { id: vendorId },
         data: {
           businessName: vendor.businessName,
+          role: vendor.role === "supplier" ? "supplier" : "reseller",
           whatsappPhone: vendor.whatsappPhone,
           whatsappPhoneId: vendor.whatsappPhoneId || null,
           copilotMode: vendor.copilotMode as CopilotMode,

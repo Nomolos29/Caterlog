@@ -12,7 +12,12 @@ interface ProductsViewProps {
   suppliers?: SupplierProfile[];
   resellerMirrors?: ResellerMirror[];
   workspaceRole?: "reseller" | "supplier";
-  initialTab?: "all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard";
+  initialTab?:
+    | "all"
+    | "my-inventory"
+    | "reselling"
+    | "exceptions"
+    | "mirror-wizard";
   onAddProduct: (input: {
     skuCode?: string;
     name: string;
@@ -47,12 +52,14 @@ interface ProductsViewProps {
         priceNaira?: number;
         stockTotal: number;
       }>;
-    }
+    },
   ) => Promise<boolean>;
   onUpdateStock: (sku: string, stock: number) => Promise<boolean>;
   onDeleteProduct?: (skuCode: string) => Promise<boolean>;
   onNavigateToNetwork?: (tab?: string) => void;
   onNavigateToSettings?: (tab?: string, subId?: string) => void;
+  initialEditResellSku?: string | null;
+  onConsumeEditResellSku?: () => void;
   onSyncWhatsAppCatalog?: () => Promise<{
     attempted: number;
     upserted: number;
@@ -83,6 +90,8 @@ export function ProductsView({
   resellerMirrors = [],
   workspaceRole = "reseller",
   initialTab = "my-inventory",
+  initialEditResellSku = null,
+  onConsumeEditResellSku,
   onAddProduct,
   onUpdateProduct,
   onUpdateStock,
@@ -92,14 +101,40 @@ export function ProductsView({
   onSyncWhatsAppCatalog,
 }: ProductsViewProps) {
   // Tabs: 'all' | 'my-inventory' | 'reselling' | 'exceptions' | 'mirror-wizard'
-  const [activeTab, setActiveTab] = useState<"all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard">(initialTab);
-  const [resellingList, setResellingList] = useState<ResellingItem[]>(INITIAL_RESELLING);
+  const [activeTab, setActiveTab] = useState<
+    "all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard"
+  >(initialTab);
+  const [resellingList, setResellingList] =
+    useState<ResellingItem[]>(INITIAL_RESELLING);
 
   useEffect(() => {
     if (workspaceRole === "supplier" && activeTab === "reselling") {
       setActiveTab("my-inventory");
     }
   }, [workspaceRole, activeTab]);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (!initialEditResellSku || resellingList.length === 0) return;
+    const upperTarget = initialEditResellSku.toUpperCase();
+    const match =
+      resellingList.find(
+        (item) =>
+          item.sku.toUpperCase() === upperTarget ||
+          item.catalogSku?.toUpperCase() === upperTarget
+      ) ?? resellingList[0];
+    if (match) {
+      setActiveTab("reselling");
+      setEditingResellItem(match);
+      setEditingResellPrice(String(match.sellingPrice));
+      onConsumeEditResellSku?.();
+    }
+  }, [initialEditResellSku, resellingList, onConsumeEditResellSku]);
 
   // Sync resellingList from database ResellerCatalogMirror + SupplierProfile + live mirrored products
   useEffect(() => {
@@ -108,7 +143,7 @@ export function ProductsView({
 
     for (const mirror of resellerMirrors || []) {
       const sup = suppliers.find(
-        (s) => s.id === mirror.supplierId || s.slug === mirror.supplierSlug
+        (s) => s.id === mirror.supplierId || s.slug === mirror.supplierSlug,
       );
       if (!sup) continue;
       for (const prod of sup.catalogProducts) {
@@ -120,20 +155,21 @@ export function ProductsView({
           const mirroredInCatalog = products.find(
             (p) =>
               p.customFields?.supplierSku === prod.sku ||
-              p.name.toLowerCase() === prod.name.toLowerCase()
+              p.name.toLowerCase() === prod.name.toLowerCase(),
           );
           const cost = Number(
             prod.wholesalePriceNaira ??
               raw.wholesaleCost ??
               mirroredInCatalog?.customFields?.wholesalePriceNaira ??
-              0
+              0,
           );
           const fallbackRetail = Number(
             prod.suggestedRetailNaira ??
               raw.suggestedRetail ??
-              (cost > 0 ? Math.round(cost * 1.25) : 0)
+              (cost > 0 ? Math.round(cost * 1.25) : 0),
           );
-          const sellingPrice = mirroredInCatalog?.basePriceNaira || fallbackRetail;
+          const sellingPrice =
+            mirroredInCatalog?.basePriceNaira || fallbackRetail;
 
           seenSkus.add(prod.sku);
           mapped.push({
@@ -142,7 +178,9 @@ export function ProductsView({
             sku: prod.sku,
             catalogSku: mirroredInCatalog?.skuCode,
             supplier: sup.name,
-            stock: mirroredInCatalog ? mirroredInCatalog.availableStock : prod.stock,
+            stock: mirroredInCatalog
+              ? mirroredInCatalog.availableStock
+              : prod.stock,
             cost,
             sellingPrice,
             status: mirror.status === "PAUSED" ? "Paused" : "Synced",
@@ -155,7 +193,10 @@ export function ProductsView({
     for (const p of products) {
       const supSku = p.customFields?.supplierSku;
       if (!supSku || seenSkus.has(supSku)) continue;
-      const cost = Number(p.customFields?.wholesalePriceNaira ?? Math.round(p.basePriceNaira * 0.8));
+      const cost = Number(
+        p.customFields?.wholesalePriceNaira ??
+          Math.round(p.basePriceNaira * 0.8),
+      );
       mapped.push({
         id: `cat-${p.id}`,
         name: p.name,
@@ -176,7 +217,8 @@ export function ProductsView({
   const [searchReselling, setSearchReselling] = useState("");
   const [selectedSupplier, setSelectedSupplier] = useState("ALL");
   const [selectedStatus, setSelectedStatus] = useState("All linked products");
-  const [editingResellItem, setEditingResellItem] = useState<ResellingItem | null>(null);
+  const [editingResellItem, setEditingResellItem] =
+    useState<ResellingItem | null>(null);
   const [editingResellPrice, setEditingResellPrice] = useState("");
   const [savingResellPrice, setSavingResellPrice] = useState(false);
 
@@ -194,19 +236,27 @@ export function ProductsView({
   const [wizardSuccess, setWizardSuccess] = useState(false);
 
   // Exceptions Workbench state
-  const [exceptionFilter, setExceptionFilter] = useState<"all" | "price" | "stock" | "automation">("all");
+  const [exceptionFilter, setExceptionFilter] = useState<
+    "all" | "price" | "stock" | "automation"
+  >("all");
   const [proposedPrice, setProposedPrice] = useState("10500");
   const [exception1Resolved, setException1Resolved] = useState(false);
   const [stockRechecked, setStockRechecked] = useState(false);
   const [customerNotified, setCustomerNotified] = useState(false);
   const [supplierMsgModal, setSupplierMsgModal] = useState(false);
-  const [supplierMsgText, setSupplierMsgText] = useState("Hi Aroko Wholesale, can you confirm if same-day delivery to Lekki before 4pm is feasible for Order CT-1042?");
+  const [supplierMsgText, setSupplierMsgText] = useState(
+    "Hi Aroko Wholesale, can you confirm if same-day delivery to Lekki before 4pm is feasible for Order CT-1042?",
+  );
   const [supplierMsgSent, setSupplierMsgSent] = useState(false);
-  const [internalNote, setInternalNote] = useState("Awaiting supplier delivery confirmation");
+  const [internalNote, setInternalNote] = useState(
+    "Awaiting supplier delivery confirmation",
+  );
 
   // Product Editor & Add Modal
   const [editorModalOpen, setEditorModalOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<ProductItem | null>(null);
+  const [editingProduct, setEditingProduct] = useState<ProductItem | null>(
+    null,
+  );
 
   // Standard product add modal
   const [showAddForm, setShowAddForm] = useState(false);
@@ -245,11 +295,23 @@ export function ProductsView({
     setWizardSuccess(true);
     setResellingList((prev) =>
       prev.map((item) => {
-        if (item.sku === "AW-FL750") return { ...item, sellingPrice: Number(flaskPrice) || item.sellingPrice };
-        if (item.sku === "AW-LB1200") return { ...item, sellingPrice: Number(lunchBoxPrice) || item.sellingPrice };
-        if (item.sku === "AW-SJ1000") return { ...item, sellingPrice: Number(jarPrice) || item.sellingPrice };
+        if (item.sku === "AW-FL750")
+          return {
+            ...item,
+            sellingPrice: Number(flaskPrice) || item.sellingPrice,
+          };
+        if (item.sku === "AW-LB1200")
+          return {
+            ...item,
+            sellingPrice: Number(lunchBoxPrice) || item.sellingPrice,
+          };
+        if (item.sku === "AW-SJ1000")
+          return {
+            ...item,
+            sellingPrice: Number(jarPrice) || item.sellingPrice,
+          };
         return item;
-      })
+      }),
     );
     setTimeout(() => {
       setActiveTab("reselling");
@@ -262,8 +324,8 @@ export function ProductsView({
       prev.map((item) =>
         item.sku === sku
           ? { ...item, status: item.status === "Synced" ? "Paused" : "Synced" }
-          : item
-      )
+          : item,
+      ),
     );
   };
 
@@ -276,12 +338,16 @@ export function ProductsView({
     setSavingResellPrice(true);
     try {
       if (editingResellItem.catalogSku && onUpdateProduct) {
-        await onUpdateProduct(editingResellItem.catalogSku, { priceNaira: nextPrice });
+        await onUpdateProduct(editingResellItem.catalogSku, {
+          priceNaira: nextPrice,
+        });
       }
       setResellingList((prev) =>
         prev.map((item) =>
-          item.id === editingResellItem.id ? { ...item, sellingPrice: nextPrice } : item
-        )
+          item.id === editingResellItem.id
+            ? { ...item, sellingPrice: nextPrice }
+            : item,
+        ),
       );
       setEditingResellItem(null);
     } finally {
@@ -360,7 +426,8 @@ export function ProductsView({
             Mirror Products &amp; Set Margins
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Link products from verified wholesale suppliers and set your custom retail markup.
+            Link products from verified wholesale suppliers and set your custom
+            retail markup.
           </p>
         </div>
 
@@ -368,9 +435,12 @@ export function ProductsView({
           <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl font-bold">
             🤝
           </div>
-          <h3 className="text-base font-bold text-gray-900">No Supplier Products Selected</h3>
+          <h3 className="text-base font-bold text-gray-900">
+            No Supplier Products Selected
+          </h3>
           <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
-            Visit the Supplier Network directory to select items from verified wholesale importers before configuring retail markup.
+            Visit the Supplier Network directory to select items from verified
+            wholesale importers before configuring retail markup.
           </p>
           {onNavigateToNetwork && (
             <button
@@ -396,9 +466,12 @@ export function ProductsView({
           <div className="text-xs text-gray-500 mb-1">
             Products / Reselling / Selling exceptions
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Selling exceptions</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+            Selling exceptions
+          </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Resolve stock and margin changes that affect linked listings, checkout and automated selling.
+            Resolve stock and margin changes that affect linked listings,
+            checkout and automated selling.
           </p>
         </div>
 
@@ -414,7 +487,8 @@ export function ProductsView({
             onClick={() => setActiveTab("my-inventory")}
             className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
-            My inventory ({products.filter((p) => !p.customFields?.supplierSku).length})
+            My inventory (
+            {products.filter((p) => !p.customFields?.supplierSku).length})
           </button>
           {workspaceRole !== "supplier" && (
             <button
@@ -457,15 +531,19 @@ export function ProductsView({
                         ex.kind === "OUT_OF_STOCK"
                           ? "bg-rose-100 text-rose-800"
                           : ex.kind === "LOW_MARGIN"
-                          ? "bg-amber-100 text-amber-900"
-                          : "bg-amber-50 text-amber-800"
+                            ? "bg-amber-100 text-amber-900"
+                            : "bg-amber-50 text-amber-800"
                       }`}
                     >
                       {ex.kind.replace(/_/g, " ")}
                     </span>
-                    <span className="font-mono text-[11px] text-gray-400">{ex.sku}</span>
+                    <span className="font-mono text-[11px] text-gray-400">
+                      {ex.sku}
+                    </span>
                   </div>
-                  <h3 className="text-sm font-bold text-gray-900">{ex.title}</h3>
+                  <h3 className="text-sm font-bold text-gray-900">
+                    {ex.title}
+                  </h3>
                   <p className="text-xs text-gray-500">{ex.detail}</p>
                 </div>
                 {ex.product && (
@@ -531,7 +609,9 @@ export function ProductsView({
   /* Screen 4: Products · Reselling                                             */
   /* -------------------------------------------------------------------------- */
   if (activeTab === "reselling") {
-    const uniqueResellSuppliers = Array.from(new Set(resellingList.map((i) => i.supplier)));
+    const uniqueResellSuppliers = Array.from(
+      new Set(resellingList.map((i) => i.supplier)),
+    );
     const filteredReselling = resellingList.filter((item) => {
       if (searchReselling.trim()) {
         const q = searchReselling.toLowerCase();
@@ -543,28 +623,48 @@ export function ProductsView({
           return false;
         }
       }
-      if (selectedSupplier !== "ALL" && item.supplier !== selectedSupplier) return false;
+      if (selectedSupplier !== "ALL" && item.supplier !== selectedSupplier)
+        return false;
       if (selectedStatus === "In stock" && item.stock <= 0) return false;
       if (selectedStatus === "Paused" && item.status !== "Paused") return false;
       return true;
     });
 
-    const totalProfitSum = resellingList.reduce((acc, i) => acc + (i.sellingPrice - i.cost), 0);
-    const totalSellingSum = resellingList.reduce((acc, i) => acc + (i.sellingPrice || 0), 0);
-    const avgMarginPct = totalSellingSum > 0 ? Math.round((totalProfitSum / totalSellingSum) * 100) : 0;
-    const avgProfitNaira = resellingList.length > 0 ? Math.round(totalProfitSum / resellingList.length) : 0;
-    const syncedCount = resellingList.filter((i) => i.status === "Synced").length;
+    const totalProfitSum = resellingList.reduce(
+      (acc, i) => acc + (i.sellingPrice - i.cost),
+      0,
+    );
+    const totalSellingSum = resellingList.reduce(
+      (acc, i) => acc + (i.sellingPrice || 0),
+      0,
+    );
+    const avgMarginPct =
+      totalSellingSum > 0
+        ? Math.round((totalProfitSum / totalSellingSum) * 100)
+        : 0;
+    const avgProfitNaira =
+      resellingList.length > 0
+        ? Math.round(totalProfitSum / resellingList.length)
+        : 0;
+    const syncedCount = resellingList.filter(
+      (i) => i.status === "Synced",
+    ).length;
     const pausedCount = resellingList.length - syncedCount;
-    const lowStockOrMarginAlerts = resellingList.filter((i) => i.stock <= 5 || i.sellingPrice <= i.cost);
+    const lowStockOrMarginAlerts = resellingList.filter(
+      (i) => i.stock <= 5 || i.sellingPrice <= i.cost,
+    );
 
     return (
       <div className="space-y-6 max-w-7xl mx-auto w-full pb-16">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Reselling</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              Reselling
+            </h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              Your retail prices, wholesale supplier inventory, and live margin tracking.
+              Your retail prices, wholesale supplier inventory, and live margin
+              tracking.
             </p>
           </div>
           <div className="flex items-center gap-2 self-start sm:self-center">
@@ -597,7 +697,8 @@ export function ProductsView({
             onClick={() => setActiveTab("my-inventory")}
             className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
-            My inventory ({products.filter((p) => !p.customFields?.supplierSku).length})
+            My inventory (
+            {products.filter((p) => !p.customFields?.supplierSku).length})
           </button>
           <button
             onClick={() => setActiveTab("reselling")}
@@ -633,22 +734,35 @@ export function ProductsView({
             {/* 3 Real-Time Metric Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-[#0d5c3a] text-white rounded-2xl p-5 shadow-xs">
-                <div className="text-xs text-emerald-100 font-medium">Linked products</div>
-                <div className="text-3xl font-extrabold mt-1">{resellingList.length}</div>
+                <div className="text-xs text-emerald-100 font-medium">
+                  Linked products
+                </div>
+                <div className="text-3xl font-extrabold mt-1">
+                  {resellingList.length}
+                </div>
                 <div className="text-[11px] text-emerald-200 mt-2">
-                  Across {uniqueResellSuppliers.length} supplier{uniqueResellSuppliers.length === 1 ? "" : "s"}
+                  Across {uniqueResellSuppliers.length} supplier
+                  {uniqueResellSuppliers.length === 1 ? "" : "s"}
                 </div>
               </div>
               <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
-                <div className="text-xs text-gray-500 font-medium">Average gross margin</div>
-                <div className="text-3xl font-extrabold text-gray-900 mt-1">{avgMarginPct}%</div>
+                <div className="text-xs text-gray-500 font-medium">
+                  Average gross margin
+                </div>
+                <div className="text-3xl font-extrabold text-gray-900 mt-1">
+                  {avgMarginPct}%
+                </div>
                 <div className="text-[11px] text-gray-400 mt-2">
                   ₦{avgProfitNaira.toLocaleString()} avg profit / unit
                 </div>
               </div>
               <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
-                <div className="text-xs text-gray-500 font-medium">Inventory sync</div>
-                <div className="text-3xl font-extrabold text-gray-900 mt-1">Live</div>
+                <div className="text-xs text-gray-500 font-medium">
+                  Inventory sync
+                </div>
+                <div className="text-3xl font-extrabold text-gray-900 mt-1">
+                  Live
+                </div>
                 <div className="text-[11px] text-gray-400 mt-2">
                   {syncedCount} active · {pausedCount} paused
                 </div>
@@ -658,9 +772,12 @@ export function ProductsView({
             {/* Linked listings table */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
               <div className="p-5 border-b border-gray-100">
-                <h3 className="text-sm font-bold text-gray-900">Linked listings</h3>
+                <h3 className="text-sm font-bold text-gray-900">
+                  Linked listings
+                </h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Supplier wholesale cost is locked; you control your retail selling price and margin.
+                  Supplier wholesale cost is locked; you control your retail
+                  selling price and margin.
                 </p>
 
                 {/* Filter Bar */}
@@ -677,7 +794,9 @@ export function ProductsView({
                     onChange={(e) => setSelectedSupplier(e.target.value)}
                     className="text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
                   >
-                    <option value="ALL">All suppliers ({uniqueResellSuppliers.length})</option>
+                    <option value="ALL">
+                      All suppliers ({uniqueResellSuppliers.length})
+                    </option>
                     {uniqueResellSuppliers.map((supName) => (
                       <option key={supName} value={supName}>
                         {supName}
@@ -711,22 +830,36 @@ export function ProductsView({
                   <tbody className="divide-y divide-gray-100 text-gray-700">
                     {filteredReselling.map((item) => {
                       const profit = item.sellingPrice - item.cost;
-                      const marginPct = item.sellingPrice > 0 ? Math.round((profit / item.sellingPrice) * 100) : 0;
-                      const supInfo = suppliers.find((s) => s.name === item.supplier);
+                      const marginPct =
+                        item.sellingPrice > 0
+                          ? Math.round((profit / item.sellingPrice) * 100)
+                          : 0;
+                      const supInfo = suppliers.find(
+                        (s) => s.name === item.supplier,
+                      );
                       const inheritedShipping = supInfo
                         ? `${supInfo.shippingScope === "NATIONWIDE" ? "Nationwide" : supInfo.coveredStates?.join(", ") || supInfo.state} · ${supInfo.leadTime || "Standard dispatch"}`
                         : "Inherited from supplier";
 
                       return (
-                        <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                        <tr
+                          key={item.id}
+                          className="hover:bg-gray-50 transition-colors"
+                        >
                           <td className="px-5 py-3.5">
-                            <div className="font-semibold text-gray-900">{item.name}</div>
+                            <div className="font-semibold text-gray-900">
+                              {item.name}
+                            </div>
                             <div className="text-[11px] text-gray-400 font-mono">
-                              {item.catalogSku ? `${item.catalogSku} · Sup: ${item.sku}` : item.sku}
+                              {item.catalogSku
+                                ? `${item.catalogSku} · Sup: ${item.sku}`
+                                : item.sku}
                             </div>
                           </td>
                           <td className="px-4 py-3.5">
-                            <div className="text-gray-900 font-medium">{item.supplier}</div>
+                            <div className="text-gray-900 font-medium">
+                              {item.supplier}
+                            </div>
                             <div className="text-[10px] text-gray-500">
                               🚚 {inheritedShipping}
                             </div>
@@ -735,28 +868,36 @@ export function ProductsView({
                                 item.status === "Paused"
                                   ? "text-amber-700"
                                   : item.stock <= 5
-                                  ? "text-rose-600"
-                                  : "text-emerald-700"
+                                    ? "text-rose-600"
+                                    : "text-emerald-700"
                               }`}
                             >
                               {item.stock} in stock · {item.status}
                             </div>
                           </td>
-                          <td className="px-4 py-3.5 font-medium">₦{item.cost.toLocaleString()}</td>
+                          <td className="px-4 py-3.5 font-medium">
+                            ₦{item.cost.toLocaleString()}
+                          </td>
                           <td className="px-4 py-3.5 font-bold text-gray-900">
                             ₦{item.sellingPrice.toLocaleString()}
                           </td>
                           <td className="px-4 py-3.5">
-                            <div className={`font-semibold ${profit > 0 ? "text-emerald-700" : "text-rose-600"}`}>
+                            <div
+                              className={`font-semibold ${profit > 0 ? "text-emerald-700" : "text-rose-600"}`}
+                            >
                               ₦{profit.toLocaleString()}
                             </div>
-                            <div className="text-[11px] text-gray-400">{marginPct}% margin</div>
+                            <div className="text-[11px] text-gray-400">
+                              {marginPct}% margin
+                            </div>
                           </td>
                           <td className="px-5 py-3.5 text-right space-x-2 whitespace-nowrap">
                             <button
                               onClick={() => {
                                 setEditingResellItem(item);
-                                setEditingResellPrice(String(item.sellingPrice));
+                                setEditingResellPrice(
+                                  String(item.sellingPrice),
+                                );
                               }}
                               className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg cursor-pointer"
                             >
@@ -777,7 +918,8 @@ export function ProductsView({
               </div>
 
               <div className="p-4 border-t border-gray-100 text-[11px] text-gray-400">
-                Showing {filteredReselling.length} of {resellingList.length} linked products · Published to storefront and WhatsApp
+                Showing {filteredReselling.length} of {resellingList.length}{" "}
+                linked products · Published to storefront and WhatsApp
               </div>
             </div>
 
@@ -785,7 +927,9 @@ export function ProductsView({
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-gray-900">Stock &amp; margin guardrails</h3>
+                  <h3 className="text-xs font-bold text-gray-900">
+                    Stock &amp; margin guardrails
+                  </h3>
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                       lowStockOrMarginAlerts.length > 0
@@ -801,14 +945,20 @@ export function ProductsView({
 
                 {lowStockOrMarginAlerts.length === 0 ? (
                   <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-900">
-                    All mirrored supplier products have healthy wholesale margins and sufficient stock levels.
+                    All mirrored supplier products have healthy wholesale
+                    margins and sufficient stock levels.
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {lowStockOrMarginAlerts.map((alertItem) => (
-                      <div key={alertItem.id} className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex items-center justify-between gap-3">
+                      <div
+                        key={alertItem.id}
+                        className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl text-xs flex items-center justify-between gap-3"
+                      >
                         <div>
-                          <div className="font-bold text-amber-900">{alertItem.name}</div>
+                          <div className="font-bold text-amber-900">
+                            {alertItem.name}
+                          </div>
                           <div className="text-[11px] text-amber-800">
                             {alertItem.sellingPrice <= alertItem.cost
                               ? `Retail ₦${alertItem.sellingPrice.toLocaleString()} is not above cost ₦${alertItem.cost.toLocaleString()}`
@@ -818,7 +968,9 @@ export function ProductsView({
                         <button
                           onClick={() => {
                             setEditingResellItem(alertItem);
-                            setEditingResellPrice(String(alertItem.sellingPrice));
+                            setEditingResellPrice(
+                              String(alertItem.sellingPrice),
+                            );
                           }}
                           className="px-3 py-1.5 bg-white border border-amber-300 text-amber-900 rounded-lg text-xs font-semibold cursor-pointer"
                         >
@@ -841,7 +993,9 @@ export function ProductsView({
 
               {/* Inventory ownership */}
               <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-                <h3 className="text-xs font-bold text-gray-900">Inventory ownership</h3>
+                <h3 className="text-xs font-bold text-gray-900">
+                  Inventory ownership
+                </h3>
 
                 <div className="divide-y divide-gray-100">
                   <div className="py-2 flex justify-between">
@@ -852,21 +1006,27 @@ export function ProductsView({
                   </div>
                   <div className="py-2 flex justify-between">
                     <span className="text-gray-500">Stock editing</span>
-                    <span className="font-semibold text-gray-900">Supplier only</span>
+                    <span className="font-semibold text-gray-900">
+                      Supplier only
+                    </span>
                   </div>
                   <div className="py-2 flex justify-between">
                     <span className="text-gray-500">Reseller control</span>
-                    <span className="font-semibold text-gray-900">Retail price &amp; channels</span>
+                    <span className="font-semibold text-gray-900">
+                      Retail price &amp; channels
+                    </span>
                   </div>
                 </div>
 
                 <p className="text-[10px] text-gray-400">
-                  Pausing your listing stops new checkouts; it does not cancel confirmed orders.
+                  Pausing your listing stops new checkouts; it does not cancel
+                  confirmed orders.
                 </p>
 
                 <button
                   onClick={() => {
-                    if (onNavigateToNetwork) onNavigateToNetwork("my-suppliers");
+                    if (onNavigateToNetwork)
+                      onNavigateToNetwork("my-suppliers");
                     else setActiveTab("mirror-wizard");
                   }}
                   className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors cursor-pointer"
@@ -887,8 +1047,12 @@ export function ProductsView({
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-bold text-gray-900">Edit Reselling Price</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5">{editingResellItem.name}</p>
+                  <h3 className="text-sm font-bold text-gray-900">
+                    Edit Reselling Price
+                  </h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    {editingResellItem.name}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -902,18 +1066,25 @@ export function ProductsView({
               <div className="bg-gray-50 rounded-xl p-3.5 space-y-1.5 border border-gray-100">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Supplier wholesale cost</span>
-                  <span className="font-semibold text-gray-900">₦{editingResellItem.cost.toLocaleString()}</span>
+                  <span className="font-semibold text-gray-900">
+                    ₦{editingResellItem.cost.toLocaleString()}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Projected profit / unit</span>
                   <span
                     className={`font-bold ${
-                      (Number(editingResellPrice) || 0) - editingResellItem.cost > 0
+                      (Number(editingResellPrice) || 0) -
+                        editingResellItem.cost >
+                      0
                         ? "text-emerald-700"
                         : "text-rose-600"
                     }`}
                   >
-                    ₦{((Number(editingResellPrice) || 0) - editingResellItem.cost).toLocaleString()}
+                    ₦
+                    {(
+                      (Number(editingResellPrice) || 0) - editingResellItem.cost
+                    ).toLocaleString()}
                   </span>
                 </div>
               </div>
@@ -963,8 +1134,12 @@ export function ProductsView({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Products</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Manage your digital inventory and live WhatsApp catalog.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+            Products
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Manage your digital inventory and live WhatsApp catalog.
+          </p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-center">
           <div className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50/80 border border-emerald-200/60 rounded-lg text-emerald-800 text-xs font-medium">
@@ -996,7 +1171,8 @@ export function ProductsView({
           onClick={() => setActiveTab("my-inventory")}
           className={`pb-2.5 cursor-pointer ${activeTab === "my-inventory" ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold" : "text-gray-500 hover:text-gray-900"}`}
         >
-          My inventory ({products.filter((p) => !p.customFields?.supplierSku).length})
+          My inventory (
+          {products.filter((p) => !p.customFields?.supplierSku).length})
         </button>
         {workspaceRole !== "supplier" && (
           <button
@@ -1019,13 +1195,18 @@ export function ProductsView({
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 sm:p-8 space-y-6">
           <div className="border-b border-gray-100 pb-4">
             <h2 className="text-lg font-bold text-gray-900">Add New Product</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Create a new item in your digital catalog for customers to browse and order.</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Create a new item in your digital catalog for customers to browse
+              and order.
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Product Name</label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+                  Product Name
+                </label>
                 <input
                   type="text"
                   placeholder="e.g. 750ml Stainless Flask"
@@ -1037,7 +1218,9 @@ export function ProductsView({
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-500">Auto-Generated SKU</label>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-500">
+                    Auto-Generated SKU
+                  </label>
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
                     Structured
                   </span>
@@ -1051,7 +1234,9 @@ export function ProductsView({
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Price (NGN)</label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+                  Price (NGN)
+                </label>
                 <input
                   type="number"
                   placeholder="10000"
@@ -1089,7 +1274,9 @@ export function ProductsView({
             className="text-xs px-3.5 py-2 bg-white border border-gray-200 rounded-xl sm:w-52"
           >
             <option value="ALL">All Categories</option>
-            {Array.from(new Set(products.map((p) => p.category || "General"))).map((cat) => (
+            {Array.from(
+              new Set(products.map((p) => p.category || "General")),
+            ).map((cat) => (
               <option key={cat} value={cat}>
                 {cat}
               </option>
@@ -1107,11 +1294,17 @@ export function ProductsView({
         const displayedProducts = baseList.filter((p) => {
           if (catalogSearch.trim()) {
             const q = catalogSearch.toLowerCase();
-            if (!p.name.toLowerCase().includes(q) && !p.skuCode.toLowerCase().includes(q)) {
+            if (
+              !p.name.toLowerCase().includes(q) &&
+              !p.skuCode.toLowerCase().includes(q)
+            ) {
               return false;
             }
           }
-          if (catalogCategory !== "ALL" && (p.category || "General") !== catalogCategory) {
+          if (
+            catalogCategory !== "ALL" &&
+            (p.category || "General") !== catalogCategory
+          ) {
             return false;
           }
           return true;
@@ -1122,7 +1315,11 @@ export function ProductsView({
             <EmptyState
               badge="Product Catalog"
               icon="📦"
-              title={activeTab === "my-inventory" ? "No Own Inventory Products Yet" : "Your Product Catalog is Empty"}
+              title={
+                activeTab === "my-inventory"
+                  ? "No Own Inventory Products Yet"
+                  : "Your Product Catalog is Empty"
+              }
               description="Add products with prices and inventory to begin selling. Your AI Sales Co-Pilot will automatically reference them during WhatsApp conversations, invoice generation, and status checkouts."
               action={{
                 label: "Add Your First Product",
@@ -1155,138 +1352,158 @@ export function ProductsView({
         return (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {displayedProducts.map((p) => (
-            <div
-              key={p.id}
-              onClick={() => {
-                setEditingProduct(p);
-                setEditorModalOpen(true);
-              }}
-              className="bg-white rounded-2xl border border-gray-100 hover:border-gray-300 overflow-hidden shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
-            >
-              <div className="h-44 bg-gray-50 flex items-center justify-center border-b border-gray-100 overflow-hidden relative">
-                {p.primaryImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={resolveImageUrl(p.primaryImageUrl)}
-                    alt={p.name}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                    className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
-                  />
-                ) : (
-                  <div className="text-3xl">📦</div>
-                )}
-                {p.customFields?.supplierSku && (
-                  <span className="absolute top-2.5 right-2.5 bg-emerald-900/85 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs">
-                    Mirrored · {p.customFields.supplierName || "Supplier"}
-                  </span>
-                )}
-                {p.variants && p.variants.length > 0 && (
-                  <span className="absolute top-2.5 left-2.5 bg-gray-900/85 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
-                    <span>🎛️</span>
-                    <span>{p.variants.length} Variants</span>
-                  </span>
-                )}
-              </div>
-              <div className="p-5 space-y-3">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-700 transition-colors">
-                      {p.name}
-                    </h3>
-                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                      <span className="text-[11px] font-mono text-gray-400">{p.skuCode}</span>
-                      {p.category && (
-                        <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
-                          {p.category}
+              <div
+                key={p.id}
+                onClick={() => {
+                  setEditingProduct(p);
+                  setEditorModalOpen(true);
+                }}
+                className="bg-white rounded-2xl border border-gray-100 hover:border-gray-300 overflow-hidden shadow-2xs hover:shadow-xs transition-all cursor-pointer group"
+              >
+                <div className="h-44 bg-gray-50 flex items-center justify-center border-b border-gray-100 overflow-hidden relative">
+                  {p.primaryImageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={resolveImageUrl(p.primaryImageUrl)}
+                      alt={p.name}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
+                    />
+                  ) : (
+                    <div className="text-3xl">📦</div>
+                  )}
+                  {p.customFields?.supplierSku && (
+                    <span className="absolute top-2.5 right-2.5 bg-emerald-900/85 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                      Mirrored · {p.customFields.supplierName || "Supplier"}
+                    </span>
+                  )}
+                  {p.variants && p.variants.length > 0 && (
+                    <span className="absolute top-2.5 left-2.5 bg-gray-900/85 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                      <span>🎛️</span>
+                      <span>{p.variants.length} Variants</span>
+                    </span>
+                  )}
+                </div>
+                <div className="p-5 space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-bold text-gray-900 text-sm group-hover:text-emerald-700 transition-colors">
+                        {p.name}
+                      </h3>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className="text-[11px] font-mono text-gray-400">
+                          {p.skuCode}
                         </span>
+                        {p.category && (
+                          <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                            {p.category}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-bold text-emerald-800 text-sm">
+                        {(() => {
+                          const variantPrices =
+                            p.variants
+                              ?.map((v) => v.priceNaira)
+                              .filter(
+                                (pr): pr is number =>
+                                  typeof pr === "number" && pr > 0,
+                              ) || [];
+                          if (variantPrices.length > 0) {
+                            const minP = Math.min(...variantPrices);
+                            const maxP = Math.max(...variantPrices);
+                            if (minP !== maxP) {
+                              return `₦${minP.toLocaleString()} - ₦${maxP.toLocaleString()}`;
+                            }
+                          }
+                          return (
+                            p.basePriceFormatted ||
+                            `₦${p.basePriceNaira.toLocaleString()}`
+                          );
+                        })()}
+                      </div>
+                      {onDeleteProduct && (
+                        <button
+                          type="button"
+                          title="Delete product"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const confirmed = window.confirm(
+                              `Delete product "${p.name}" (${p.skuCode})?\n\nThis will remove it from Caterlog and sync it off your WhatsApp Catalog.`,
+                            );
+                            if (confirmed) {
+                              void onDeleteProduct(p.skuCode);
+                            }
+                          }}
+                          className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1 hover:bg-rose-50 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
+                        >
+                          🗑️
+                        </button>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="font-bold text-emerald-800 text-sm">
-                      {(() => {
-                        const variantPrices =
-                          p.variants
-                            ?.map((v) => v.priceNaira)
-                            .filter((pr): pr is number => typeof pr === "number" && pr > 0) || [];
-                        if (variantPrices.length > 0) {
-                          const minP = Math.min(...variantPrices);
-                          const maxP = Math.max(...variantPrices);
-                          if (minP !== maxP) {
-                            return `₦${minP.toLocaleString()} - ₦${maxP.toLocaleString()}`;
-                          }
-                        }
-                        return p.basePriceFormatted || `₦${p.basePriceNaira.toLocaleString()}`;
-                      })()}
+
+                  {/* Variable Products Breakdown Chips with Individual Prices */}
+                  {p.variants && p.variants.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {p.variants.map((v) => (
+                        <span
+                          key={v.id || v.sku}
+                          className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 border border-gray-200"
+                        >
+                          <span className="font-semibold">{v.name}</span>
+                          <span className="text-gray-400">·</span>
+                          <span className="font-bold text-gray-900">
+                            {v.priceFormatted ||
+                              `₦${(v.priceNaira ?? p.basePriceNaira).toLocaleString()}`}
+                          </span>
+                          <span className="text-gray-400">·</span>
+                          <span className="font-mono text-emerald-700 font-bold">
+                            {v.availableStock !== undefined
+                              ? v.availableStock
+                              : v.stock}{" "}
+                            left
+                          </span>
+                        </span>
+                      ))}
                     </div>
-                    {onDeleteProduct && (
-                      <button
-                        type="button"
-                        title="Delete product"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const confirmed = window.confirm(
-                            `Delete product "${p.name}" (${p.skuCode})?\n\nThis will remove it from Caterlog and sync it off your WhatsApp Catalog.`
-                          );
-                          if (confirmed) {
-                            void onDeleteProduct(p.skuCode);
-                          }
-                        }}
-                        className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1 hover:bg-rose-50 rounded-lg text-rose-500 hover:text-rose-700 transition-all cursor-pointer"
-                      >
-                        🗑️
-                      </button>
-                    )}
-                  </div>
-                </div>
+                  )}
 
-                {/* Variable Products Breakdown Chips with Individual Prices */}
-                {p.variants && p.variants.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {p.variants.map((v) => (
-                      <span
-                        key={v.id || v.sku}
-                        className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 border border-gray-200"
-                      >
-                        <span className="font-semibold">{v.name}</span>
-                        <span className="text-gray-400">·</span>
-                        <span className="font-bold text-gray-900">
-                          {v.priceFormatted || `₦${(v.priceNaira ?? p.basePriceNaira).toLocaleString()}`}
+                  {/* Custom Fields / Attributes Chips */}
+                  {p.customFields && Object.keys(p.customFields).length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {Object.entries(p.customFields).map(([key, val]) => (
+                        <span
+                          key={key}
+                          className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-gray-50 text-gray-700 border border-gray-200"
+                        >
+                          <span className="font-semibold text-gray-500">
+                            {key}:
+                          </span>
+                          <span className="font-medium text-gray-900">
+                            {val}
+                          </span>
                         </span>
-                        <span className="text-gray-400">·</span>
-                        <span className="font-mono text-emerald-700 font-bold">
-                          {v.availableStock !== undefined ? v.availableStock : v.stock} left
-                        </span>
-                      </span>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
 
-                {/* Custom Fields / Attributes Chips */}
-                {p.customFields && Object.keys(p.customFields).length > 0 && (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {Object.entries(p.customFields).map(([key, val]) => (
-                      <span
-                        key={key}
-                        className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-gray-50 text-gray-700 border border-gray-200"
-                      >
-                        <span className="font-semibold text-gray-500">{key}:</span>
-                        <span className="font-medium text-gray-900">{val}</span>
-                      </span>
-                    ))}
+                  <div className="flex items-center justify-between pt-2 border-t border-gray-50 text-xs">
+                    <span className="text-gray-500">
+                      Total stock available:
+                    </span>
+                    <span className="font-bold text-gray-900">
+                      {p.availableStock} units
+                    </span>
                   </div>
-                )}
-
-                <div className="flex items-center justify-between pt-2 border-t border-gray-50 text-xs">
-                  <span className="text-gray-500">Total stock available:</span>
-                  <span className="font-bold text-gray-900">{p.availableStock} units</span>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
         );
       })()}
 

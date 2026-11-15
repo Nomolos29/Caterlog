@@ -34,6 +34,7 @@ export interface Vendor {
   id: string;
   slug: string;
   businessName: string;
+  role?: "reseller" | "supplier";
   whatsappPhone: string;
   whatsappPhoneId: string;
   verificationStatus: "VERIFIED" | "PENDING" | "REJECTED";
