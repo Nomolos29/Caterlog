@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { subscribeToNeonRealtime } from "@/lib/neon-realtime";
 import type { VendorState, OrderItem } from "@/lib/types";
 
 import { Sidebar, type NavView } from "./sidebar";
@@ -14,7 +15,8 @@ import { CustomersView } from "./views/customers-view";
 import { PaymentsView } from "./views/payments-view";
 import { MarketBoostView } from "./views/market-boost-view";
 import { PaymentLinksView } from "./views/payment-links-view";
-import { SettingsView } from "./views/settings-view";
+import { SettingsView, type SettingsTabId } from "./views/settings-view";
+import { ProfileView, type ProfileTabId } from "./views/profile-view";
 import { AnalyticsView } from "./views/analytics-view";
 import { VerificationView } from "./views/verification-view";
 import { TeamView } from "./views/team-view";
@@ -42,8 +44,20 @@ export function Dashboard() {
   });
   const [state, setState] = useState<VendorState | null>(null);
   const [currentView, setCurrentView] = useState<NavView>("overview");
-  const [settingsTab, setSettingsTab] = useState<"setup" | "conversations" | "detail" | "shipping" | "general">("setup");
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>("setup");
+  const [profileTab, setProfileTab] = useState<ProfileTabId>("profile");
   const [activeWorkspace, setActiveWorkspace] = useState<"reseller" | "supplier">("reseller");
+
+  useEffect(() => {
+    if (activeWorkspace === "reseller") {
+      if (currentView === "market-boost" || currentView === "analytics" || currentView === "team") {
+        setCurrentView("overview");
+      }
+      if (settingsTab === "shipping") {
+        setSettingsTab("setup");
+      }
+    }
+  }, [activeWorkspace, currentView, settingsTab]);
   const [ordersFilter, setOrdersFilter] = useState<string>("ALL");
   const [paymentLinkCustomer, setPaymentLinkCustomer] = useState<string>("");
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -122,6 +136,36 @@ export function Dashboard() {
     return () => source.close();
   }, []);
 
+  // Neon Realtime WebSocket live query subscription on Lakebase Postgres orders
+  useEffect(() => {
+    const vendorId = state?.vendor?.id;
+    if (typeof window === "undefined" || !vendorId) return;
+
+    let cleanup: (() => void) | null = null;
+    let active = true;
+
+    void subscribeToNeonRealtime(vendorId, () => {
+      if (active) {
+        void loadState();
+      }
+    })
+      .then((unsub) => {
+        if (active) {
+          cleanup = unsub;
+        } else {
+          unsub();
+        }
+      })
+      .catch(() => {
+        // Fallback to SSE when Neon Realtime WebSocket is unreachable
+      });
+
+    return () => {
+      active = false;
+      if (cleanup) cleanup();
+    };
+  }, [state?.vendor?.id, loadState]);
+
   if (!authSession) {
     return (
       <AuthView
@@ -160,7 +204,7 @@ export function Dashboard() {
   }) => {
     try {
       const next = await api.addProduct({
-        skuCode: input.skuCode || `ITEM-${Date.now().toString().slice(-4)}`,
+        skuCode: input.skuCode || undefined,
         name: input.name,
         description: input.description,
         category: input.category,
@@ -215,6 +259,23 @@ export function Dashboard() {
   const handleDeleteProduct = async (sku: string) => {
     try {
       const next = await api.deleteProduct(sku);
+      setState(next);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const handleUpdateProfile = async (input: {
+    businessName?: string;
+    whatsappPhone?: string;
+    instagramHandle?: string;
+    baseState?: string;
+    baseCity?: string;
+  }) => {
+    try {
+      const next = await api.updateProfile(input);
       setState(next);
       return true;
     } catch (err) {
@@ -318,6 +379,141 @@ export function Dashboard() {
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
       return null;
+    }
+  };
+
+  const handleSaveMarketBoost = async (
+    input: Omit<Partial<NonNullable<VendorState["marketBoostListing"]>>, "startingPriceNaira"> & {
+      startingPriceNaira?: number | string;
+    }
+  ) => {
+    try {
+      const res = await api.saveMarketBoost(input);
+      if (res.state) setState(res.state);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleMirrorSupplier = async (supplierIdOrSlug: string, productSkus?: string[]) => {
+    const res = await api.mirrorSupplierCatalog({
+      supplierIdOrSlug,
+      productSkus,
+    });
+    if (res.state) setState(res.state);
+  };
+
+  const handleCreatePaymentLink = async (input: {
+    customerName?: string;
+    customerPhone?: string;
+    productSku?: string;
+    description?: string;
+    amountNaira: number | string;
+  }) => {
+    try {
+      const res = await api.createPaymentLink(input);
+      if (res.state) setState(res.state);
+      return res.link;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  };
+
+  const handleDeletePaymentLink = async (slug: string) => {
+    try {
+      const next = await api.deletePaymentLink(slug);
+      setState(next);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleSaveSplitRule = async (input: {
+    name?: string;
+    supplierSubAccountCode?: string;
+    supplierShareBps: number;
+    resellerShareBps: number;
+    platformFeeBps?: number;
+  }) => {
+    try {
+      const res = await api.saveSplitRule(input);
+      if (res.state) setState(res.state);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const handleSubmitKyc = async (input: {
+    businessName: string;
+    cacNumber?: string;
+    tinNumber?: string;
+    businessAddress?: string;
+    businessCategory?: string;
+    bankCode?: string;
+    accountNumber?: string;
+    resolvedAccountName?: string;
+    whatsappPhone?: string;
+    instagramHandle?: string;
+  }) => {
+    try {
+      const res = await api.submitKyc({
+        businessName: input.businessName,
+        cacNumber: input.cacNumber || "",
+        tinNumber: input.tinNumber,
+        businessAddress: input.businessAddress,
+        businessCategory: input.businessCategory,
+        bankCode: input.bankCode || "035",
+        accountNumber: input.accountNumber || "",
+        resolvedAccountName: input.resolvedAccountName || input.businessName,
+        whatsappPhone: input.whatsappPhone,
+        instagramHandle: input.instagramHandle,
+      });
+      if (res.state) setState(res.state);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const handleSaveTeamMember = async (input: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: string;
+    status?: "Active" | "Invited" | "Suspended";
+  }) => {
+    try {
+      const res = await api.saveTeamMember(input);
+      if (res.state) setState(res.state);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleDeleteTeamMember = async (idOrEmail: string) => {
+    try {
+      const next = await api.deleteTeamMember(idOrEmail);
+      setState(next);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleSyncNotifications = async (input: {
+    readKeys?: string[];
+    dismissedKeys?: string[];
+    markAllRead?: boolean;
+  }) => {
+    try {
+      const next = await api.syncNotifications(input);
+      setState(next);
+      return true;
+    } catch {
+      return false;
     }
   };
 
@@ -447,10 +643,19 @@ export function Dashboard() {
             if (v === "shipping") {
               setCurrentView("settings");
               setSettingsTab("shipping");
+            } else if (v === "profile-settings") {
+              setProfileTab("profile");
+              setCurrentView("profile");
+            } else if (v === "verification") {
+              setProfileTab("verification");
+              setCurrentView("profile");
+            } else if (v === "notification-settings") {
+              setCurrentView("settings");
+              setSettingsTab("notifications");
+            } else if (v === "settings") {
+              setCurrentView("settings");
+              setSettingsTab("setup");
             } else {
-              if (v === "settings") {
-                setSettingsTab("setup");
-              }
               setCurrentView(v as NavView);
             }
           }}
@@ -519,6 +724,9 @@ export function Dashboard() {
           {currentView === "products" && (
             <ProductsView
               products={state.products}
+              suppliers={state.suppliers}
+              resellerMirrors={state.resellerMirrors}
+              workspaceRole={activeWorkspace}
               onAddProduct={handleAddProduct}
               onUpdateProduct={handleUpdateProduct}
               onUpdateStock={handleUpdateStock}
@@ -531,6 +739,10 @@ export function Dashboard() {
 
           {currentView === "network" && (
             <NetworkView
+              workspaceRole={activeWorkspace}
+              suppliers={state.suppliers}
+              resellerMirrors={state.resellerMirrors}
+              onMirrorSupplier={handleMirrorSupplier}
               onMirrorProducts={() => setCurrentView("products")}
             />
           )}
@@ -553,6 +765,9 @@ export function Dashboard() {
             <PaymentsView
               orders={state.orders}
               vendor={state.vendor}
+              payoutWithdrawals={state.payoutWithdrawals}
+              settlementSplitRules={state.settlementSplitRules}
+              onSaveSplitRule={handleSaveSplitRule}
               initialOrderCode={selectedOrder?.shortCode}
               onSimulateTransfer={handleSimulateTransfer}
               onNavigateToOrder={(code) => {
@@ -566,7 +781,14 @@ export function Dashboard() {
           )}
 
           {currentView === "market-boost" && (
-            <MarketBoostView vendorName={state.vendor.businessName} />
+            <MarketBoostView
+              vendorName={state.vendor.businessName}
+              listing={state.marketBoostListing}
+              products={state.products}
+              suppliers={state.suppliers}
+              resellerMirrors={state.resellerMirrors}
+              onSaveListing={handleSaveMarketBoost}
+            />
           )}
 
           {currentView === "analytics" && (
@@ -583,17 +805,31 @@ export function Dashboard() {
             <PaymentLinksView
               products={state.products}
               orders={state.orders}
+              paymentLinks={state.paymentLinks}
+              onCreatePaymentLink={handleCreatePaymentLink}
+              onDeletePaymentLink={handleDeletePaymentLink}
               vendorName={state.vendor.businessName}
               initialCustomerName={paymentLinkCustomer}
             />
           )}
 
           {currentView === "team" && (
-            <TeamView vendorName={state.vendor.businessName} />
+            <TeamView
+              vendorName={state.vendor.businessName}
+              teamMembers={state.teamMembers}
+              commerceEvents={state.commerceEvents}
+              onSaveTeamMember={handleSaveTeamMember}
+              onDeleteTeamMember={handleDeleteTeamMember}
+            />
           )}
 
           {currentView === "verification" && (
             <VerificationView
+              vendor={state.vendor}
+              vendorName={state.vendor.businessName}
+              whatsappPhone={state.vendor.whatsappPhone}
+              kycSubmissions={state.kycSubmissions}
+              onSubmitKyc={handleSubmitKyc}
               onBack={() => setCurrentView("overview")}
               onComplete={() => setCurrentView("overview")}
             />
@@ -604,6 +840,8 @@ export function Dashboard() {
               orders={state.orders}
               products={state.products}
               chatMessages={state.chatMessages}
+              dbNotifications={state.notifications}
+              onSyncNotifications={handleSyncNotifications}
               onNavigateToOrder={(code) => {
                 const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
                 if (target) {
@@ -616,11 +854,23 @@ export function Dashboard() {
             />
           )}
 
+          {currentView === "profile" && (
+            <ProfileView
+              key={profileTab}
+              initialTab={profileTab}
+              vendor={state.vendor}
+              kycSubmissions={state.kycSubmissions}
+              onUpdateProfile={handleUpdateProfile}
+              onSubmitKyc={handleSubmitKyc}
+            />
+          )}
+
           {currentView === "settings" && (
             <SettingsView
               key={settingsTab}
               initialTab={settingsTab}
               vendor={state.vendor}
+              workspaceRole={activeWorkspace}
               shippingZones={state.shippingZones}
               discounts={state.discounts}
               chatMessages={state.chatMessages}

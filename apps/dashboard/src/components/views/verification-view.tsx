@@ -2,35 +2,77 @@
 
 import React, { useState, useEffect } from "react";
 import { CheckIcon } from "../icons";
+import type { KycSubmissionItem, VendorProfile } from "@/lib/types";
 
 interface VerificationViewProps {
   onBack?: () => void;
   onComplete?: () => void;
+  vendor?: VendorProfile;
   vendorName?: string;
   whatsappPhone?: string;
+  kycSubmissions?: KycSubmissionItem[];
+  onSubmitKyc?: (input: {
+    businessName: string;
+    cacNumber?: string;
+    tinNumber?: string;
+    businessAddress?: string;
+    businessCategory?: string;
+    bankCode?: string;
+    accountNumber?: string;
+    resolvedAccountName?: string;
+    whatsappPhone?: string;
+    instagramHandle?: string;
+  }) => Promise<boolean>;
 }
 
-export function VerificationView({ onBack, onComplete, vendorName, whatsappPhone: initialWhatsappPhone }: VerificationViewProps) {
+export function VerificationView({
+  onBack,
+  onComplete,
+  vendor,
+  vendorName,
+  whatsappPhone: initialWhatsappPhone,
+  kycSubmissions,
+  onSubmitKyc,
+}: VerificationViewProps) {
+  const latestKyc = kycSubmissions?.[0];
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Step 1: Business Info
-  const [businessName, setBusinessName] = useState(vendorName || "My Store");
-  const [cacNumber, setCacNumber] = useState("RC-1849204");
-  const [tinNumber, setTinNumber] = useState("24910293-0001");
-  const [businessAddress, setBusinessAddress] = useState("Block 4, Plot 12, Admiralty Way, Lekki Phase 1, Lagos");
-  const [businessCategory, setBusinessCategory] = useState("Kitchenware & Home Goods");
+  const [businessName, setBusinessName] = useState(
+    latestKyc?.businessName || vendor?.businessName || vendorName || "My Store"
+  );
+  const [cacNumber, setCacNumber] = useState(
+    latestKyc?.cacNumber || vendor?.cacNumber || "RC-1849204"
+  );
+  const [tinNumber, setTinNumber] = useState(
+    latestKyc?.tinNumber || vendor?.tinNumber || "24910293-0001"
+  );
+  const [businessAddress, setBusinessAddress] = useState(
+    latestKyc?.businessAddress || "Block 4, Plot 12, Admiralty Way, Lekki Phase 1, Lagos"
+  );
+  const [businessCategory, setBusinessCategory] = useState(
+    latestKyc?.businessCategory || "Kitchenware & Home Goods"
+  );
 
   // Step 2: Settlement Account
-  const [bankCode, setBankCode] = useState("035"); // Wema
-  const [accountNumber, setAccountNumber] = useState("7821948301");
+  const [bankCode, setBankCode] = useState(latestKyc?.bankCode || "035"); // Wema
+  const [accountNumber, setAccountNumber] = useState(
+    latestKyc?.accountNumber || vendor?.bankAccountNumber || "7821948301"
+  );
   const [resolvingAccount, setResolvingAccount] = useState(false);
-  const [resolvedAccountName, setResolvedAccountName] = useState("NIA STORES & GOODS LTD");
+  const [resolvedAccountName, setResolvedAccountName] = useState(
+    latestKyc?.resolvedAccountName || "NIA STORES & GOODS LTD"
+  );
 
   // Step 3: Socials & Channels
   const [whatsappConnected, setWhatsappConnected] = useState(true);
-  const [whatsappPhone, setWhatsappPhone] = useState(initialWhatsappPhone || "+2348031234567");
+  const [whatsappPhone, setWhatsappPhone] = useState(
+    latestKyc?.whatsappPhone || vendor?.whatsappPhone || initialWhatsappPhone || "+2348031234567"
+  );
   const [instagramConnected, setInstagramConnected] = useState(true);
-  const [instagramHandle, setInstagramHandle] = useState("@niastores.ng");
+  const [instagramHandle, setInstagramHandle] = useState(
+    latestKyc?.instagramHandle || vendor?.instagramHandle || "@niastores.ng"
+  );
 
   useEffect(() => {
     if (vendorName) setBusinessName(vendorName);
@@ -57,12 +99,27 @@ export function VerificationView({ onBack, onComplete, vendorName, whatsappPhone
     }
   };
 
-  const handleSubmitVerification = () => {
+  const handleSubmitVerification = async () => {
     setSubmitting(true);
-    setTimeout(() => {
-      setSubmitting(false);
+    try {
+      if (onSubmitKyc) {
+        await onSubmitKyc({
+          businessName,
+          cacNumber,
+          tinNumber,
+          businessAddress,
+          businessCategory,
+          bankCode,
+          accountNumber,
+          resolvedAccountName,
+          whatsappPhone,
+          instagramHandle,
+        });
+      }
       setSubmitted(true);
-    }, 1200);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const steps = [

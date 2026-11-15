@@ -2,12 +2,22 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ServerVerifiedPaymentRecord } from "@caterlog/commerce-core";
 import type {
+  BuyerConversationSession,
+  ChatThreadMessage,
   RuntimeDiscount,
+  RuntimeKycSubmission,
+  RuntimeMarketBoostListing,
   RuntimeOrder,
+  RuntimePaymentLink,
+  RuntimePayoutWithdrawal,
   RuntimeProduct,
+  RuntimeResellerMirror,
+  RuntimeSettlementSplitRule,
   RuntimeShippingZone,
   RuntimeSnapshot,
+  RuntimeTeamMember,
   RuntimeVendor,
+  RuntimeVendorNotification,
 } from "../runtime-types.ts";
 import type { PersistenceEvent, PersistenceStore } from "./types.ts";
 
@@ -80,6 +90,18 @@ export class MemoryPersistenceStore implements PersistenceStore {
       discounts: snapshot.discounts.map((d) => ({ ...d })),
       orders: snapshot.orders.map((o) => ({ ...o })),
       processedTransactionRefs: [...snapshot.processedTransactionRefs],
+      chatMessages: snapshot.chatMessages ? [...snapshot.chatMessages] : [],
+      buyerSessions: snapshot.buyerSessions ? [...snapshot.buyerSessions] : [],
+      marketBoostListing: snapshot.marketBoostListing ? { ...snapshot.marketBoostListing } : null,
+      suppliers: snapshot.suppliers ? [...snapshot.suppliers] : [],
+      resellerMirrors: snapshot.resellerMirrors ? [...snapshot.resellerMirrors] : [],
+      paymentLinks: snapshot.paymentLinks ? [...snapshot.paymentLinks] : [],
+      payoutWithdrawals: snapshot.payoutWithdrawals ? [...snapshot.payoutWithdrawals] : [],
+      settlementSplitRules: snapshot.settlementSplitRules ? [...snapshot.settlementSplitRules] : [],
+      kycSubmissions: snapshot.kycSubmissions ? [...snapshot.kycSubmissions] : [],
+      teamMembers: snapshot.teamMembers ? [...snapshot.teamMembers] : [],
+      notifications: snapshot.notifications ? [...snapshot.notifications] : [],
+      commerceEvents: snapshot.commerceEvents ? [...snapshot.commerceEvents] : [],
     };
     this.flush();
   }
@@ -164,7 +186,181 @@ export class MemoryPersistenceStore implements PersistenceStore {
     await this.saveOrder(order);
   }
 
-  public async recordEvent(_event: PersistenceEvent): Promise<void> {}
+  public async recordEvent(event: PersistenceEvent): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.commerceEvents) this.snapshot.commerceEvents = [];
+    this.snapshot.commerceEvents.unshift({
+      id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      eventType: event.eventType,
+      actorType: event.actorType,
+      entityType: event.entityType,
+      entityId: event.entityId,
+      payload: event.payload,
+      createdAt: new Date(),
+    });
+    this.flush();
+  }
+
+  public async saveChatMessage(message: ChatThreadMessage): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.chatMessages) this.snapshot.chatMessages = [];
+    if (!this.snapshot.chatMessages.some((m) => m.id === message.id)) {
+      this.snapshot.chatMessages.push({ ...message });
+      this.flush();
+    }
+  }
+
+  public async saveBuyerSession(session: BuyerConversationSession): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.buyerSessions) this.snapshot.buyerSessions = [];
+    const idx = this.snapshot.buyerSessions.findIndex((s) => s.buyerPhone === session.buyerPhone);
+    if (idx >= 0) {
+      this.snapshot.buyerSessions[idx] = { ...session };
+    } else {
+      this.snapshot.buyerSessions.push({ ...session });
+    }
+    this.flush();
+  }
+
+  public async deleteBuyerSession(buyerPhone: string): Promise<void> {
+    if (!this.snapshot?.buyerSessions) return;
+    this.snapshot.buyerSessions = this.snapshot.buyerSessions.filter(
+      (s) => s.buyerPhone !== buyerPhone
+    );
+    this.flush();
+  }
+
+  public async saveMarketBoostListing(listing: RuntimeMarketBoostListing): Promise<void> {
+    if (!this.snapshot) return;
+    this.snapshot.marketBoostListing = { ...listing };
+    this.flush();
+  }
+
+  public async saveResellerMirror(mirror: RuntimeResellerMirror): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.resellerMirrors) this.snapshot.resellerMirrors = [];
+    const idx = this.snapshot.resellerMirrors.findIndex(
+      (m) => m.supplierId === mirror.supplierId || m.id === mirror.id
+    );
+    if (idx >= 0) {
+      this.snapshot.resellerMirrors[idx] = { ...mirror };
+    } else {
+      this.snapshot.resellerMirrors.unshift({ ...mirror });
+    }
+    this.flush();
+  }
+
+  public async saveSupplierProfile(supplier: import("../runtime-types.ts").RuntimeSupplierProfile): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.suppliers) this.snapshot.suppliers = [];
+    const idx = this.snapshot.suppliers.findIndex(
+      (s) => s.id === supplier.id || s.slug === supplier.slug
+    );
+    if (idx >= 0) {
+      this.snapshot.suppliers[idx] = { ...supplier };
+    } else {
+      this.snapshot.suppliers.push({ ...supplier });
+    }
+    this.flush();
+  }
+
+  public async savePaymentLink(link: RuntimePaymentLink): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.paymentLinks) this.snapshot.paymentLinks = [];
+    const idx = this.snapshot.paymentLinks.findIndex((l) => l.slug === link.slug);
+    if (idx >= 0) {
+      this.snapshot.paymentLinks[idx] = { ...link };
+    } else {
+      this.snapshot.paymentLinks.unshift({ ...link });
+    }
+    this.flush();
+  }
+
+  public async deletePaymentLink(slug: string): Promise<void> {
+    if (!this.snapshot?.paymentLinks) return;
+    this.snapshot.paymentLinks = this.snapshot.paymentLinks.filter((l) => l.slug !== slug);
+    this.flush();
+  }
+
+  public async savePayoutWithdrawal(withdrawal: RuntimePayoutWithdrawal): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.payoutWithdrawals) this.snapshot.payoutWithdrawals = [];
+    this.snapshot.payoutWithdrawals.unshift({ ...withdrawal });
+    this.flush();
+  }
+
+  public async saveSettlementSplitRule(rule: RuntimeSettlementSplitRule): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.settlementSplitRules) this.snapshot.settlementSplitRules = [];
+    const idx = this.snapshot.settlementSplitRules.findIndex((r) => r.id === rule.id);
+    if (idx >= 0) {
+      this.snapshot.settlementSplitRules[idx] = { ...rule };
+    } else {
+      this.snapshot.settlementSplitRules.unshift({ ...rule });
+    }
+    this.flush();
+  }
+
+  public async saveKycSubmission(submission: RuntimeKycSubmission): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.kycSubmissions) this.snapshot.kycSubmissions = [];
+    this.snapshot.kycSubmissions.unshift({ ...submission });
+    this.flush();
+  }
+
+  public async saveTeamMember(member: RuntimeTeamMember): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.teamMembers) this.snapshot.teamMembers = [];
+    const idx = this.snapshot.teamMembers.findIndex(
+      (m) => m.id === member.id || m.email.toLowerCase() === member.email.toLowerCase()
+    );
+    if (idx >= 0) {
+      this.snapshot.teamMembers[idx] = { ...member };
+    } else {
+      this.snapshot.teamMembers.push({ ...member });
+    }
+    this.flush();
+  }
+
+  public async deleteTeamMember(idOrEmail: string): Promise<void> {
+    if (!this.snapshot?.teamMembers) return;
+    this.snapshot.teamMembers = this.snapshot.teamMembers.filter(
+      (m) => m.id !== idOrEmail && m.email.toLowerCase() !== idOrEmail.toLowerCase()
+    );
+    this.flush();
+  }
+
+  public async saveNotification(notification: RuntimeVendorNotification): Promise<void> {
+    if (!this.snapshot) return;
+    if (!this.snapshot.notifications) this.snapshot.notifications = [];
+    const idx = this.snapshot.notifications.findIndex(
+      (n) => n.notificationKey === notification.notificationKey
+    );
+    if (idx >= 0) {
+      this.snapshot.notifications[idx] = { ...notification };
+    } else {
+      this.snapshot.notifications.unshift({ ...notification });
+    }
+    this.flush();
+  }
+
+  public async syncNotifications(input: {
+    readKeys?: string[];
+    dismissedKeys?: string[];
+    markAllRead?: boolean;
+  }): Promise<void> {
+    if (!this.snapshot?.notifications) return;
+    for (const n of this.snapshot.notifications) {
+      if (input.markAllRead || input.readKeys?.includes(n.notificationKey)) {
+        n.isRead = true;
+        n.readAt = new Date();
+      }
+      if (input.dismissedKeys?.includes(n.notificationKey)) {
+        n.isDismissed = true;
+      }
+    }
+    this.flush();
+  }
 
   public async close(): Promise<void> {
     this.flush();

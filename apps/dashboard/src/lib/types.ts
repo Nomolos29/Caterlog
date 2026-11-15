@@ -45,6 +45,11 @@ export interface Vendor {
   bankAccountNumber?: string;
   bankAccountName?: string;
   monnifySubAccountCode?: string;
+  cacNumber?: string;
+  tinNumber?: string;
+  instagramHandle?: string;
+  baseState?: string;
+  baseCity?: string;
 }
 
 export interface ProductVariant {
@@ -293,8 +298,203 @@ export interface BuyerSession {
   updatedAt: string;
 }
 
-export interface VendorState {
+export interface WholesaleDiscountRule {
+  id: string;
+  name: string;
+  discountType: "PERCENTAGE" | "FLAT_NAIRA";
+  value: number;
+  scope: "ENTIRE_MIRROR_CATALOG" | "CATEGORY" | "SPECIFIC_PRODUCTS";
+  targetCategories?: string[];
+  targetProductSkus?: string[];
+  resellerScope: "ALL_RESELLERS" | "SPECIFIC_RESELLERS";
+  targetResellers?: string[];
+  isActive: boolean;
+  createdAt: string;
+}
 
+export interface MarketBoostListing {
+  id: string;
+  vendorId: string;
+  isPublished: boolean;
+  businessName: string;
+  category: string;
+  baseState: string;
+  baseCity: string;
+  shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
+  allowInterstate: boolean;
+  coveredStates: string[];
+  description: string;
+  moq: string;
+  startingPriceKobo: string;
+  startingPriceNaira?: number;
+  startingPriceFormatted?: string;
+  fulfillmentMethod: string;
+  deliveryNote: string;
+  featuredTags: string[];
+  mirroredCategories: string[];
+  mirroredProductSkus: string[];
+  wholesaleDiscountRules: WholesaleDiscountRule[];
+  subscriptionPlan: "STARTER" | "GROWTH" | "ENTERPRISE";
+  updatedAt: string;
+}
+
+export interface SupplierCatalogProduct {
+  sku: string;
+  name: string;
+  wholesalePriceNaira: number;
+  suggestedRetailNaira: number;
+  stock: number;
+  moq: number;
+  category: string;
+}
+
+export interface SupplierProfile {
+  id: string;
+  slug: string;
+  name: string;
+  verified: boolean;
+  cacNumber: string;
+  category: string;
+  location: string;
+  state: string;
+  shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
+  allowInterstate: boolean;
+  coveredStates: string[];
+  warehouseAddress: string;
+  phone: string;
+  whatsapp: string;
+  rating: number;
+  totalFulfilled: number;
+  subAccountCode: string;
+  leadTime: string;
+  cutoffTime: string;
+  wholesaleTerms: string[];
+  catalogProducts: SupplierCatalogProduct[];
+}
+
+export interface ResellerMirror {
+  id: string;
+  resellerVendorId: string;
+  supplierId: string;
+  supplierSlug?: string;
+  supplierName?: string;
+  mirroredProductSkus: string[];
+  defaultMarkupBps: number;
+  status: "ACTIVE" | "PAUSED";
+  lastSyncedAt: string;
+}
+
+export interface PaymentLinkItem {
+  id: string;
+  slug: string;
+  customerName?: string;
+  customerPhone?: string;
+  productSku?: string;
+  description?: string;
+  amountKobo: string;
+  amountNaira?: number;
+  amountFormatted?: string;
+  checkoutUrl: string;
+  isActive: boolean;
+  timesUsed: number;
+  expiresAt?: string;
+  createdAt: string;
+}
+
+export interface PayoutWithdrawalItem {
+  id: string;
+  reference: string;
+  amountKobo: string;
+  amountNaira?: number;
+  amountFormatted?: string;
+  feeKobo: string;
+  netAmountKobo: string;
+  netAmountNaira?: number;
+  netAmountFormatted?: string;
+  bankCode?: string;
+  bankName: string;
+  accountNumber: string;
+  accountName?: string;
+  status: "PENDING" | "DISPATCHED" | "SETTLED" | "FAILED";
+  verifiedByOtp: boolean;
+  createdAt: string;
+  settledAt?: string;
+}
+
+export interface SettlementSplitRuleItem {
+  id: string;
+  name: string;
+  supplierSubAccountCode?: string;
+  supplierShareBps: number;
+  resellerShareBps: number;
+  platformFeeBps: number;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+export interface KycSubmissionItem {
+  id: string;
+  businessName: string;
+  cacNumber: string;
+  tinNumber?: string;
+  businessAddress?: string;
+  businessCategory?: string;
+  bankCode: string;
+  bankName?: string;
+  accountNumber: string;
+  resolvedAccountName: string;
+  whatsappPhone?: string;
+  instagramHandle?: string;
+  cacDocumentUploaded: boolean;
+  idDocumentUploaded: boolean;
+  status: "UNVERIFIED" | "PENDING_REVIEW" | "VERIFIED" | "REJECTED";
+  reviewerNotes?: string;
+  submittedAt: string;
+  reviewedAt?: string;
+}
+
+export interface TeamMemberItem {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: string;
+  status: "Active" | "Invited" | "Suspended";
+  canManageOrders: boolean;
+  canManageInventory: boolean;
+  canViewPayouts: boolean;
+  canProcessRefunds: boolean;
+  canOverrideCopilot: boolean;
+  lastActiveAt?: string;
+  invitedAt: string;
+}
+
+export interface VendorNotificationItem {
+  id: string;
+  notificationKey: string;
+  title: string;
+  message: string;
+  category: "ORDERS" | "PAYOUTS" | "INVENTORY" | "COPILOT" | "SYSTEM";
+  isRead: boolean;
+  isDismissed: boolean;
+  linkText?: string;
+  targetView?: string;
+  targetRef?: string;
+  createdAt: string;
+  readAt?: string;
+}
+
+export interface CommerceEventItem {
+  id: string;
+  eventType: string;
+  actorType: string;
+  entityType: string;
+  entityId: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface VendorState {
   vendor: Vendor;
   activeBuyerSession: BuyerSession | null;
   analytics: Analytics;
@@ -303,6 +503,16 @@ export interface VendorState {
   discounts: Discount[];
   orders: Order[];
   chatMessages: ChatMessage[];
+  marketBoostListing?: MarketBoostListing | null;
+  suppliers?: SupplierProfile[];
+  resellerMirrors?: ResellerMirror[];
+  paymentLinks?: PaymentLinkItem[];
+  payoutWithdrawals?: PayoutWithdrawalItem[];
+  settlementSplitRules?: SettlementSplitRuleItem[];
+  kycSubmissions?: KycSubmissionItem[];
+  teamMembers?: TeamMemberItem[];
+  notifications?: VendorNotificationItem[];
+  commerceEvents?: CommerceEventItem[];
 }
 
 export interface WhatsAppSimulationResult {

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
+import type { TeamMemberItem, CommerceEventItem } from "@/lib/types";
 import { FilterIcon, ExportIcon, PlusIcon } from "../icons";
 
 interface TeamMember {
@@ -32,9 +33,23 @@ interface AuditEvent {
 
 interface TeamViewProps {
   vendorName?: string;
+  teamMembers?: TeamMemberItem[];
+  commerceEvents?: CommerceEventItem[];
+  onSaveTeamMember?: (input: {
+    name: string;
+    email: string;
+    role: string;
+    status?: "Active" | "Invited" | "Suspended";
+  }) => Promise<void>;
+  onDeleteTeamMember?: (idOrEmail: string) => Promise<void>;
 }
 
-export function TeamView({ vendorName }: TeamViewProps) {
+export function TeamView({
+  vendorName,
+  teamMembers = [],
+  commerceEvents = [],
+  onSaveTeamMember,
+}: TeamViewProps) {
   const [activeTab, setActiveTab] = useState<"roles" | "audit">("roles");
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [editMember, setEditMember] = useState<TeamMember | null>(null);
@@ -57,7 +72,7 @@ export function TeamView({ vendorName }: TeamViewProps) {
   const [actorFilter, setActorFilter] = useState<string>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
 
-  // Team Data (defaults to authenticated store owner)
+  // Team Data (hydrated from database TeamMember table when present)
   const [members, setMembers] = useState<TeamMember[]>([
     {
       id: "mem-owner",
@@ -76,21 +91,79 @@ export function TeamView({ vendorName }: TeamViewProps) {
     },
   ]);
 
-  // Keep owner name in sync with vendor name
   useEffect(() => {
-    if (vendorName) {
+    if (teamMembers && teamMembers.length > 0) {
+      setMembers(
+        teamMembers.map((tm) => ({
+          id: tm.id,
+          name: tm.name,
+          email: tm.email,
+          role: (tm.role as TeamMember["role"]) || "Store Attendant",
+          status: tm.status === "Invited" ? "Invited" : "Active",
+          lastActive: tm.lastActiveAt
+            ? new Date(tm.lastActiveAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : "Now",
+          permissions: {
+            canManageOrders: tm.canManageOrders,
+            canManageInventory: tm.canManageInventory,
+            canViewPayouts: tm.canViewPayouts,
+            canProcessRefunds: tm.canProcessRefunds,
+            canOverrideCopilot: tm.canOverrideCopilot,
+          },
+        }))
+      );
+    } else if (vendorName) {
       setMembers((prev) =>
         prev.map((m) => (m.id === "mem-owner" ? { ...m, name: vendorName } : m))
       );
     }
-  }, [vendorName]);
+  }, [teamMembers, vendorName]);
 
-  // Audit Trail (starts clean; filled as live operations occur)
+  // Audit Trail (hydrated from database CommerceEvent table)
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
+
+  useEffect(() => {
+    if (!commerceEvents || commerceEvents.length === 0) return;
+    setAuditLogs(
+      commerceEvents.map((ev) => ({
+        id: ev.id,
+        actor:
+          ev.actorType === "COPILOT_AUTO"
+            ? "AI Sales Co-Pilot"
+            : ev.actorType === "WEBHOOK"
+              ? "Monnify Settlement Webhook"
+              : vendorName || "Store Owner",
+        actorType:
+          ev.actorType === "COPILOT_AUTO"
+            ? "AI_COPILOT"
+            : ev.actorType === "WEBHOOK"
+              ? "MONNIFY"
+              : "OWNER",
+        action: ev.eventType.replace(/_/g, " "),
+        target: ev.entityId,
+        category:
+          ev.entityType === "ORDER"
+            ? "ORDERS"
+            : ev.entityType === "PRODUCT"
+              ? "INVENTORY"
+              : "SETTINGS",
+        timestamp: new Date(ev.createdAt).toLocaleString(),
+        details: JSON.stringify(ev.payload || {}),
+      }))
+    );
+  }, [commerceEvents, vendorName]);
 
   // Handle Team Member Invitation
   const handleSendInvite = () => {
     if (!inviteEmail || !inviteName) return;
+    if (onSaveTeamMember) {
+      void onSaveTeamMember({
+        name: inviteName,
+        email: inviteEmail,
+        role: inviteRole,
+        status: "Invited",
+      });
+    }
     const newMember: TeamMember = {
       id: `mem-${Date.now()}`,
       name: inviteName,

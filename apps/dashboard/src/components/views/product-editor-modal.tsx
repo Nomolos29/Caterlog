@@ -36,8 +36,143 @@ export const PRESET_CATEGORIES = [
   "Other / Custom Category",
 ];
 
+export function resolveStructuredSkuPrefix(name: string, category?: string): string {
+  const n = (name || "").toUpperCase();
+  const c = (category || "").toUpperCase();
+  const combined = `${n} ${c}`;
+
+  if (/\b(BAG|TOTE|HANDBAG|PURSE|BACKPACK|CLUTCH|WALLET|POUCH)\b/.test(n)) return "BAG";
+  if (/\b(HEEL|SHOE|BOOT|SNEAKER|SLIDE|SANDAL|LOAFER|MULE|SLIPPER|FOOTWEAR)\b/.test(n)) return "SHOE";
+  if (/\b(FLASK|BOTTLE|TUMBLER|MUG|THERMOS)\b/.test(n)) return "FLASK";
+  if (/\b(WIG|FRONTAL|CLOSURE|BRAID|BUNDLE|HAIR EXTENSION)\b/.test(combined)) return "HAIR";
+  if (/\b(PERFUME|OUD|SCENT|FRAGRANCE|COLOGNE|DIFFUSER|BODY MIST)\b/.test(combined)) return "SCNT";
+  if (/\b(WATCH|NECKLACE|BRACELET|EARRING|RING|JEWELRY|SUNGLASS|EYEGLASS|CHAIN)\b/.test(combined)) return "JEWL";
+  if (/\b(PHONE|IPHONE|SAMSUNG|LAPTOP|MACBOOK|EARBUD|AIRPOD|POWERBANK|CHARGER|TABLET|GADGET)\b/.test(combined)) return "TECH";
+  if (/\b(TV|FRIDGE|FREEZER|FAN|IRON|SPEAKER|INVERTER|GENERATOR|APPLIANCE|MICROWAVE)\b/.test(combined)) return "ELEC";
+  if (/\b(POT|PAN|BLENDER|KETTLE|PLATE|CUTLERY|KITCHEN|COOKWARE|UTENSIL)\b/.test(combined)) return "KITCH";
+  if (/\b(FOOD|LUNCH|CAKE|SNACK|RICE|MEAL|CHOPS|PASTRY|HONEY|SPICE|GROCER|CATERING)\b/.test(combined)) return "FOOD";
+  if (/\b(COSMETIC|CREAM|LOTION|SERUM|SOAP|BUTTER|MAKEUP|BEAUTY|SKINCARE|GLOW|CLEANSER)\b/.test(combined)) return "GLOW";
+  if (/\b(DRESS|SHIRT|GOWN|HOODIE|TOP|PANTS|TROUSER|SUIT|JACKET|WEAR|CLOTH|ABAYA|ANKARA|KAFTAN|SKIRT|JEAN|APPAREL)\b/.test(combined)) return "WEAR";
+  if (/\b(BED|SHEET|DUVET|PILLOW|CURTAIN|RUG|LAMP|CHAIR|TABLE|DECOR|FURNITURE)\b/.test(combined)) return "HOME";
+  if (/\b(VITAMIN|SUPPLEMENT|GYM|TEA|HERB|FITNESS|WELLNESS|HEALTH)\b/.test(combined)) return "HLTH";
+  if (/\b(BABY|KID|TOY|DIAPER|STROLLER|INFANT)\b/.test(combined)) return "KIDS";
+  if (/\b(BOOK|JOURNAL|PLANNER|PEN|STATIONERY|CRAFT)\b/.test(combined)) return "BOOK";
+  if (/\b(CAR|AUTO|TIRE|BATTERY|TOOL|HELMET)\b/.test(combined)) return "AUTO";
+
+  if (/SHOES|BAGS|FOOTWEAR/.test(c)) return "SHOE";
+  if (/FASHION|APPAREL/.test(c)) return "WEAR";
+  if (/BEAUTY|SKINCARE|COSMETIC/.test(c)) return "GLOW";
+
+  const catToken = c.replace(/[^A-Z0-9]/g, "").slice(0, 4);
+  if (catToken.length >= 3 && catToken !== "GENE" && catToken !== "CUST" && catToken !== "OTHE") {
+    return catToken;
+  }
+
+  const firstWord = n.trim().split(/\s+/)[0]?.replace(/[^A-Z0-9]/g, "") ?? "";
+  if (firstWord.length >= 3) {
+    return firstWord.slice(0, 4);
+  }
+  return "ITEM";
+}
+
+export function buildStructuredSku(
+  name: string,
+  category?: string,
+  existingProducts: Array<{ skuCode: string }> = []
+): string {
+  const prefix = resolveStructuredSkuPrefix(name, category);
+  const existingUpper = new Set(existingProducts.map((p) => p.skuCode.toUpperCase()));
+
+  let maxIndex = 0;
+  const prefixRegex = new RegExp(`^${prefix}-(\\d+)$`, "i");
+  for (const prod of existingProducts) {
+    const m = prod.skuCode.trim().match(prefixRegex);
+    if (m?.[1]) {
+      const num = parseInt(m[1], 10);
+      if (Number.isFinite(num) && num > maxIndex) {
+        maxIndex = num;
+      }
+    }
+  }
+
+  let index = maxIndex + 1;
+  let candidate = `${prefix}-${String(index).padStart(2, "0")}`;
+  while (existingUpper.has(candidate)) {
+    index++;
+    candidate = `${prefix}-${String(index).padStart(2, "0")}`;
+  }
+  return candidate;
+}
+
+export function buildStructuredVariantSku(
+  parentSku: string,
+  variantName: string,
+  index: number,
+  usedSkus: Set<string> = new Set()
+): string {
+  const cleanParent = parentSku.trim().toUpperCase();
+  const raw = (variantName || "").toUpperCase();
+
+  const colorMap: Array<[RegExp, string]> = [
+    [/\bBLACK\b/, "BLK"],
+    [/\bGOLD\b/, "GLD"],
+    [/\bSILVER\b/, "SLV"],
+    [/\bWHITE\b/, "WHT"],
+    [/\bGREEN\b/, "GRN"],
+    [/\bBLUE\b/, "BLU"],
+    [/\bPINK\b/, "PNK"],
+    [/\bBROWN\b/, "BRN"],
+    [/\bPURPLE\b/, "PRP"],
+    [/\bYELLOW\b/, "YLW"],
+    [/\bORANGE\b/, "ORG"],
+    [/\bRED\b/, "RED"],
+    [/\bTAN\b/, "TAN"],
+    [/\bNAVY\b/, "NVY"],
+    [/\bNUDE\b/, "NUD"],
+  ];
+
+  const sizeMatch = raw.match(/\b(\d{1,4}(?:ML|L|KG|G|IN|CM)?|XXXL|XXL|XL|XS|SM|MD|LG)\b/);
+  let colorCode = "";
+  for (const [regex, abbr] of colorMap) {
+    if (regex.test(raw)) {
+      colorCode = abbr;
+      break;
+    }
+  }
+
+  let suffix = "";
+  if (sizeMatch && colorCode) {
+    suffix = `${sizeMatch[1]}${colorCode}`;
+  } else if (sizeMatch) {
+    const rest = raw
+      .replace(sizeMatch[0], "")
+      .replace(/\b(SIZE|COLOR|COLOUR|VOLUME|LENGTH)\b/g, "")
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 3);
+    suffix = `${sizeMatch[1]}${rest}`;
+  } else if (colorCode) {
+    suffix = colorCode;
+  } else {
+    suffix =
+      raw
+        .replace(/\b(SIZE|COLOR|COLOUR|VARIANT)\b/g, "")
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 6) || `V${index + 1}`;
+  }
+
+  let candidate = `${cleanParent}-${suffix}`;
+  let counter = 2;
+  while (usedSkus.has(candidate)) {
+    candidate = `${cleanParent}-${suffix}${counter}`;
+    counter++;
+  }
+  usedSkus.add(candidate);
+  return candidate;
+}
+
 interface ProductEditorModalProps {
   product?: ProductItem | null;
+  existingProducts?: ProductItem[];
   isOpen: boolean;
   onClose: () => void;
   onSave: (productData: any) => Promise<boolean> | void;
@@ -46,6 +181,7 @@ interface ProductEditorModalProps {
 
 export function ProductEditorModal({
   product,
+  existingProducts = [],
   isOpen,
   onClose,
   onSave,
@@ -55,7 +191,10 @@ export function ProductEditorModal({
   const [deleting, setDeleting] = useState(false);
 
   const [name, setName] = useState(product?.name || "");
-  const [sku, setSku] = useState(product?.skuCode || `SKU-${Date.now().toString().slice(-4)}`);
+  const [sku, setSku] = useState(
+    product?.skuCode || buildStructuredSku("", "Fashion & Apparel", existingProducts)
+  );
+  const [autoGenerateSku, setAutoGenerateSku] = useState(!product);
   const [category, setCategory] = useState(product?.category || "Fashion & Apparel");
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [customCategoryText, setCustomCategoryText] = useState("");
@@ -158,7 +297,8 @@ export function ProductEditorModal({
       }
     } else if (isOpen) {
       setName("");
-      setSku(`SKU-${Date.now().toString().slice(-4)}`);
+      setAutoGenerateSku(true);
+      setSku(buildStructuredSku("", "Fashion & Apparel", existingProducts));
       setCategory("Fashion & Apparel");
       setIsCustomCategory(false);
       setCustomCategoryText("");
@@ -172,6 +312,31 @@ export function ProductEditorModal({
       setImages([]);
     }
   }, [product, isOpen]);
+
+  // Live structured SKU auto-generation when creating or auto-syncing a product
+  useEffect(() => {
+    if (!isOpen || !autoGenerateSku) return;
+    const effectiveCat = isCustomCategory
+      ? customCategoryText.trim() || "General"
+      : category;
+    const otherProducts = product
+      ? existingProducts.filter((p) => p.skuCode.toUpperCase() !== product.skuCode.toUpperCase())
+      : existingProducts;
+    const nextSku = buildStructuredSku(name, effectiveCat, otherProducts);
+    setSku(nextSku);
+  }, [name, category, isCustomCategory, customCategoryText, autoGenerateSku, isOpen, existingProducts, product]);
+
+  // Keep variant SKUs structured (`<PARENT_SKU>-<VARIANT_TOKEN>`) whenever parent SKU changes
+  useEffect(() => {
+    if (!sku || variants.length === 0) return;
+    const used = new Set<string>();
+    setVariants((prev) =>
+      prev.map((v, idx) => ({
+        ...v,
+        sku: buildStructuredVariantSku(sku, v.name, idx, used),
+      }))
+    );
+  }, [sku]);
 
   // Computed Margins
   const grossProfit = sellingPrice - wholesaleCost;
@@ -189,10 +354,11 @@ export function ProductEditorModal({
 
   const handleAddVariant = () => {
     if (!newVariantName.trim()) return;
+    const used = new Set(variants.map((v) => v.sku.toUpperCase()));
     const newV: ProductVariant = {
       id: `v-${Date.now()}`,
       name: newVariantName.trim(),
-      sku: `${sku}-${newVariantName.trim().slice(0, 3).toUpperCase()}`,
+      sku: buildStructuredVariantSku(sku, newVariantName.trim(), variants.length, used),
       priceNaira: Number(newVariantPrice) || sellingPrice,
       stock: Number(newVariantStock) || 0,
     };
@@ -375,14 +541,35 @@ export function ProductEditorModal({
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1.5">
-              SKU Identifier *
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-500">
+                SKU Identifier *
+              </label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+                  {autoGenerateSku ? "Auto-Structured" : "Custom"}
+                </span>
+                {!isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => setAutoGenerateSku((prev) => !prev)}
+                    className="text-[10px] font-semibold text-emerald-700 hover:underline cursor-pointer"
+                  >
+                    {autoGenerateSku ? "Customize" : "Auto-Generate"}
+                  </button>
+                )}
+              </div>
+            </div>
             <input
               type="text"
               value={sku}
-              onChange={(e) => setSku(e.target.value)}
-              className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-900 font-mono font-semibold focus:outline-none focus:border-emerald-500"
+              readOnly={autoGenerateSku || isEditing}
+              onChange={(e) => setSku(e.target.value.toUpperCase())}
+              className={`w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold focus:outline-none ${
+                autoGenerateSku || isEditing
+                  ? "bg-emerald-50/40 border-emerald-200 text-emerald-950"
+                  : "bg-white border-gray-200 text-gray-900 focus:border-emerald-500"
+              }`}
             />
           </div>
 

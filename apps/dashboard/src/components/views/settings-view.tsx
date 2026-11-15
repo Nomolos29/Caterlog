@@ -3,13 +3,22 @@
 import React, { useState, useEffect } from "react";
 import type { VendorProfile, ShippingZoneItem, DiscountItem, ChatMessageItem, OrderItem, BuyerSession } from "@/lib/types";
 
+export type SettingsTabId =
+  | "notifications"
+  | "setup"
+  | "conversations"
+  | "detail"
+  | "shipping"
+  | "general";
+
 interface SettingsViewProps {
   vendor: VendorProfile;
+  workspaceRole?: "reseller" | "supplier";
   shippingZones: ShippingZoneItem[];
   discounts: DiscountItem[];
   chatMessages?: ChatMessageItem[];
   orders?: OrderItem[];
-  initialTab?: "setup" | "conversations" | "detail" | "shipping" | "general";
+  initialTab?: SettingsTabId;
   activeBuyerSession?: BuyerSession | null;
   onSendVendorManualEcho?: (text: string, buyerPhone?: string) => Promise<void>;
   onUpdateSettings: (settings: {
@@ -36,6 +45,7 @@ const INITIAL_MESSAGES: MessageItem[] = [];
 
 export function SettingsView({
   vendor,
+  workspaceRole = "reseller",
   shippingZones,
   discounts,
   chatMessages = [],
@@ -50,14 +60,19 @@ export function SettingsView({
   onDeleteDiscount,
   onNavigateToOrder,
 }: SettingsViewProps) {
-  // Tabs: 'setup' | 'conversations' | 'detail' | 'shipping' | 'general'
-  const [activeTab, setActiveTab] = useState<"setup" | "conversations" | "detail" | "shipping" | "general">(initialTab);
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab);
 
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
     }
   }, [initialTab]);
+
+  useEffect(() => {
+    if (workspaceRole === "reseller" && activeTab === "shipping") {
+      setActiveTab("setup");
+    }
+  }, [workspaceRole, activeTab]);
 
   // Derived live messages
   const liveMessages: MessageItem[] = React.useMemo(() => {
@@ -213,6 +228,30 @@ export function SettingsView({
   const [holdMinutes, setHoldMinutes] = useState(vendor.reservationTtlMinutes);
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // Profile Settings State
+  const [profileBusinessName, setProfileBusinessName] = useState(vendor.businessName || "");
+  const [profileWhatsappPhone, setProfileWhatsappPhone] = useState(vendor.whatsappPhone || "");
+  const [profileInstagram, setProfileInstagram] = useState(vendor.instagramHandle || "");
+  const [profileBaseState, setProfileBaseState] = useState(vendor.baseState || "Lagos");
+  const [profileBaseCity, setProfileBaseCity] = useState(vendor.baseCity || "Lagos");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSavedToast, setProfileSavedToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    setProfileBusinessName(vendor.businessName || "");
+    setProfileWhatsappPhone(vendor.whatsappPhone || "");
+    setProfileInstagram(vendor.instagramHandle || "");
+    setProfileBaseState(vendor.baseState || "Lagos");
+    setProfileBaseCity(vendor.baseCity || "Lagos");
+  }, [vendor.businessName, vendor.whatsappPhone, vendor.instagramHandle, vendor.baseState, vendor.baseCity]);
+
+  // Notification Preferences State (centralized in Settings -> Notifications)
+  const [waNotifications, setWaNotifications] = useState(true);
+  const [emailDigest, setEmailDigest] = useState(true);
+  const [soundAlerts, setSoundAlerts] = useState(false);
+  const [lowStockAlerts, setLowStockAlerts] = useState(true);
+  const [notifSavedToast, setNotifSavedToast] = useState(false);
+
   // Sync settings when vendor profile is updated externally (e.g. via WhatsApp keywords or SSE)
   useEffect(() => {
     setCopilotMode(vendor.copilotMode);
@@ -262,11 +301,142 @@ export function SettingsView({
   /* -------------------------------------------------------------------------- */
   /* Screen: Settings · Delivery & Shipping Zones                               */
   /* -------------------------------------------------------------------------- */
+  const renderTabStrip = () => {
+    const tabs: Array<{ id: SettingsTabId; label: string }> = [
+      { id: "setup", label: "Sales co-pilot" },
+      { id: "conversations", label: "Conversations" },
+      ...(workspaceRole === "supplier" ? [{ id: "shipping" as const, label: "Delivery & Shipping" }] : []),
+      { id: "notifications", label: "Notifications" },
+      { id: "general", label: "Shop & Webhooks" },
+    ];
+    return (
+      <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`pb-2.5 cursor-pointer transition-colors ${
+              activeTab === t.id
+                ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold"
+                : "text-gray-500 hover:text-gray-900"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  /* -------------------------------------------------------------------------- */
+  /* Settings · Notifications                                                   */
+  /* -------------------------------------------------------------------------- */
+  if (activeTab === "notifications") {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto w-full pb-24">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Notification Settings</h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Control how and where you receive business, order, payout, and inventory alerts.
+            </p>
+          </div>
+        </div>
+
+        {renderTabStrip()}
+
+        {notifSavedToast && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl">
+            ✓ Notification preferences updated
+          </div>
+        )}
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-5 text-xs">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="font-bold text-gray-900">WhatsApp Instant Alerts</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                Receive 1-tap alerts on {vendor.whatsappPhone} whenever an order is paid or requires confirmation.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={waNotifications}
+              onChange={(e) => {
+                setWaNotifications(e.target.checked);
+                setNotifSavedToast(true);
+                setTimeout(() => setNotifSavedToast(false), 2000);
+              }}
+              className="rounded text-emerald-600 cursor-pointer mt-0.5"
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4">
+            <div>
+              <div className="font-bold text-gray-900">Daily Financial Digest</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                Daily summary of Monnify split settlements and net payouts at 9:00 PM WAT.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={emailDigest}
+              onChange={(e) => {
+                setEmailDigest(e.target.checked);
+                setNotifSavedToast(true);
+                setTimeout(() => setNotifSavedToast(false), 2000);
+              }}
+              className="rounded text-emerald-600 cursor-pointer mt-0.5"
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4">
+            <div>
+              <div className="font-bold text-gray-900">Low Stock &amp; Mirror Sync Alerts</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                Alert when mirrored supplier inventory drops below 5 units or goes out of stock.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={lowStockAlerts}
+              onChange={(e) => {
+                setLowStockAlerts(e.target.checked);
+                setNotifSavedToast(true);
+                setTimeout(() => setNotifSavedToast(false), 2000);
+              }}
+              className="rounded text-emerald-600 cursor-pointer mt-0.5"
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-4 border-t border-gray-100 pt-4">
+            <div>
+              <div className="font-bold text-gray-900">Dashboard Audio Alert</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">
+                Play a subtle sound chime when a live WhatsApp buyer message arrives while the dashboard is open.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={soundAlerts}
+              onChange={(e) => {
+                setSoundAlerts(e.target.checked);
+                setNotifSavedToast(true);
+                setTimeout(() => setNotifSavedToast(false), 2000);
+              }}
+              className="rounded text-emerald-600 cursor-pointer mt-0.5"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (activeTab === "shipping") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-24">
+      <div className="space-y-6 max-w-6xl mx-auto w-full pb-24">
         {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Delivery &amp; Shipping</h1>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -282,41 +452,7 @@ export function SettingsView({
         </div>
 
         {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
-          <button
-            onClick={() => setActiveTab("setup")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-          >
-            Setup
-          </button>
-          <button
-            onClick={() => setActiveTab("conversations")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-          >
-            Conversations
-          </button>
-          <button
-            onClick={() => {
-              setStateFilter("Needs you");
-              setActiveTab("conversations");
-            }}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-          >
-            Escalations (1)
-          </button>
-          <button
-            onClick={() => setActiveTab("shipping")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
-          >
-            Delivery &amp; Shipping
-          </button>
-          <button
-            onClick={() => setActiveTab("general")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 ml-auto cursor-pointer"
-          >
-            Shop &amp; Webhooks
-          </button>
-        </div>
+        {renderTabStrip()}
 
         {shippingSavedToast && (
           <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2">
@@ -943,9 +1079,9 @@ export function SettingsView({
   /* -------------------------------------------------------------------------- */
   if (activeTab === "conversations") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-16">
+      <div className="space-y-6 max-w-6xl mx-auto w-full pb-24">
         {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Co-pilot conversations</h1>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -961,41 +1097,7 @@ export function SettingsView({
         </div>
 
         {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
-          <button
-            onClick={() => setActiveTab("setup")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            Setup
-          </button>
-          <button
-            onClick={() => setActiveTab("conversations")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
-          >
-            Conversations
-          </button>
-          <button
-            onClick={() => {
-              setStateFilter("Needs you");
-              setActiveTab("conversations");
-            }}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-          >
-            Escalations ({escalatedSessions.length})
-          </button>
-          <button
-            onClick={() => setActiveTab("shipping")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-          >
-            Delivery &amp; Shipping
-          </button>
-          <button
-            onClick={() => setActiveTab("general")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 ml-auto cursor-pointer"
-          >
-            Shop &amp; Webhooks
-          </button>
-        </div>
+        {renderTabStrip()}
 
         {/* 3 Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1236,9 +1338,9 @@ export function SettingsView({
   /* -------------------------------------------------------------------------- */
   if (activeTab === "setup") {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-24">
+      <div className="space-y-6 max-w-6xl mx-auto w-full pb-24">
         {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Sales co-pilot</h1>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -1254,41 +1356,7 @@ export function SettingsView({
         </div>
 
         {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
-          <button
-            onClick={() => setActiveTab("setup")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
-          >
-            Setup
-          </button>
-          <button
-            onClick={() => setActiveTab("conversations")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            Conversations
-          </button>
-          <button
-            onClick={() => {
-              setStateFilter("Needs you");
-              setActiveTab("conversations");
-            }}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-          >
-            Escalations (1)
-          </button>
-          <button
-            onClick={() => setActiveTab("shipping")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-          >
-            Delivery &amp; Shipping
-          </button>
-          <button
-            onClick={() => setActiveTab("general")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900 ml-auto cursor-pointer"
-          >
-            Shop &amp; Webhooks
-          </button>
-        </div>
+        {renderTabStrip()}
 
         {/* Section 1: Automation & connected channels */}
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
@@ -1666,12 +1734,12 @@ export function SettingsView({
   /* General Shop & Webhook Settings                                            */
   /* -------------------------------------------------------------------------- */
   return (
-    <div className="space-y-8 max-w-5xl mx-auto pb-16">
+    <div className="space-y-6 max-w-6xl mx-auto w-full pb-24">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Shop Settings</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <p className="text-xs text-gray-500 mt-0.5">
             Manage your shop profile, WhatsApp Coexistence, delivery zones, and Monnify webhooks.
           </p>
         </div>
@@ -1684,32 +1752,7 @@ export function SettingsView({
       </div>
 
       {/* Tab Strip */}
-      <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
-        <button
-          onClick={() => setActiveTab("setup")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-        >
-          Sales co-pilot
-        </button>
-        <button
-          onClick={() => setActiveTab("conversations")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-        >
-          Conversations
-        </button>
-        <button
-          onClick={() => setActiveTab("shipping")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
-        >
-          Delivery &amp; Shipping
-        </button>
-        <button
-          onClick={() => setActiveTab("general")}
-          className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold ml-auto cursor-pointer"
-        >
-          Shop &amp; Webhooks
-        </button>
-      </div>
+      {renderTabStrip()}
 
       {/* General Settings form */}
       <div className="bg-white rounded-2xl border border-gray-100 p-6 sm:p-8 shadow-xs space-y-6">

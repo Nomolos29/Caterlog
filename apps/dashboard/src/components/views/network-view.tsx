@@ -1,11 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import type {
+  SupplierProfile as DbSupplierProfile,
+  ResellerMirror,
+} from "@/lib/types";
 import { FilterIcon, CheckIcon } from "../icons";
 import { NIGERIAN_STATES } from "./market-boost-view";
 
 interface NetworkViewProps {
   initialTab?: "my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers";
+  workspaceRole?: "reseller" | "supplier";
+  suppliers?: DbSupplierProfile[];
+  resellerMirrors?: ResellerMirror[];
+  onMirrorSupplier?: (supplierIdOrSlug: string, productSkus?: string[]) => Promise<void>;
   onMirrorProducts?: (selectedSkus?: string[]) => void;
 }
 
@@ -258,22 +266,106 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
   },
 ];
 
-export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: NetworkViewProps) {
+export function NetworkView({
+  initialTab = "my-suppliers",
+  workspaceRole = "reseller",
+  suppliers: dbSuppliers = [],
+  resellerMirrors = [],
+  onMirrorSupplier,
+  onMirrorProducts,
+}: NetworkViewProps) {
   // Connected suppliers list & wholesale directory
   const [connectedSuppliers, setConnectedSuppliers] = useState<SupplierProfile[]>([SUPPLIERS_DATA[0]]);
   const [directorySuppliers, setDirectorySuppliers] = useState<SupplierProfile[]>(SUPPLIERS_DATA);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierProfile | null>(null);
+
+  useEffect(() => {
+    if (!dbSuppliers || dbSuppliers.length === 0) return;
+    const mapped: SupplierProfile[] = dbSuppliers.map((sup) => ({
+      id: sup.id,
+      name: sup.name,
+      slug: sup.slug,
+      verified: sup.verified,
+      cacNumber: sup.cacNumber || "RC-1928401",
+      category: sup.category,
+      location: sup.location,
+      state: sup.state || "Lagos",
+      shippingScope: sup.shippingScope || "LOCAL_STATE",
+      allowInterstate: sup.allowInterstate ?? false,
+      coveredStates: sup.coveredStates && sup.coveredStates.length > 0 ? sup.coveredStates : [sup.state || "Lagos"],
+      warehouseAddress: sup.warehouseAddress || sup.location,
+      phone: sup.phone,
+      whatsapp: sup.whatsapp,
+      rating: sup.rating || 4.9,
+      totalFulfilled: sup.totalFulfilled || 100,
+      subAccountCode: sup.subAccountCode || "MFY_SUB_01",
+      leadTime: sup.leadTime || "Same day dispatch",
+      cutoffTime: sup.cutoffTime || "2:00 PM WAT",
+      wholesaleTerms: {
+        moqDropship: 1,
+        moqWholesale: 4,
+        settlementTerms: sup.wholesaleTerms?.[0] || "Instant escrow split via Monnify upon customer payment",
+        returnWindow: sup.wholesaleTerms?.[1] || "48-hour return window for transit damage",
+        suggestedMargin: sup.wholesaleTerms?.[2] || "25% – 35% gross retail margin",
+        inventorySync: "Real-time webhook inventory reservations with automatic 15-minute hold TTL",
+      },
+      products: (sup.catalogProducts || []).map((cp, idx) => {
+        const raw = cp as unknown as Record<string, unknown>;
+        const wholesaleCost = Number(cp.wholesalePriceNaira ?? raw.wholesaleCost ?? 0);
+        const suggestedRetail = Number(
+          cp.suggestedRetailNaira ?? raw.suggestedRetail ?? (wholesaleCost > 0 ? Math.round(wholesaleCost * 1.25) : 0)
+        );
+        return {
+          id: `${sup.id}-p-${idx}`,
+          sku: cp.sku,
+          name: cp.name,
+          category: cp.category || sup.category,
+          wholesaleCost,
+          suggestedRetail,
+          stock: cp.stock,
+          imageUrl:
+            (raw.imageUrl as string | undefined) ||
+            "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=500&auto=format&fit=crop&q=60",
+          moq: cp.moq || 1,
+        };
+      }),
+    }));
+    setDirectorySuppliers(mapped);
+    const mirroredIds = new Set(
+      resellerMirrors.flatMap((m) => [m.supplierId, m.supplierSlug || ""])
+    );
+    const connected = mapped.filter(
+      (s) => mirroredIds.has(s.id) || mirroredIds.has(s.slug)
+    );
+    if (connected.length > 0) {
+      setConnectedSuppliers(connected);
+    } else if (mapped.length > 0) {
+      setConnectedSuppliers([mapped[0]]);
+    }
+  }, [dbSuppliers, resellerMirrors]);
 
   // Default to my-suppliers
   const [activeTab, setActiveTab] = useState<"my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers">(
     initialTab
   );
 
+  useEffect(() => {
+    if (workspaceRole === "reseller" && activeTab === "my-resellers") {
+      setActiveTab("my-suppliers");
+    }
+  }, [workspaceRole, activeTab]);
+
   // Supplier Catalog selection
   const [selectedProductSkus, setSelectedProductSkus] = useState<string[]>([]);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogCategory, setCatalogCategory] = useState("ALL");
   const [mirrorToast, setMirrorToast] = useState<string | null>(null);
+  const [mirroring, setMirroring] = useState(false);
+  const [mirrorModal, setMirrorModal] = useState<{
+    type: "success" | "error" | "warning";
+    title: string;
+    message: string;
+  } | null>(null);
 
   // Reseller operating location & Geographic visibility filters
   const [resellerState, setResellerState] = useState("Lagos");
@@ -326,6 +418,7 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
   // Resellers permission states
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteSent, setInviteSent] = useState(false);
+  const [pendingInvites, setPendingInvites] = useState<Array<{ email: string; sentAt: string }>>([]);
 
   const toggleSelectSku = (sku: string) => {
     if (selectedProductSkus.includes(sku)) {
@@ -345,16 +438,43 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
     }
   };
 
-  const handleMirrorSelected = () => {
+  const handleMirrorSelected = async () => {
+    if (selectedProductSkus.length === 0) {
+      setMirrorModal({
+        type: "warning",
+        title: "No Products Selected",
+        message: "Select at least one supplier product before publishing to your store inventory.",
+      });
+      return;
+    }
     if (selectedSupplier && !isSupplierDeliverable(selectedSupplier)) {
       setIncompatibleModalSup(selectedSupplier);
       return;
     }
-    if (onMirrorProducts) {
-      onMirrorProducts(selectedProductSkus);
+    setMirroring(true);
+    try {
+      const mirroredCount = selectedProductSkus.length;
+      if (selectedSupplier && onMirrorSupplier) {
+        await onMirrorSupplier(selectedSupplier.slug, selectedProductSkus);
+      }
+      if (onMirrorProducts) {
+        onMirrorProducts(selectedProductSkus);
+      }
+      setSelectedProductSkus([]);
+      setMirrorModal({
+        type: "success",
+        title: "Products Mirrored to Store",
+        message: `${mirroredCount} product${mirroredCount === 1 ? "" : "s"} from ${selectedSupplier?.name || "supplier"} synced to your catalog and Reselling inventory.`,
+      });
+    } catch (err) {
+      setMirrorModal({
+        type: "error",
+        title: "Mirroring Failed",
+        message: err instanceof Error ? err.message : "Could not mirror selected supplier products.",
+      });
+    } finally {
+      setMirroring(false);
     }
-    setMirrorToast(`✓ Successfully mirrored ${selectedProductSkus.length} products to your reselling inventory!`);
-    setTimeout(() => setMirrorToast(null), 3000);
   };
 
   const handleViewSupplierCatalog = (sup: SupplierProfile) => {
@@ -390,6 +510,57 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
         </div>
       )}
 
+      {/* Mirror Result Modal Card with Icon */}
+      {mirrorModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-4">
+              <div
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                  mirrorModal.type === "success"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : mirrorModal.type === "error"
+                    ? "bg-rose-100 text-rose-700"
+                    : "bg-amber-100 text-amber-700"
+                }`}
+              >
+                {mirrorModal.type === "success" ? (
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : mirrorModal.type === "error" ? (
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                  </svg>
+                ) : (
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-bold text-gray-900">{mirrorModal.title}</h3>
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">{mirrorModal.message}</p>
+              </div>
+            </div>
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={() => setMirrorModal(null)}
+                className={`px-5 py-2 rounded-xl text-xs font-semibold text-white cursor-pointer transition-colors ${
+                  mirrorModal.type === "success"
+                    ? "bg-[#0d5c3a] hover:bg-[#0b4b2f]"
+                    : mirrorModal.type === "error"
+                    ? "bg-rose-600 hover:bg-rose-700"
+                    : "bg-amber-600 hover:bg-amber-700"
+                }`}
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -402,9 +573,10 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
           {activeTab === "supplier-catalog" && (
             <button
               onClick={handleMirrorSelected}
-              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-2"
+              disabled={mirroring}
+              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-2"
             >
-              <span>Publish ({selectedProductSkus.length}) to My Store</span>
+              <span>{mirroring ? "Mirroring..." : `Publish (${selectedProductSkus.length}) to My Store`}</span>
             </button>
           )}
         </div>
@@ -443,16 +615,18 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
           </button>
         )}
 
-        <button
-          onClick={() => setActiveTab("my-resellers")}
-          className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
-            activeTab === "my-resellers"
-              ? "border-emerald-600 text-emerald-700 font-bold"
-              : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
-          }`}
-        >
-          My Resellers (Distribution)
-        </button>
+        {workspaceRole === "supplier" && (
+          <button
+            onClick={() => setActiveTab("my-resellers")}
+            className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+              activeTab === "my-resellers"
+                ? "border-emerald-600 text-emerald-700 font-bold"
+                : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
+            }`}
+          >
+            My Resellers (Distribution)
+          </button>
+        )}
       </div>
 
       {/* ---------------------------------------------------------------------- */}
@@ -629,7 +803,7 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
                           <div className="min-w-0 flex-1">
                             <div className="font-semibold text-xs text-gray-900 truncate">{prod.name}</div>
                             <div className="text-[11px] text-gray-500 mt-0.5">
-                              Wholesale: <span className="font-bold text-emerald-800">₦{prod.wholesaleCost.toLocaleString()}</span>
+                              Wholesale: <span className="font-bold text-emerald-800">₦{prod.wholesaleCost?.toLocaleString()}</span>
                             </div>
                             <div className="text-[10px] text-gray-400">Stock: {prod.stock} units</div>
                           </div>
@@ -837,10 +1011,10 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
                           </div>
                         </td>
                         <td className="py-3.5 px-6 text-gray-600">{p.category}</td>
-                        <td className="py-3.5 px-6 font-bold text-gray-900">₦{p.wholesaleCost.toLocaleString()}</td>
-                        <td className="py-3.5 px-6 font-medium text-gray-600">₦{p.suggestedRetail.toLocaleString()}</td>
+                        <td className="py-3.5 px-6 font-bold text-gray-900">₦{p.wholesaleCost?.toLocaleString()}</td>
+                        <td className="py-3.5 px-6 font-medium text-gray-600">₦{p.suggestedRetail?.toLocaleString()}</td>
                         <td className="py-3.5 px-6 font-bold text-emerald-700">
-                          +{marginPct}% (₦{margin.toLocaleString()})
+                          +{marginPct}% (₦{margin?.toLocaleString()})
                         </td>
                         <td className="py-3.5 px-6">
                           <span className={`font-semibold ${p.stock < 15 ? "text-amber-600 font-bold" : "text-gray-900"}`}>
@@ -1057,7 +1231,12 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
                 />
                 <button
                   onClick={() => {
-                    if (inviteEmail) {
+                    const clean = inviteEmail.trim();
+                    if (clean) {
+                      setPendingInvites((prev) => [
+                        { email: clean, sentAt: "Just now" },
+                        ...prev.filter((p) => p.email.toLowerCase() !== clean.toLowerCase()),
+                      ]);
                       setInviteSent(true);
                       setTimeout(() => setInviteSent(false), 3000);
                       setInviteEmail("");
@@ -1079,16 +1258,73 @@ export function NetworkView({ initialTab = "my-suppliers", onMirrorProducts }: N
             </div>
           </div>
 
-          {/* Active Resellers Empty State */}
-          <div className="bg-white rounded-3xl border border-gray-100 p-10 text-center shadow-2xs space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl mx-auto">
-              👥
+          {pendingInvites.length > 0 && (
+            <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs space-y-3">
+              <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Pending Invitations ({pendingInvites.length})</h3>
+              <div className="divide-y divide-gray-100 text-xs">
+                {pendingInvites.map((inv) => (
+                  <div key={inv.email} className="py-2.5 flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold text-gray-900">{inv.email}</span>
+                      <span className="text-[11px] text-gray-400 ml-2">Sent {inv.sentAt}</span>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                      Pending Acceptance
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <h3 className="text-sm font-bold text-gray-900">No Resellers Connected Yet</h3>
-            <p className="text-xs text-gray-500 max-w-sm mx-auto">
-              Send an invite to downstream distributors, retail partners, or affiliate vendors to allow them to mirror your inventory.
-            </p>
-          </div>
+          )}
+
+          {resellerMirrors.length > 0 ? (
+            <div className="bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-2xs">
+              <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-gray-900">Active Network Mirrors ({resellerMirrors.length})</h3>
+                <span className="text-[11px] text-emerald-700 font-semibold">Live DB Synced</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[520px]">
+                  <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    <tr>
+                      <th className="px-5 py-3">Partner / Store</th>
+                      <th className="px-4 py-3">Mirrored Items</th>
+                      <th className="px-4 py-3">Markup Rule</th>
+                      <th className="px-5 py-3 text-right">Sync Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {resellerMirrors.map((mirror) => (
+                      <tr key={mirror.id} className="hover:bg-gray-50">
+                        <td className="px-5 py-3.5 font-semibold text-gray-900">
+                          {mirror.supplierName || mirror.supplierSlug || mirror.supplierId}
+                        </td>
+                        <td className="px-4 py-3.5 text-gray-700">{mirror.mirroredProductSkus.length} products</td>
+                        <td className="px-4 py-3.5 font-mono text-gray-700">
+                          +{(mirror.defaultMarkupBps / 100).toFixed(0)}%
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                            {mirror.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-3xl border border-gray-100 p-10 text-center shadow-2xs space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl mx-auto">
+                👥
+              </div>
+              <h3 className="text-sm font-bold text-gray-900">No Resellers Connected Yet</h3>
+              <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                Send an invite to downstream distributors, retail partners, or affiliate vendors to allow them to mirror your inventory.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

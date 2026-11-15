@@ -1,9 +1,15 @@
 import type {
   Discount,
+  KycSubmissionItem,
+  MarketBoostListing,
   MonnifySimulationResult,
   Order,
   OrderWaybill,
+  PaymentLinkItem,
   PublicOrderReceipt,
+  ResellerMirror,
+  SettlementSplitRuleItem,
+  TeamMemberItem,
   VendorState,
   WhatsAppSimulationResult,
 } from "./types";
@@ -85,6 +91,19 @@ export const api = {
     reservationTtlMinutes?: number;
   }): Promise<VendorState> {
     return request<VendorState>("/api/v1/vendor/settings", {
+      method: "PATCH",
+      ...jsonBody(input),
+    });
+  },
+
+  updateProfile(input: {
+    businessName?: string;
+    whatsappPhone?: string;
+    instagramHandle?: string;
+    baseState?: string;
+    baseCity?: string;
+  }): Promise<VendorState> {
+    return request<VendorState>("/api/v1/vendor/profile", {
       method: "PATCH",
       ...jsonBody(input),
     });
@@ -413,6 +432,137 @@ export const api = {
     state: VendorState;
   }> {
     return request("/api/v1/auth/onboard", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  getNeonStatus(): Promise<Record<string, unknown>> {
+    return request("/api/v1/neon/status");
+  },
+
+  sealRealtimeQuery(
+    table: "orders" | "products",
+    vendorId: string,
+    limit = 50
+  ): Promise<{
+    table: string;
+    vendorId: string;
+    realtimeUrl: string;
+    sealed: unknown;
+  }> {
+    return request("/api/v1/neon/realtime/seal", {
+      method: "POST",
+      ...jsonBody({ table, vendorId, limit }),
+    });
+  },
+
+  saveMarketBoost(
+    input: Omit<Partial<MarketBoostListing>, "startingPriceNaira"> & {
+      startingPriceNaira?: number | string;
+    }
+  ): Promise<{ status: string; listing: MarketBoostListing; state: VendorState }> {
+    return request("/api/v1/vendor/market-boost", {
+      method: "PUT",
+      ...jsonBody(input),
+    });
+  },
+
+  mirrorSupplierCatalog(input: {
+    supplierIdOrSlug: string;
+    productSkus?: string[];
+    defaultMarkupBps?: number;
+    status?: "ACTIVE" | "PAUSED";
+  }): Promise<{
+    status: string;
+    mirror: ResellerMirror;
+    mirroredProductsCount: number;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/network/mirror", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  createPaymentLink(input: {
+    customerName?: string;
+    customerPhone?: string;
+    productSku?: string;
+    description?: string;
+    amountNaira: number | string;
+  }): Promise<{ status: string; link: PaymentLinkItem; state: VendorState }> {
+    return request("/api/v1/vendor/payment-links", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  deletePaymentLink(slug: string): Promise<VendorState> {
+    return request<VendorState>(`/api/v1/vendor/payment-links/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+    });
+  },
+
+  saveSplitRule(input: {
+    name?: string;
+    supplierSubAccountCode?: string;
+    supplierShareBps: number;
+    resellerShareBps: number;
+    platformFeeBps?: number;
+  }): Promise<{ status: string; rule: SettlementSplitRuleItem; state: VendorState }> {
+    return request("/api/v1/vendor/split-rules", {
+      method: "PUT",
+      ...jsonBody(input),
+    });
+  },
+
+  submitKyc(input: {
+    businessName: string;
+    cacNumber: string;
+    tinNumber?: string;
+    businessAddress?: string;
+    businessCategory?: string;
+    bankCode: string;
+    bankName?: string;
+    accountNumber: string;
+    resolvedAccountName: string;
+    whatsappPhone?: string;
+    instagramHandle?: string;
+    cacDocumentUploaded?: boolean;
+    idDocumentUploaded?: boolean;
+  }): Promise<{ status: string; submission: KycSubmissionItem; state: VendorState }> {
+    return request("/api/v1/vendor/kyc", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  saveTeamMember(input: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: string;
+    status?: "Active" | "Invited" | "Suspended";
+  }): Promise<{ status: string; member: TeamMemberItem; state: VendorState }> {
+    return request("/api/v1/vendor/team", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  deleteTeamMember(idOrEmail: string): Promise<VendorState> {
+    return request<VendorState>(`/api/v1/vendor/team/${encodeURIComponent(idOrEmail)}`, {
+      method: "DELETE",
+    });
+  },
+
+  syncNotifications(input: {
+    readKeys?: string[];
+    dismissedKeys?: string[];
+    markAllRead?: boolean;
+  }): Promise<VendorState> {
+    return request<VendorState>("/api/v1/vendor/notifications/sync", {
       method: "POST",
       ...jsonBody(input),
     });

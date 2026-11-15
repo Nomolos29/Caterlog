@@ -7,11 +7,19 @@
  * implement these interfaces in `packages/integrations` or app layers.
  */
 
+export interface VirtualAccountSplitConfigItem {
+  subAccountCode: string;
+  feePercentage: number;
+  splitPercentage: number;
+  feeBearer: boolean;
+}
+
 export interface CreateVirtualAccountInvoiceRequest {
   orderId: string;
   orderShortCode: string;
   vendorBusinessName: string;
   vendorSubAccountCode?: string | null;
+  incomeSplitConfig?: VirtualAccountSplitConfigItem[];
   customerName?: string | null;
   customerPhone: string;
   expectedAmountKobo: bigint;

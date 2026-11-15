@@ -1,18 +1,29 @@
 import React, { useState, useEffect } from "react";
-import type { ProductItem, OrderItem } from "@/lib/types";
+import type { ProductItem, OrderItem, PaymentLinkItem } from "@/lib/types";
 
 interface PaymentLinksViewProps {
   products: ProductItem[];
   orders: OrderItem[];
+  paymentLinks?: PaymentLinkItem[];
   vendorName: string;
   initialCustomerName?: string;
+  onCreatePaymentLink?: (input: {
+    customerName?: string;
+    productSku?: string;
+    description?: string;
+    amountNaira: number | string;
+  }) => Promise<PaymentLinkItem | null>;
+  onDeletePaymentLink?: (slug: string) => Promise<void>;
 }
 
 export function PaymentLinksView({
   products,
   orders,
+  paymentLinks = [],
   vendorName,
   initialCustomerName = "",
+  onCreatePaymentLink,
+  onDeletePaymentLink,
 }: PaymentLinksViewProps) {
   const [customerName, setCustomerName] = useState(initialCustomerName);
 
@@ -25,7 +36,8 @@ export function PaymentLinksView({
   const [selectedProduct, setSelectedProduct] = useState("");
   const [description, setDescription] = useState("");
   const [copied, setCopied] = useState(false);
-  const [simulatedCheckoutOpen, setSimulatedCheckoutOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [lastCreatedUrl, setLastCreatedUrl] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState<"details" | "transfer" | "success">("details");
 
   const handleSelectProduct = (sku: string) => {
@@ -39,11 +51,31 @@ export function PaymentLinksView({
 
   const previewAmount = Number(amount) || 0;
   const previewFormatted = `₦${previewAmount.toLocaleString()}`;
-  const checkoutUrl = `https://caterlog.store/pay/${encodeURIComponent(vendorName.toLowerCase().replace(/\s+/g, "-"))}?amt=${previewAmount || 10000}`;
+  const checkoutUrl =
+    lastCreatedUrl ||
+    `https://caterlog.store/pay/${encodeURIComponent(vendorName.toLowerCase().replace(/\s+/g, "-"))}?amt=${previewAmount || 10000}`;
 
-  const handleCopyLink = () => {
+  const handleCopyLink = async () => {
+    let targetUrl = checkoutUrl;
+    if (onCreatePaymentLink && (Number(amount) || 10000) > 0) {
+      setCreating(true);
+      try {
+        const created = await onCreatePaymentLink({
+          customerName: customerName || undefined,
+          productSku: selectedProduct || undefined,
+          description: description || undefined,
+          amountNaira: Number(amount) || 10000,
+        });
+        if (created?.checkoutUrl) {
+          targetUrl = created.checkoutUrl;
+          setLastCreatedUrl(created.checkoutUrl);
+        }
+      } finally {
+        setCreating(false);
+      }
+    }
     if (typeof window !== "undefined") {
-      navigator.clipboard.writeText(checkoutUrl);
+      navigator.clipboard.writeText(targetUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -292,6 +324,66 @@ export function PaymentLinksView({
           <p className="text-[11px] text-gray-400 mt-3 text-center">Interactive preview: Click buttons inside the phone to test.</p>
         </div>
       </div>
+
+      {/* Active Payment Links from Database */}
+      {paymentLinks.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-base font-bold text-gray-900">Active Payment Links ({paymentLinks.length})</h2>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
+              Synced with Database
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm min-w-[650px]">
+              <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+                <tr>
+                  <th className="py-3 px-6">Slug</th>
+                  <th className="py-3 px-6">Customer / Product</th>
+                  <th className="py-3 px-6">Amount</th>
+                  <th className="py-3 px-6">Checkout URL</th>
+                  <th className="py-3 px-6 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {paymentLinks.map((pl) => (
+                  <tr key={pl.id} className="hover:bg-gray-50/60 transition-colors">
+                    <td className="py-3.5 px-6 font-mono text-xs font-bold text-emerald-800">{pl.slug}</td>
+                    <td className="py-3.5 px-6 text-xs text-gray-700">
+                      <div className="font-semibold text-gray-900">{pl.customerName || "Any Shopper"}</div>
+                      <div className="text-[11px] text-gray-400">{pl.productSku || pl.description || "Custom Link"}</div>
+                    </td>
+                    <td className="py-3.5 px-6 font-bold text-gray-900 text-xs">
+                      {pl.amountFormatted || `₦${(pl.amountNaira ?? 0).toLocaleString()}`}
+                    </td>
+                    <td className="py-3.5 px-6 font-mono text-xs text-gray-500 truncate max-w-[220px]">
+                      {pl.checkoutUrl}
+                    </td>
+                    <td className="py-3.5 px-6 text-right space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard.writeText(pl.checkoutUrl)}
+                        className="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer"
+                      >
+                        Copy
+                      </button>
+                      {onDeletePaymentLink && (
+                        <button
+                          type="button"
+                          onClick={() => void onDeletePaymentLink(pl.slug)}
+                          className="text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Table: Recent Payment Links */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">

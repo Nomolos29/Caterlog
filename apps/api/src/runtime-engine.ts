@@ -36,14 +36,24 @@ import type {
   PaymentReconciliationResult,
   QuickReplyOption,
   RuntimeCartItem,
+  RuntimeCommerceEvent,
   RuntimeDiscount,
+  RuntimeKycSubmission,
+  RuntimeMarketBoostListing,
   RuntimeOrder,
   RuntimeOrderItem,
+  RuntimePaymentLink,
+  RuntimePayoutWithdrawal,
   RuntimeProduct,
   RuntimeProductVariant,
+  RuntimeResellerMirror,
+  RuntimeSettlementSplitRule,
   RuntimeShippingZone,
   RuntimeSnapshot,
+  RuntimeSupplierProfile,
+  RuntimeTeamMember,
   RuntimeVendor,
+  RuntimeVendorNotification,
 } from "./runtime-types.ts";
 import { createMemoryPersistence } from "./persistence/memory.ts";
 import type { PersistenceStore } from "./persistence/types.ts";
@@ -55,12 +65,22 @@ export type {
   ChatThreadMessage,
   PaymentReconciliationResult,
   QuickReplyOption,
+  RuntimeCommerceEvent,
   RuntimeDiscount,
+  RuntimeKycSubmission,
+  RuntimeMarketBoostListing,
   RuntimeOrder,
+  RuntimePaymentLink,
+  RuntimePayoutWithdrawal,
   RuntimeProduct,
+  RuntimeResellerMirror,
+  RuntimeSettlementSplitRule,
   RuntimeShippingZone,
   RuntimeSnapshot,
+  RuntimeSupplierProfile,
+  RuntimeTeamMember,
   RuntimeVendor,
+  RuntimeVendorNotification,
 } from "./runtime-types.ts";
 
 
@@ -100,6 +120,48 @@ export function computeDeterministicImagePhash(imageSource: string): string {
 }
 
 /**
+ * Resolves the structured 3-5 letter SKU prefix from a product's name and category.
+ */
+export function resolveStructuredSkuPrefix(name: string, category?: string): string {
+  const n = (name || "").toUpperCase();
+  const c = (category || "").toUpperCase();
+  const combined = `${n} ${c}`;
+
+  if (/\b(BAG|TOTE|HANDBAG|PURSE|BACKPACK|CLUTCH|WALLET|POUCH)(?:S|ES)?\b/.test(n)) return "BAG";
+  if (/\b(HEEL|SHOE|BOOT|SNEAKER|SLIDE|SANDAL|LOAFER|MULE|SLIPPER|STILETTO|FOOTWEAR)(?:S|ES)?\b/.test(n)) return "SHOE";
+  if (/\b(FLASK|BOTTLE|TUMBLER|MUG|THERMOS)(?:S|ES)?\b/.test(n)) return "FLASK";
+  if (/\b(WIG|FRONTAL|CLOSURE|BRAID|BUNDLE|HAIR EXTENSION)(?:S|ES)?\b/.test(combined)) return "HAIR";
+  if (/\b(PERFUME|OUD|SCENT|FRAGRANCE|COLOGNE|DIFFUSER|BODY MIST)(?:S|ES)?\b/.test(combined)) return "SCNT";
+  if (/\b(WATCH|NECKLACE|BRACELET|EARRING|RING|JEWELRY|SUNGLASS|EYEGLASS|CHAIN)(?:S|ES)?\b/.test(combined)) return "JEWL";
+  if (/\b(PHONE|IPHONE|SAMSUNG|LAPTOP|MACBOOK|EARBUD|AIRPOD|POWERBANK|CHARGER|TABLET|GADGET)(?:S|ES)?\b/.test(combined)) return "TECH";
+  if (/\b(TV|FRIDGE|FREEZER|FAN|IRON|SPEAKER|INVERTER|GENERATOR|APPLIANCE|MICROWAVE)(?:S|ES)?\b/.test(combined)) return "ELEC";
+  if (/\b(POT|PAN|BLENDER|KETTLE|PLATE|CUTLERY|KITCHEN|COOKWARE|UTENSIL)(?:S|ES)?\b/.test(combined)) return "KITCH";
+  if (/\b(FOOD|LUNCH|CAKE|SNACK|RICE|MEAL|CHOPS|PASTRY|HONEY|SPICE|GROCER|CATERING)(?:S|ES)?\b/.test(combined)) return "FOOD";
+  if (/\b(COSMETIC|CREAM|LOTION|SERUM|SOAP|BUTTER|MAKEUP|BEAUTY|SKINCARE|GLOW|CLEANSER)(?:S|ES)?\b/.test(combined)) return "GLOW";
+  if (/\b(DRESS|SHIRT|GOWN|HOODIE|TOP|PANTS|TROUSER|SUIT|JACKET|WEAR|CLOTH|ABAYA|ANKARA|KAFTAN|SKIRT|JEAN|APPAREL)(?:S|ES)?\b/.test(combined)) return "WEAR";
+  if (/\b(BED|SHEET|DUVET|PILLOW|CURTAIN|RUG|LAMP|CHAIR|TABLE|DECOR|FURNITURE)(?:S|ES)?\b/.test(combined)) return "HOME";
+  if (/\b(VITAMIN|SUPPLEMENT|GYM|TEA|HERB|FITNESS|WELLNESS|HEALTH)(?:S|ES)?\b/.test(combined)) return "HLTH";
+  if (/\b(BABY|KID|TOY|DIAPER|STROLLER|INFANT)(?:S|ES)?\b/.test(combined)) return "KIDS";
+  if (/\b(BOOK|JOURNAL|PLANNER|PEN|STATIONERY|CRAFT)(?:S|ES)?\b/.test(combined)) return "BOOK";
+  if (/\b(CAR|AUTO|TIRE|BATTERY|TOOL|HELMET)(?:S|ES)?\b/.test(combined)) return "AUTO";
+
+  if (/SHOES|BAGS|FOOTWEAR/.test(c)) return "SHOE";
+  if (/FASHION|APPAREL/.test(c)) return "WEAR";
+  if (/BEAUTY|SKINCARE|COSMETIC/.test(c)) return "GLOW";
+
+  const catToken = c.replace(/[^A-Z0-9]/g, "").slice(0, 4);
+  if (catToken.length >= 3 && catToken !== "GENE" && catToken !== "CUST") {
+    return catToken;
+  }
+
+  const firstWord = n.trim().split(/\s+/)[0]?.replace(/[^A-Z0-9]/g, "") ?? "";
+  if (firstWord.length >= 3) {
+    return firstWord.slice(0, 4);
+  }
+  return "ITEM";
+}
+
+/**
  * Generates a clean, consistent, sequential SKU (Content ID) for a product
  * based on category/name prefix (e.g. SHOE-03, BAG-02, FLASK-01, WEAR-01)
  * avoiding duplicates and inconsistent fallback codes.
@@ -109,28 +171,9 @@ export function generateConsistentSku(
   category?: string,
   existingProducts: Array<{ skuCode: string }> = []
 ): string {
-  const combined = `${name} ${category ?? ""}`.toUpperCase();
-  let prefix = "ITEM";
-  if (/HEEL|SHOE|BOOT|SNEAKER|SLIDE|SANDAL|FOOTWEAR/.test(combined)) {
-    prefix = "SHOE";
-  } else if (/BAG|TOTE|HANDBAG|PURSE|BACKPACK|CLUTCH/.test(combined)) {
-    prefix = "BAG";
-  } else if (/FLASK|BOTTLE|CUP|TUMBLER|MUG/.test(combined)) {
-    prefix = "FLASK";
-  } else if (/DRESS|SHIRT|GOWN|HOODIE|TOP|PANTS|SUIT|JACKET|WEAR|CLOTH/.test(combined)) {
-    prefix = "WEAR";
-  } else if (/FOOD|LUNCH|CAKE|SNACK|RICE|MEAL|KITCHEN/.test(combined)) {
-    prefix = "FOOD";
-  } else if (/COSMETIC|CREAM|LOTION|PERFUME|BEAUTY|SKIN/.test(combined)) {
-    prefix = "GLOW";
-  } else {
-    const firstWord = name.trim().split(/\s+/)[0]?.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-    if (firstWord && firstWord.length >= 3) {
-      prefix = firstWord.slice(0, 6);
-    }
-  }
+  const prefix = resolveStructuredSkuPrefix(name, category);
+  const existingUpper = new Set(existingProducts.map((p) => p.skuCode.trim().toUpperCase()));
 
-  const existingUpper = new Set(existingProducts.map((p) => p.skuCode.toUpperCase()));
   let index = 1;
   let candidate = `${prefix}-${String(index).padStart(2, "0")}`;
   while (existingUpper.has(candidate)) {
@@ -138,6 +181,121 @@ export function generateConsistentSku(
     candidate = `${prefix}-${String(index).padStart(2, "0")}`;
   }
   return candidate;
+}
+
+/**
+ * Generates a structured variant SKU (`<PARENT_SKU>-<VARIANT_TOKEN>`, e.g. `SHOE-01-39GLD`).
+ */
+export function generateVariantSku(
+  parentSku: string,
+  variantName: string,
+  index: number,
+  usedSkus: Set<string> = new Set()
+): string {
+  const cleanParent = parentSku.trim().toUpperCase();
+  const raw = (variantName || "").toUpperCase();
+
+  const colorMap: Array<[RegExp, string]> = [
+    [/\bBLACK\b/, "BLK"],
+    [/\bGOLD\b/, "GLD"],
+    [/\bSILVER\b/, "SLV"],
+    [/\bWHITE\b/, "WHT"],
+    [/\bGREEN\b/, "GRN"],
+    [/\bBLUE\b/, "BLU"],
+    [/\bPINK\b/, "PNK"],
+    [/\bBROWN\b/, "BRN"],
+    [/\bPURPLE\b/, "PRP"],
+    [/\bYELLOW\b/, "YLW"],
+    [/\bORANGE\b/, "ORG"],
+    [/\bRED\b/, "RED"],
+    [/\bTAN\b/, "TAN"],
+    [/\bNAVY\b/, "NVY"],
+    [/\bNUDE\b/, "NUD"],
+  ];
+
+  const sizeMatch = raw.match(/\b(\d{1,4}(?:ML|L|KG|G|IN|CM)?|XXXL|XXL|XL|XS|SM|MD|LG)\b/);
+  let colorCode = "";
+  for (const [regex, abbr] of colorMap) {
+    if (regex.test(raw)) {
+      colorCode = abbr;
+      break;
+    }
+  }
+
+  let suffix = "";
+  if (sizeMatch && colorCode) {
+    suffix = `${sizeMatch[1]}${colorCode}`;
+  } else if (sizeMatch) {
+    const rest = raw
+      .replace(sizeMatch[0], "")
+      .replace(/\b(SIZE|COLOR|COLOUR|VOLUME|LENGTH)\b/g, "")
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 3);
+    suffix = `${sizeMatch[1]}${rest}`;
+  } else if (colorCode) {
+    suffix = colorCode;
+  } else {
+    suffix =
+      raw
+        .replace(/\b(SIZE|COLOR|COLOUR|VARIANT)\b/g, "")
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 6) || `V${index + 1}`;
+  }
+
+  let candidate = `${cleanParent}-${suffix}`;
+  let counter = 2;
+  while (usedSkus.has(candidate)) {
+    candidate = `${cleanParent}-${suffix}${counter}`;
+    counter++;
+  }
+  usedSkus.add(candidate);
+  return candidate;
+}
+
+/**
+ * Generates a guaranteed-unique, human-friendly Order ShortCode (`ORD-<SEQ>`, e.g. `ORD-883`).
+ *
+ * Logic:
+ * 1. Scans all existing orders and previously allocated codes to find the highest numeric sequence (starting at base 880).
+ * 2. Increments monotonically (`max + 1`) and verifies against both active orders and the lifetime `allocatedCodes` set
+ *    so deleted, expired, or concurrent orders can never collide or reuse an order number.
+ * 3. Immediately reserves the code in `allocatedCodes` before returning.
+ */
+export function generateUniqueOrderShortCode(
+  existingOrders: Array<{ shortCode: string }> = [],
+  allocatedCodes: Set<string> = new Set(),
+  minBaseSequence = 880
+): { shortCode: string; sequenceNumber: number } {
+  const existingUpper = new Set<string>();
+  let maxSeq = minBaseSequence;
+
+  for (const order of existingOrders) {
+    const code = order.shortCode.trim().toUpperCase();
+    existingUpper.add(code);
+    const match = /^ORD-(\d+)(?:-[A-Z0-9]+)?$/i.exec(code);
+    if (match) {
+      maxSeq = Math.max(maxSeq, Number(match[1]));
+    }
+  }
+
+  for (const code of allocatedCodes) {
+    const upper = code.trim().toUpperCase();
+    existingUpper.add(upper);
+    const match = /^ORD-(\d+)(?:-[A-Z0-9]+)?$/i.exec(upper);
+    if (match) {
+      maxSeq = Math.max(maxSeq, Number(match[1]));
+    }
+  }
+
+  let nextSeq = maxSeq + 1;
+  let candidate = `ORD-${nextSeq}`;
+  while (existingUpper.has(candidate) || allocatedCodes.has(candidate)) {
+    nextSeq++;
+    candidate = `ORD-${nextSeq}`;
+  }
+
+  allocatedCodes.add(candidate);
+  return { shortCode: candidate, sequenceNumber: nextSeq };
 }
 
 export class CaterlogStage1Engine {
@@ -299,6 +457,16 @@ export class CaterlogStage1Engine {
   ];
 
   public chatMessages: ChatThreadMessage[] = [];
+  public marketBoostListing: RuntimeMarketBoostListing | null = null;
+  public suppliers: RuntimeSupplierProfile[] = [];
+  public resellerMirrors: RuntimeResellerMirror[] = [];
+  public paymentLinks: RuntimePaymentLink[] = [];
+  public payoutWithdrawals: RuntimePayoutWithdrawal[] = [];
+  public settlementSplitRules: RuntimeSettlementSplitRule[] = [];
+  public kycSubmissions: RuntimeKycSubmission[] = [];
+  public teamMembers: RuntimeTeamMember[] = [];
+  public notifications: RuntimeVendorNotification[] = [];
+  public commerceEvents: RuntimeCommerceEvent[] = [];
 
   public readonly buyerSessions = new Map<string, BuyerConversationSession>();
   public readonly buyerCarts = new Map<string, RuntimeCartItem[]>();
@@ -325,6 +493,8 @@ export class CaterlogStage1Engine {
     this.buyerCarts.delete(phone);
   }
   private readonly processedTxRefs = new Set<string>();
+  private readonly allocatedOrderCodes = new Set<string>(["ORD-881", "ORD-882"]);
+  private highestOrderSeq = 882;
   private readonly activeCopilotTimers = new Map<string, NodeJS.Timeout>();
   private lastVendorReplyInBuyerThreadAt: Date | null = null;
   private persistence: PersistenceStore = createMemoryPersistence();
@@ -344,14 +514,25 @@ export class CaterlogStage1Engine {
     return this.jobScheduler;
   }
 
-  public createMagicLinkToken(): string {
+  public createMagicLinkToken(phone?: string, email?: string): string {
     const token = crypto.randomBytes(24).toString("hex");
+    const expiresAt = new Date(Date.now() + 15 * 60_000);
     this.magicTokens.set(token, {
       token,
       vendorSlug: this.vendor.slug,
-      expiresAt: new Date(Date.now() + 15 * 60_000),
+      expiresAt,
       used: false,
     });
+    if (this.persistence.saveAuthSession) {
+      this.persistInBackground("saveAuthSession", () =>
+        this.persistence.saveAuthSession!({
+          token,
+          phone: phone ?? this.vendor.whatsappPhone,
+          email: email ?? `${this.vendor.slug}@caterlog.store`,
+          expiresAt,
+        })
+      );
+    }
     return token;
   }
 
@@ -361,6 +542,11 @@ export class CaterlogStage1Engine {
       return null;
     }
     record.used = true;
+    if (this.persistence.consumeAuthSession) {
+      this.persistInBackground("consumeAuthSession", async () => {
+        await this.persistence.consumeAuthSession!(token);
+      });
+    }
     return { token: record.token, vendorSlug: record.vendorSlug };
   }
 
@@ -404,6 +590,21 @@ export class CaterlogStage1Engine {
     }
   }
 
+  /**
+   * Re-hydrates the in-memory engine state directly from the durable database
+   * snapshot (after flushing any queued writes) so the Dashboard and PostgreSQL
+   * are guaranteed 100% in sync.
+   */
+  public async syncFromDatabase(): Promise<void> {
+    if (this.persistence.mode !== "database") return;
+    await this.flushPersistence();
+    const snapshot = await this.persistence.loadSnapshot(this.vendor.slug);
+    if (snapshot) {
+      this.applySnapshot(snapshot);
+      await this.broadcastStateChange();
+    }
+  }
+
   public takeSnapshot(): RuntimeSnapshot {
     return {
       vendor: { ...this.vendor },
@@ -412,6 +613,18 @@ export class CaterlogStage1Engine {
       discounts: this.discounts.map((discount) => ({ ...discount })),
       orders: this.orders.map((order) => ({ ...order })),
       processedTransactionRefs: Array.from(this.processedTxRefs),
+      chatMessages: this.chatMessages.map((m) => ({ ...m })),
+      buyerSessions: Array.from(this.buyerSessions.values()).map((s) => ({ ...s })),
+      marketBoostListing: this.marketBoostListing ? { ...this.marketBoostListing } : null,
+      suppliers: this.suppliers.map((s) => ({ ...s })),
+      resellerMirrors: this.resellerMirrors.map((m) => ({ ...m })),
+      paymentLinks: this.paymentLinks.map((l) => ({ ...l })),
+      payoutWithdrawals: this.payoutWithdrawals.map((w) => ({ ...w })),
+      settlementSplitRules: this.settlementSplitRules.map((r) => ({ ...r })),
+      kycSubmissions: this.kycSubmissions.map((k) => ({ ...k })),
+      teamMembers: this.teamMembers.map((t) => ({ ...t })),
+      notifications: this.notifications.map((n) => ({ ...n })),
+      commerceEvents: this.commerceEvents.map((e) => ({ ...e })),
     };
   }
 
@@ -437,33 +650,114 @@ export class CaterlogStage1Engine {
 
   private applySnapshot(snapshot: RuntimeSnapshot): void {
     this.vendor = { ...snapshot.vendor };
+    const envPhoneId =
+      this.integrationConfig.whatsapp.defaultPhoneNumberId?.trim() ||
+      process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+    if (
+      envPhoneId &&
+      envPhoneId !== "105992837465001" &&
+      (!this.vendor.whatsappPhoneId || this.vendor.whatsappPhoneId === "105992837465001")
+    ) {
+      this.vendor.whatsappPhoneId = envPhoneId;
+      this.persistInBackground("sync-vendor-whatsapp-phone-id", () =>
+        this.persistence.saveVendor(this.vendor)
+      );
+    }
+    const envVendorPhone = process.env.VENDOR_WHATSAPP_PHONE?.trim();
+    if (
+      envVendorPhone &&
+      (!this.vendor.whatsappPhone || this.vendor.whatsappPhone === "+2348031234567")
+    ) {
+      this.vendor.whatsappPhone = envVendorPhone;
+    }
     if (process.env.COPILOT_MODE) {
       this.vendor.copilotMode = process.env.COPILOT_MODE as DomainCopilotMode;
     } else if (!snapshot.vendor.copilotMode || snapshot.vendor.copilotMode === "COPILOT") {
       this.vendor.copilotMode = "FULL_AUTO";
     }
-    if (snapshot.products && snapshot.products.length > 0) {
-      const seedMap = new Map(this.products.map((p) => [p.skuCode.toUpperCase(), p]));
-      this.products = snapshot.products.map((product) => {
-        const seed = seedMap.get(product.skuCode.toUpperCase());
-        const variants =
-          product.variants && product.variants.length > 0 ? product.variants : seed?.variants;
-        return {
-          ...product,
-          variants,
-        };
-      });
-    }
-    if (snapshot.shippingZones && snapshot.shippingZones.length > 0) {
-      this.shippingZones = snapshot.shippingZones.map((zone) => ({ ...zone }));
-    }
-    if (snapshot.discounts && snapshot.discounts.length > 0) {
-      this.discounts = snapshot.discounts.map((discount) => ({ ...discount }));
+    if (this.persistence.mode === "database") {
+      this.products = (snapshot.products ?? []).map((product) => ({
+        ...product,
+        variants: product.variants ? product.variants.map((v) => ({ ...v })) : undefined,
+      }));
+      this.shippingZones = (snapshot.shippingZones ?? []).map((zone) => ({ ...zone }));
+      this.discounts = (snapshot.discounts ?? []).map((discount) => ({ ...discount }));
+    } else {
+      if (snapshot.products && snapshot.products.length > 0) {
+        const seedMap = new Map(this.products.map((p) => [p.skuCode.toUpperCase(), p]));
+        this.products = snapshot.products.map((product) => {
+          const seed = seedMap.get(product.skuCode.toUpperCase());
+          const variants =
+            product.variants && product.variants.length > 0 ? product.variants : seed?.variants;
+          return {
+            ...product,
+            variants,
+          };
+        });
+      }
+      if (snapshot.shippingZones && snapshot.shippingZones.length > 0) {
+        this.shippingZones = snapshot.shippingZones.map((zone) => ({ ...zone }));
+      }
+      if (snapshot.discounts && snapshot.discounts.length > 0) {
+        this.discounts = snapshot.discounts.map((discount) => ({ ...discount }));
+      }
     }
     this.orders = snapshot.orders.map((order) => ({ ...order }));
+    for (const order of this.orders) {
+      const clean = order.shortCode.trim().toUpperCase();
+      this.allocatedOrderCodes.add(clean);
+      const match = /^ORD-(\d+)(?:-[A-Z0-9]+)?$/i.exec(clean);
+      if (match) {
+        const num = Number.parseInt(match[1], 10);
+        if (Number.isFinite(num) && num > this.highestOrderSeq) {
+          this.highestOrderSeq = num;
+        }
+      }
+    }
     this.processedTxRefs.clear();
     for (const ref of snapshot.processedTransactionRefs) {
       this.processedTxRefs.add(ref);
+    }
+    if (snapshot.chatMessages) {
+      this.chatMessages = snapshot.chatMessages.map((m) => ({ ...m }));
+    }
+    if (snapshot.buyerSessions) {
+      this.buyerSessions.clear();
+      for (const s of snapshot.buyerSessions) {
+        this.buyerSessions.set(s.buyerPhone, { ...s });
+      }
+    }
+    if (snapshot.marketBoostListing !== undefined) {
+      this.marketBoostListing = snapshot.marketBoostListing
+        ? { ...snapshot.marketBoostListing }
+        : null;
+    }
+    if (snapshot.suppliers) {
+      this.suppliers = snapshot.suppliers.map((s) => ({ ...s }));
+    }
+    if (snapshot.resellerMirrors) {
+      this.resellerMirrors = snapshot.resellerMirrors.map((m) => ({ ...m }));
+    }
+    if (snapshot.paymentLinks) {
+      this.paymentLinks = snapshot.paymentLinks.map((l) => ({ ...l }));
+    }
+    if (snapshot.payoutWithdrawals) {
+      this.payoutWithdrawals = snapshot.payoutWithdrawals.map((w) => ({ ...w }));
+    }
+    if (snapshot.settlementSplitRules) {
+      this.settlementSplitRules = snapshot.settlementSplitRules.map((r) => ({ ...r }));
+    }
+    if (snapshot.kycSubmissions) {
+      this.kycSubmissions = snapshot.kycSubmissions.map((k) => ({ ...k }));
+    }
+    if (snapshot.teamMembers) {
+      this.teamMembers = snapshot.teamMembers.map((t) => ({ ...t }));
+    }
+    if (snapshot.notifications) {
+      this.notifications = snapshot.notifications.map((n) => ({ ...n }));
+    }
+    if (snapshot.commerceEvents) {
+      this.commerceEvents = snapshot.commerceEvents.map((e) => ({ ...e }));
     }
   }
 
@@ -556,6 +850,13 @@ export class CaterlogStage1Engine {
       }
     }
 
+    const resolvedVendorPhoneId =
+      this.vendor.whatsappPhoneId && this.vendor.whatsappPhoneId !== "105992837465001"
+        ? this.vendor.whatsappPhoneId
+        : this.integrationConfig.whatsapp.defaultPhoneNumberId ||
+          process.env.WHATSAPP_PHONE_NUMBER_ID ||
+          this.vendor.whatsappPhoneId;
+
     await this.whatsapp.sendWhatsAppMessage({
       toPhone: params.toPhone,
       text: params.text,
@@ -565,7 +866,7 @@ export class CaterlogStage1Engine {
       quickReplies: params.quickReplies,
       headerText: params.headerText,
       footerText: params.footerText,
-      vendorPhoneId: this.vendor.whatsappPhoneId,
+      vendorPhoneId: resolvedVendorPhoneId,
     });
 
     this.appendChat({
@@ -2229,17 +2530,25 @@ export class CaterlogStage1Engine {
             })
           : [];
 
+      const customFieldLines =
+        product.customFields && Object.keys(product.customFields).length > 0
+          ? Object.entries(product.customFields).map(([k, v]) => `• ${k}: *${v}*`)
+          : [];
+
       const promptText = [
         `📦 *${product.name}* (\`${product.skuCode}\`)`,
         product.description ? `_${product.description}_` : "",
         `📂 Category: *${product.category || "General"}*`,
         `💰 Price: *${priceDisplay}*`,
         `🔢 Available Stock: *${Math.max(0, product.stockTotal - product.stockReserved)} unit(s)*`,
+        ...(customFieldLines.length > 0 ? [``, `✨ *Specifications:*`, ...customFieldLines] : []),
         ...(variantLines.length > 0
           ? [``, `🎛️ *Available Options & Live Stock:*`, ...variantLines]
           : []),
         ``,
-        `_Tap an option below to add to cart, or view other items in this category:_`,
+        variantLines.length > 0
+          ? `_Tap an option below or reply with the option number (e.g. *1*) to add to cart:_`
+          : `_Tap below to add to cart or browse more items in this category:_`,
       ]
         .filter(Boolean)
         .join("\n");
@@ -2600,10 +2909,16 @@ export class CaterlogStage1Engine {
     }
 
     const shortCode = this.nextOrderShortCode();
+    const orderId = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + this.vendor.reservationTtlMinutes * 60 * 1000);
 
+    const incomeSplitConfig = this.computeOrderSplitConfig(
+      rawCart.map((it) => ({ productId: it.productId, quantity: it.quantity })),
+      pricing.totalAmountKobo
+    );
+
     const virtualAccount = await this.monnify.createDynamicVirtualAccount({
-      orderId: `ord-${Date.now()}`,
+      orderId,
       orderShortCode: shortCode,
       vendorBusinessName: this.vendor.businessName,
       customerName: params.buyerName,
@@ -2611,10 +2926,11 @@ export class CaterlogStage1Engine {
       expectedAmountKobo: pricing.totalAmountKobo,
       expiresAt,
       vendorSubAccountCode: this.vendor.monnifySubAccountCode,
+      incomeSplitConfig,
     });
 
-    const orderItems: RuntimeOrderItem[] = rawCart.map((it, idx) => ({
-      id: `item-${Date.now()}-${idx}`,
+    const orderItems: RuntimeOrderItem[] = rawCart.map((it) => ({
+      id: crypto.randomUUID(),
       productId: it.productId,
       productSku: it.productSku,
       productName: it.productName,
@@ -2634,7 +2950,7 @@ export class CaterlogStage1Engine {
         : `${primaryItem.productName} + ${rawCart.length - 1} more item${rawCart.length > 2 ? "s" : ""}`;
 
     const newOrder: RuntimeOrder = {
-      id: `ord-${Date.now()}`,
+      id: orderId,
       shortCode,
       customerPhone: params.buyerPhone,
       customerName: params.buyerName,
@@ -2664,15 +2980,34 @@ export class CaterlogStage1Engine {
 
     this.orders.unshift(newOrder);
 
-    // Mirror the reservation, invoice and order atomically
-    await this.persistNow("createOrder", async () => {
+    // Mirror the reservation, invoice and order atomically; roll back in-memory
+    // state if persistence fails so the Dashboard and Database never diverge.
+    try {
+      await this.persistNow("createOrder", async () => {
+        if (activeDiscount && discountAmountKobo > 0n) {
+          await this.persistence.saveDiscount(activeDiscount);
+        }
+        const primaryProd =
+          this.products.find((p) => p.id === primaryItem.productId) ?? this.products[0]!;
+        await this.persistence.createOrder(newOrder, primaryProd);
+      });
+    } catch (err) {
+      this.orders = this.orders.filter((o) => o.shortCode !== newOrder.shortCode);
+      for (const item of rawCart) {
+        const prod = this.products.find((p) => p.id === item.productId);
+        if (prod) {
+          if (item.variantId && prod.variants) {
+            const v = prod.variants.find((vr) => vr.id === item.variantId);
+            if (v) v.stockReserved = Math.max(0, v.stockReserved - item.quantity);
+          }
+          prod.stockReserved = Math.max(0, prod.stockReserved - item.quantity);
+        }
+      }
       if (activeDiscount && discountAmountKobo > 0n) {
-        await this.persistence.saveDiscount(activeDiscount);
+        activeDiscount.usedCount = Math.max(0, activeDiscount.usedCount - 1);
       }
-      for (const p of affectedProducts) {
-        await this.persistence.createOrder(newOrder, p);
-      }
-    });
+      throw err;
+    }
 
     this.triggerRealtimeCatalogSync();
 
@@ -2779,14 +3114,20 @@ export class CaterlogStage1Engine {
     return newOrder;
   }
 
-  /** Allocates the next order code from the highest existing code, not the array length. */
+  /**
+   * Allocates the next globally unique order code (`ORD-NNN`) from the highest
+   * sequence across all active orders, lifetime allocated codes, and persisted history.
+   */
   private nextOrderShortCode(): string {
-    let max = 880;
-    for (const order of this.orders) {
-      const match = /^ORD-(\d+)$/i.exec(order.shortCode);
-      if (match) max = Math.max(max, Number(match[1]));
+    const { shortCode, sequenceNumber } = generateUniqueOrderShortCode(
+      this.orders,
+      this.allocatedOrderCodes,
+      this.highestOrderSeq
+    );
+    if (Number.isFinite(sequenceNumber) && sequenceNumber > this.highestOrderSeq) {
+      this.highestOrderSeq = sequenceNumber;
     }
-    return `ORD-${max + 1}`;
+    return shortCode;
   }
 
   private isDiscountUsable(discount: RuntimeDiscount, now = new Date()): boolean {
@@ -3247,6 +3588,7 @@ export class CaterlogStage1Engine {
                 prod.stockReserved = prod.variants.reduce((sum, v) => sum + v.stockReserved, 0);
               }
               this.persistInBackground("updateStockOnPayment", () => this.persistence.saveProduct(prod));
+              this.syncSupplierInventoryOnSale(prod, item.quantity);
             }
           }
         } else if (product) {
@@ -3269,6 +3611,7 @@ export class CaterlogStage1Engine {
             product.stockReserved = product.variants.reduce((sum, v) => sum + v.stockReserved, 0);
           }
           this.persistInBackground("updateStockOnPayment", () => this.persistence.saveProduct(product));
+          this.syncSupplierInventoryOnSale(product, order.quantity);
         }
 
         order.reservationReleased = false;
@@ -3728,6 +4071,35 @@ export class CaterlogStage1Engine {
     return this.vendor;
   }
 
+  public updateVendorProfile(input: {
+    businessName?: string;
+    whatsappPhone?: string;
+    instagramHandle?: string;
+    baseState?: string;
+    baseCity?: string;
+  }): RuntimeVendor {
+    if (typeof input.businessName === "string" && input.businessName.trim()) {
+      this.vendor.businessName = input.businessName.trim();
+    }
+    if (typeof input.whatsappPhone === "string" && input.whatsappPhone.trim()) {
+      const cleanPhone = input.whatsappPhone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
+      this.vendor.whatsappPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
+    }
+    if (typeof input.instagramHandle === "string") {
+      const cleanIg = input.instagramHandle.trim().replace(/^@/, "");
+      this.vendor.instagramHandle = cleanIg ? `@${cleanIg}` : undefined;
+    }
+    if (typeof input.baseState === "string" && input.baseState.trim()) {
+      this.vendor.baseState = input.baseState.trim();
+    }
+    if (typeof input.baseCity === "string" && input.baseCity.trim()) {
+      this.vendor.baseCity = input.baseCity.trim();
+    }
+    this.persistInBackground("saveVendor", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+    return this.vendor;
+  }
+
   public onboardVendorProfile(input: {
     businessName: string;
     whatsappPhone: string;
@@ -3829,13 +4201,25 @@ export class CaterlogStage1Engine {
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const key = `${formattedPhone}:${purpose}`;
+    const expiresAtMs = Date.now() + 10 * 60 * 1000; // 10 minutes
     this.activeOtps.set(key, {
       code,
       phone: formattedPhone,
       purpose,
-      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+      expiresAt: expiresAtMs,
       attempts: 0,
     });
+
+    if (this.persistence.saveOtpVerification) {
+      this.persistInBackground("saveOtpVerification", () =>
+        this.persistence.saveOtpVerification!({
+          phone: formattedPhone,
+          code,
+          purpose,
+          expiresAt: new Date(expiresAtMs),
+        })
+      );
+    }
 
     const purposeDescriptions: Record<string, string> = {
       LOGIN: "Dashboard Login",
@@ -3874,6 +4258,15 @@ export class CaterlogStage1Engine {
       const vendorRecord = this.activeOtps.get(vendorKey);
       if (vendorRecord && vendorRecord.expiresAt > Date.now() && vendorRecord.code === inputCode.trim()) {
         this.activeOtps.delete(vendorKey);
+        if (this.persistence.consumeOtpVerification) {
+          this.persistInBackground("consumeOtpVerification", async () => {
+            await this.persistence.consumeOtpVerification!({
+              phone: this.vendor.whatsappPhone,
+              code: inputCode.trim(),
+              purpose,
+            });
+          });
+        }
         return true;
       }
       return false;
@@ -3893,6 +4286,15 @@ export class CaterlogStage1Engine {
     }
 
     this.activeOtps.delete(key);
+    if (this.persistence.consumeOtpVerification) {
+      this.persistInBackground("consumeOtpVerification", async () => {
+        await this.persistence.consumeOtpVerification!({
+          phone: formattedPhone,
+          code: inputCode.trim(),
+          purpose,
+        });
+      });
+    }
     return true;
   }
 
@@ -3943,9 +4345,13 @@ export class CaterlogStage1Engine {
       throw new Error("Stock must be a whole number greater than or equal to 0.");
     }
 
+    const rawCandidateSku = input.skuCode?.trim().toUpperCase() ?? "";
+    const isExistingSku = rawCandidateSku !== "" && this.products.some((p) => p.skuCode.toUpperCase() === rawCandidateSku);
+    const isGenericRandomSku = /^(SKU|ITEM|PROD)-\d{3,8}$/i.test(rawCandidateSku) && !isExistingSku;
+
     const skuCode = (
-      input.skuCode && input.skuCode.trim() !== ""
-        ? input.skuCode.trim()
+      rawCandidateSku && !isGenericRandomSku
+        ? rawCandidateSku
         : generateConsistentSku(name, input.category, this.products)
     ).toUpperCase();
     if (!/^[A-Z0-9][A-Z0-9_-]{1,31}$/.test(skuCode)) {
@@ -3954,12 +4360,20 @@ export class CaterlogStage1Engine {
       );
     }
 
+    const usedVariantSkus = new Set<string>();
     const normalizedVariants = input.variants?.map((v, i) => {
       const cleanVariantSku = v.skuCode?.toUpperCase() || "";
       const expectedPrefix = `${skuCode}-`;
-      const finalVariantSku = cleanVariantSku.startsWith(expectedPrefix)
+      const isStructuredForParent =
+        cleanVariantSku.startsWith(expectedPrefix) &&
+        cleanVariantSku.length > expectedPrefix.length &&
+        !/^(SKU|ITEM|PROD)-\d+/i.test(cleanVariantSku) &&
+        !usedVariantSkus.has(cleanVariantSku);
+
+      const finalVariantSku = isStructuredForParent
         ? cleanVariantSku
-        : `${skuCode}-${(cleanVariantSku || v.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 6) || String(i + 1)).toUpperCase()}`;
+        : generateVariantSku(skuCode, v.name, i, usedVariantSkus);
+      usedVariantSkus.add(finalVariantSku);
       return {
         ...v,
         skuCode: finalVariantSku,
@@ -4013,7 +4427,7 @@ export class CaterlogStage1Engine {
     }
 
     const created: RuntimeProduct = {
-      id: `prod-${Date.now()}`,
+      id: crypto.randomUUID(),
       skuCode,
       name,
       description: input.description?.trim() || `${name} — available via WhatsApp & Caterlog`,
@@ -4067,8 +4481,26 @@ export class CaterlogStage1Engine {
     }
 
     if (input.variants) {
-      existing.variants = input.variants;
-      existing.stockTotal = input.variants.reduce((sum, v) => sum + (v.stockTotal || 0), 0);
+      const usedVariantSkus = new Set<string>();
+      const expectedPrefix = `${existing.skuCode.toUpperCase()}-`;
+      existing.variants = input.variants.map((v, i) => {
+        const cleanVariantSku = v.skuCode?.toUpperCase() || "";
+        const isStructuredForParent =
+          cleanVariantSku.startsWith(expectedPrefix) &&
+          cleanVariantSku.length > expectedPrefix.length &&
+          !/^(SKU|ITEM|PROD)-\d+/i.test(cleanVariantSku) &&
+          !usedVariantSkus.has(cleanVariantSku);
+
+        const finalVariantSku = isStructuredForParent
+          ? cleanVariantSku
+          : generateVariantSku(existing.skuCode, v.name, i, usedVariantSkus);
+        usedVariantSkus.add(finalVariantSku);
+        return {
+          ...v,
+          skuCode: finalVariantSku,
+        };
+      });
+      existing.stockTotal = existing.variants.reduce((sum, v) => sum + (v.stockTotal || 0), 0);
     } else if (input.stockTotal !== undefined) {
       existing.stockTotal = input.stockTotal;
     }
@@ -4690,6 +5122,701 @@ export class CaterlogStage1Engine {
     };
   }
 
+  // ---------------------------------------------------------
+  // Platform-Wide Database Sync Methods (Market Boost, Network,
+  // Payment Links, Withdrawals, Split Rules, KYC, Team, Notifications)
+  // ---------------------------------------------------------
+
+  public saveMarketBoost(input: Partial<RuntimeMarketBoostListing> & { startingPriceNaira?: number | string }): RuntimeMarketBoostListing {
+    const existing = this.marketBoostListing;
+    const startingPriceKobo =
+      input.startingPriceKobo !== undefined
+        ? input.startingPriceKobo
+        : input.startingPriceNaira !== undefined
+          ? nairaToKobo(Number(String(input.startingPriceNaira).replace(/[^0-9.]/g, "")) || 3000)
+          : existing?.startingPriceKobo ?? nairaToKobo(3000);
+
+    const listing: RuntimeMarketBoostListing = {
+      id: existing?.id ?? `mb-${Date.now()}`,
+      vendorId: this.vendor.id,
+      isPublished: input.isPublished ?? existing?.isPublished ?? true,
+      businessName: input.businessName?.trim() || existing?.businessName || this.vendor.businessName,
+      category: input.category?.trim() || existing?.category || "Fashion & Footwear",
+      baseState: input.baseState?.trim() || existing?.baseState || this.vendor.baseState || "Lagos",
+      baseCity: input.baseCity?.trim() || existing?.baseCity || this.vendor.baseCity || "Ikeja",
+      shippingScope: input.shippingScope ?? existing?.shippingScope ?? "LOCAL_STATE",
+      allowInterstate: input.allowInterstate ?? existing?.allowInterstate ?? false,
+      coveredStates:
+        input.coveredStates && input.coveredStates.length > 0
+          ? input.coveredStates
+          : existing?.coveredStates ?? [input.baseState || this.vendor.baseState || "Lagos"],
+      description: input.description ?? existing?.description ?? "",
+      moq: input.moq?.trim() || existing?.moq || "1 unit",
+      startingPriceKobo,
+      fulfillmentMethod:
+        input.fulfillmentMethod?.trim() ||
+        existing?.fulfillmentMethod ||
+        "Pickup or merchant-arranged delivery",
+      deliveryNote: input.deliveryNote ?? existing?.deliveryNote ?? "",
+      featuredTags: input.featuredTags ?? existing?.featuredTags ?? [],
+      mirroredCategories: Array.from(
+        new Set(
+          (input.mirroredCategories ?? existing?.mirroredCategories ?? [])
+            .map((c) => c.trim())
+            .filter(Boolean)
+        )
+      ),
+      mirroredProductSkus: Array.from(
+        new Set(
+          (input.mirroredProductSkus ?? existing?.mirroredProductSkus ?? [])
+            .map((s) => s.trim().toUpperCase())
+            .filter(Boolean)
+        )
+      ),
+      wholesaleDiscountRules: (
+        input.wholesaleDiscountRules ?? existing?.wholesaleDiscountRules ?? []
+      ).map((rule) => ({
+        ...rule,
+        name: rule.name?.trim() || "Wholesale Discount",
+        value: Math.max(0, Number(rule.value) || 0),
+        targetCategories: rule.targetCategories?.map((c) => c.trim()).filter(Boolean) ?? [],
+        targetProductSkus:
+          rule.targetProductSkus?.map((s) => s.trim().toUpperCase()).filter(Boolean) ?? [],
+        targetResellers: rule.targetResellers?.map((r) => r.trim()).filter(Boolean) ?? [],
+      })),
+      subscriptionPlan: input.subscriptionPlan ?? existing?.subscriptionPlan ?? "STARTER",
+      updatedAt: new Date(),
+    };
+
+    this.marketBoostListing = listing;
+    this.vendor.baseState = listing.baseState;
+    this.vendor.baseCity = listing.baseCity;
+
+    if (this.persistence.saveMarketBoostListing) {
+      this.persistInBackground("saveMarketBoostListing", () =>
+        this.persistence.saveMarketBoostListing!(listing)
+      );
+    }
+    this.recordAuditEvent("MARKET_BOOST_UPDATED", "VENDOR_WEB_DASHBOARD", "VENDOR", this.vendor.id, {
+      isPublished: listing.isPublished,
+      baseState: listing.baseState,
+      shippingScope: listing.shippingScope,
+      coveredStatesCount: listing.coveredStates.length,
+      mirroredCategoriesCount: listing.mirroredCategories.length,
+      mirroredProductsCount: listing.mirroredProductSkus.length,
+      discountRulesCount: listing.wholesaleDiscountRules.length,
+    });
+    void this.broadcastStateChange();
+    return listing;
+  }
+
+  /**
+   * Resolves which products are exposed for mirroring and calculates the effective
+   * wholesale price after applying active Market Boost discount rules (by catalog,
+   * category, specific product, and all/specific network resellers).
+   */
+  public getMarketBoostWholesaleCatalog(resellerIdentifier?: string) {
+    const listing = this.marketBoostListing;
+    const mirroredCats = new Set(
+      (listing?.mirroredCategories ?? []).map((c) => c.toLowerCase())
+    );
+    const mirroredSkus = new Set(
+      (listing?.mirroredProductSkus ?? []).map((s) => s.toUpperCase())
+    );
+    const rules = (listing?.wholesaleDiscountRules ?? []).filter((r) => r.isActive);
+    const cleanReseller = resellerIdentifier?.trim().toLowerCase();
+
+    return this.products
+      .filter((p) => {
+        const cat = (p.category || "General").trim().toLowerCase();
+        return mirroredCats.has(cat) || mirroredSkus.has(p.skuCode.toUpperCase());
+      })
+      .map((p) => {
+        const baseNaira = koboToNaira(p.basePriceKobo);
+        const catLower = (p.category || "General").trim().toLowerCase();
+        const skuUpper = p.skuCode.toUpperCase();
+
+        let bestDiscountNaira = 0;
+        let appliedRuleName: string | null = null;
+
+        for (const rule of rules) {
+          // 1. Check reseller audience
+          if (rule.resellerScope === "SPECIFIC_RESELLERS") {
+            if (!cleanReseller) continue;
+            const targets = (rule.targetResellers ?? []).map((r) => r.toLowerCase());
+            if (!targets.some((t) => t === cleanReseller || cleanReseller.includes(t))) {
+              continue;
+            }
+          }
+
+          // 2. Check product/category/catalog scope
+          const matchesScope =
+            rule.scope === "ENTIRE_MIRROR_CATALOG" ||
+            (rule.scope === "CATEGORY" &&
+              (rule.targetCategories ?? []).some((c) => c.toLowerCase() === catLower)) ||
+            (rule.scope === "SPECIFIC_PRODUCTS" &&
+              (rule.targetProductSkus ?? []).some((s) => s.toUpperCase() === skuUpper));
+
+          if (!matchesScope) continue;
+
+          const discountNaira =
+            rule.discountType === "PERCENTAGE"
+              ? Math.round((baseNaira * Math.min(100, rule.value)) / 100)
+              : Math.min(baseNaira, Math.round(rule.value));
+
+          if (discountNaira > bestDiscountNaira) {
+            bestDiscountNaira = discountNaira;
+            appliedRuleName = rule.name;
+          }
+        }
+
+        const effectiveNaira = Math.max(0, baseNaira - bestDiscountNaira);
+        return {
+          skuCode: p.skuCode,
+          name: p.name,
+          category: p.category || "General",
+          basePriceNaira: baseNaira,
+          discountNaira: bestDiscountNaira,
+          effectiveWholesaleNaira: effectiveNaira,
+          appliedRuleName,
+          availableStock: Math.max(0, p.stockTotal - p.stockReserved),
+        };
+      });
+  }
+
+  public mirrorSupplierCatalog(input: {
+    supplierIdOrSlug: string;
+    productSkus?: string[];
+    defaultMarkupBps?: number;
+    status?: "ACTIVE" | "PAUSED";
+  }): { mirror: RuntimeResellerMirror; mirroredProducts: RuntimeProduct[] } {
+    const cleanTarget = input.supplierIdOrSlug.trim().toLowerCase();
+    const supplier = this.suppliers.find(
+      (s) => s.id.toLowerCase() === cleanTarget || s.slug.toLowerCase() === cleanTarget
+    );
+    if (!supplier) {
+      throw new Error(`Supplier "${input.supplierIdOrSlug}" was not found.`);
+    }
+
+    const existingIdx = this.resellerMirrors.findIndex(
+      (m) => m.supplierId === supplier.id || m.supplierSlug === supplier.slug
+    );
+    const existing = existingIdx >= 0 ? this.resellerMirrors[existingIdx] : undefined;
+
+    const requestedSkus =
+      input.productSkus && input.productSkus.length > 0
+        ? input.productSkus
+        : supplier.catalogProducts.map((cp) => cp.sku);
+
+    const combinedSkus = Array.from(
+      new Set([...(existing?.mirroredProductSkus ?? []), ...requestedSkus])
+    );
+
+    const mirror: RuntimeResellerMirror = {
+      id: existing?.id ?? crypto.randomUUID(),
+      resellerVendorId: this.vendor.id,
+      supplierId: supplier.id,
+      supplierSlug: supplier.slug,
+      supplierName: supplier.name,
+      mirroredProductSkus: combinedSkus,
+      defaultMarkupBps: input.defaultMarkupBps ?? existing?.defaultMarkupBps ?? 2000,
+      status: input.status ?? existing?.status ?? "ACTIVE",
+      lastSyncedAt: new Date(),
+    };
+
+    if (existingIdx >= 0) {
+      this.resellerMirrors[existingIdx] = mirror;
+    } else {
+      this.resellerMirrors.unshift(mirror);
+    }
+
+    if (this.persistence.saveResellerMirror) {
+      this.persistInBackground("saveResellerMirror", () =>
+        this.persistence.saveResellerMirror!(mirror)
+      );
+    }
+
+    // Mirror selected supplier products into vendor's catalog with structured SKUs
+    const mirroredProducts: RuntimeProduct[] = [];
+    for (const sp of supplier.catalogProducts) {
+      if (!requestedSkus.includes(sp.sku)) continue;
+      const alreadyInCatalog = this.products.find(
+        (p) =>
+          p.name.toLowerCase() === sp.name.toLowerCase() ||
+          p.customFields?.supplierSku === sp.sku
+      );
+      if (alreadyInCatalog) {
+        mirroredProducts.push(alreadyInCatalog);
+        continue;
+      }
+      const wholesaleNaira = Number(
+        sp.wholesalePriceNaira ?? (sp as unknown as Record<string, unknown>).wholesaleCost ?? 0
+      );
+      const retailNaira = Number(
+        sp.suggestedRetailNaira ??
+          (sp as unknown as Record<string, unknown>).suggestedRetail ??
+          (wholesaleNaira > 0 ? Math.round(wholesaleNaira * 1.25) : 0)
+      );
+      if (!Number.isFinite(retailNaira) || retailNaira <= 0) {
+        throw new Error(`Supplier product "${sp.name}" (${sp.sku}) is missing a valid wholesale/retail price.`);
+      }
+      const created = this.addProduct({
+        name: sp.name,
+        category: sp.category || supplier.category,
+        basePriceKobo: nairaToKobo(retailNaira),
+        stockTotal: sp.stock || 20,
+        description: `${sp.name} — Fulfilled via ${supplier.name} (${supplier.location})`,
+        customFields: {
+          supplierName: supplier.name,
+          supplierSlug: supplier.slug,
+          supplierSku: sp.sku,
+          wholesalePriceNaira: String(wholesaleNaira || Math.round(retailNaira * 0.8)),
+        },
+      });
+      mirroredProducts.push(created);
+    }
+
+    this.recordAuditEvent("SUPPLIER_CATALOG_MIRRORED", "VENDOR_WEB_DASHBOARD", "PRODUCT", supplier.slug, {
+      supplierName: supplier.name,
+      mirroredCount: combinedSkus.length,
+    });
+    void this.broadcastStateChange();
+    return { mirror, mirroredProducts };
+  }
+
+  public createPaymentLink(input: {
+    customerName?: string;
+    customerPhone?: string;
+    productSku?: string;
+    description?: string;
+    amountNaira: number | string;
+  }): RuntimePaymentLink {
+    const amountNum = Number(String(input.amountNaira).replace(/[^0-9.]/g, ""));
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      throw new Error("Payment link amount must be greater than ₦0.");
+    }
+    const amountKobo = nairaToKobo(amountNum);
+    const slug = `pay-${this.vendor.slug.slice(0, 12)}-${Date.now().toString(36).slice(-5)}`;
+    const dashboardBase = (process.env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+    const checkoutUrl = `${dashboardBase}/pay/${slug}`;
+
+    const link: RuntimePaymentLink = {
+      id: `plink-${Date.now()}`,
+      slug,
+      customerName: input.customerName?.trim() || undefined,
+      customerPhone: input.customerPhone?.trim() || undefined,
+      productSku: input.productSku?.trim() || undefined,
+      description: input.description?.trim() || undefined,
+      amountKobo,
+      checkoutUrl,
+      isActive: true,
+      timesUsed: 0,
+      createdAt: new Date(),
+    };
+
+    this.paymentLinks.unshift(link);
+    if (this.persistence.savePaymentLink) {
+      this.persistInBackground("savePaymentLink", () => this.persistence.savePaymentLink!(link));
+    }
+    this.recordAuditEvent("PAYMENT_LINK_CREATED", "VENDOR_WEB_DASHBOARD", "ORDER", slug, {
+      amountNaira: amountNum,
+      customerName: link.customerName,
+      productSku: link.productSku,
+    });
+    void this.broadcastStateChange();
+    return link;
+  }
+
+  public deletePaymentLink(slug: string): boolean {
+    const idx = this.paymentLinks.findIndex((l) => l.slug === slug);
+    if (idx === -1) return false;
+    this.paymentLinks.splice(idx, 1);
+    if (this.persistence.deletePaymentLink) {
+      this.persistInBackground("deletePaymentLink", () =>
+        this.persistence.deletePaymentLink!(slug)
+      );
+    }
+    void this.broadcastStateChange();
+    return true;
+  }
+
+  public recordWithdrawal(input: {
+    amountNaira: number;
+    bankName: string;
+    accountNumber: string;
+    bankCode?: string;
+    accountName?: string;
+  }): RuntimePayoutWithdrawal {
+    const amountKobo = nairaToKobo(input.amountNaira);
+    const feeKobo = 0n;
+    const reference = `WTH-${Date.now().toString().slice(-6)}`;
+    const withdrawal: RuntimePayoutWithdrawal = {
+      id: `wth-${Date.now()}`,
+      reference,
+      amountKobo,
+      feeKobo,
+      netAmountKobo: amountKobo - feeKobo,
+      bankCode: input.bankCode ?? this.vendor.bankCode,
+      bankName: input.bankName,
+      accountNumber: input.accountNumber,
+      accountName: input.accountName ?? this.vendor.bankAccountName ?? this.vendor.businessName,
+      status: "SETTLED",
+      verifiedByOtp: true,
+      createdAt: new Date(),
+      settledAt: new Date(),
+    };
+
+    this.payoutWithdrawals.unshift(withdrawal);
+    if (this.persistence.savePayoutWithdrawal) {
+      this.persistInBackground("savePayoutWithdrawal", () =>
+        this.persistence.savePayoutWithdrawal!(withdrawal)
+      );
+    }
+    this.recordAuditEvent("PAYOUT_WITHDRAWAL_SETTLED", "VENDOR_WEB_DASHBOARD", "VENDOR", reference, {
+      amountNaira: input.amountNaira,
+      bankName: input.bankName,
+      accountNumber: input.accountNumber,
+    });
+    void this.broadcastStateChange();
+    return withdrawal;
+  }
+
+  private computeOrderSplitConfig(
+    cartItems: Array<{ productId: string; quantity: number }>,
+    totalAmountKobo: bigint
+  ): Array<{
+    subAccountCode: string;
+    feePercentage: number;
+    splitPercentage: number;
+    feeBearer: boolean;
+  }> | undefined {
+    const resellerSub = this.vendor.monnifySubAccountCode?.trim();
+    if (!resellerSub || totalAmountKobo <= 0n) return undefined;
+
+    const activeRule = this.settlementSplitRules.find((r) => r.isActive) ?? this.settlementSplitRules[0];
+    const platformFeePct = Number(((activeRule?.platformFeeBps ?? 150) / 100).toFixed(2));
+
+    // Check whether any cart item is a mirrored supplier product
+    let totalWholesaleKobo = 0n;
+    let supplierSubAccountCode: string | undefined;
+
+    for (const item of cartItems) {
+      const prod = this.products.find((p) => p.id === item.productId);
+      const supSku = prod?.customFields?.supplierSku;
+      if (!supSku) continue;
+
+      const supSlug = prod?.customFields?.supplierSlug;
+      const supplier = this.suppliers.find(
+        (s) =>
+          (supSlug && s.slug === supSlug) ||
+          s.catalogProducts.some((cp) => cp.sku === supSku)
+      );
+      if (supplier?.subAccountCode) {
+        supplierSubAccountCode = supplier.subAccountCode;
+      } else if (activeRule?.supplierSubAccountCode) {
+        supplierSubAccountCode = activeRule.supplierSubAccountCode;
+      }
+
+      const wholesaleNaira = Number(prod?.customFields?.wholesalePriceNaira ?? 0);
+      if (Number.isFinite(wholesaleNaira) && wholesaleNaira > 0) {
+        totalWholesaleKobo += nairaToKobo(wholesaleNaira) * BigInt(item.quantity);
+      }
+    }
+
+    // Pure vendor-owned order -> 100% minus platform fee to vendor subaccount
+    if (!supplierSubAccountCode || supplierSubAccountCode === resellerSub) {
+      return [
+        {
+          subAccountCode: resellerSub,
+          feePercentage: 100,
+          splitPercentage: Number(Math.max(1, 100 - platformFeePct).toFixed(2)),
+          feeBearer: true,
+        },
+      ];
+    }
+
+    // Mirrored dropship order -> split supplier cost + reseller margin
+    const supplierPctRaw =
+      totalWholesaleKobo > 0n
+        ? (Number((totalWholesaleKobo * 10000n) / totalAmountKobo) / 100)
+        : (activeRule?.supplierShareBps ?? 7500) / 100;
+    const supplierPct = Number(Math.min(95, Math.max(1, supplierPctRaw)).toFixed(2));
+    const resellerPct = Number(Math.max(1, 100 - supplierPct - platformFeePct).toFixed(2));
+
+    return [
+      {
+        subAccountCode: supplierSubAccountCode,
+        feePercentage: 0,
+        splitPercentage: supplierPct,
+        feeBearer: false,
+      },
+      {
+        subAccountCode: resellerSub,
+        feePercentage: 100,
+        splitPercentage: resellerPct,
+        feeBearer: true,
+      },
+    ];
+  }
+
+  private syncSupplierInventoryOnSale(soldProduct: RuntimeProduct, quantitySold: number): void {
+    const supSku = soldProduct.customFields?.supplierSku;
+    if (!supSku || quantitySold <= 0) return;
+
+    const supSlug = soldProduct.customFields?.supplierSlug;
+    const supplier = this.suppliers.find(
+      (s) =>
+        (supSlug && s.slug === supSlug) ||
+        s.catalogProducts.some((cp) => cp.sku === supSku)
+    );
+    if (!supplier) return;
+
+    const catalogItem = supplier.catalogProducts.find((cp) => cp.sku === supSku);
+    if (!catalogItem) return;
+
+    catalogItem.stock = Math.max(0, (catalogItem.stock || 0) - quantitySold);
+    // Keep mirrored product stock aligned with supplier stock
+    soldProduct.stockTotal = catalogItem.stock;
+
+    if (this.persistence.saveSupplierProfile) {
+      this.persistInBackground("saveSupplierProfile", () =>
+        this.persistence.saveSupplierProfile!(supplier)
+      );
+    }
+    this.persistInBackground("syncMirroredProductStock", () =>
+      this.persistence.saveProduct(soldProduct)
+    );
+  }
+
+  public saveSplitRule(input: {
+    name?: string;
+    supplierSubAccountCode?: string;
+    supplierShareBps: number;
+    resellerShareBps: number;
+    platformFeeBps?: number;
+  }): RuntimeSettlementSplitRule {
+    const existing = this.settlementSplitRules[0];
+    const supplierShareBps = clamp(Math.round(input.supplierShareBps), 100, 9500);
+    const resellerShareBps = 10000 - supplierShareBps;
+    const rule: RuntimeSettlementSplitRule = {
+      id: existing?.id ?? crypto.randomUUID(),
+      name: input.name?.trim() || existing?.name || "Default Wholesale Escrow Split",
+      supplierSubAccountCode:
+        input.supplierSubAccountCode ?? existing?.supplierSubAccountCode ?? "SUB-AW-001",
+      supplierShareBps,
+      resellerShareBps,
+      platformFeeBps: clamp(input.platformFeeBps ?? existing?.platformFeeBps ?? 150, 0, 1000),
+      isActive: true,
+      updatedAt: new Date(),
+    };
+
+    if (this.settlementSplitRules.length > 0) {
+      this.settlementSplitRules[0] = rule;
+    } else {
+      this.settlementSplitRules.push(rule);
+    }
+
+    if (this.persistence.saveSettlementSplitRule) {
+      this.persistInBackground("saveSettlementSplitRule", () =>
+        this.persistence.saveSettlementSplitRule!(rule)
+      );
+    }
+    void this.broadcastStateChange();
+    return rule;
+  }
+
+  public submitKyc(input: {
+    businessName: string;
+    cacNumber: string;
+    tinNumber?: string;
+    businessAddress?: string;
+    businessCategory?: string;
+    bankCode: string;
+    bankName?: string;
+    accountNumber: string;
+    resolvedAccountName: string;
+    whatsappPhone?: string;
+    instagramHandle?: string;
+    cacDocumentUploaded?: boolean;
+    idDocumentUploaded?: boolean;
+  }): RuntimeKycSubmission {
+    const submission: RuntimeKycSubmission = {
+      id: `kyc-${Date.now()}`,
+      businessName: input.businessName.trim() || this.vendor.businessName,
+      cacNumber: input.cacNumber.trim().toUpperCase(),
+      tinNumber: input.tinNumber?.trim() || undefined,
+      businessAddress: input.businessAddress?.trim() || undefined,
+      businessCategory: input.businessCategory?.trim() || undefined,
+      bankCode: input.bankCode.trim(),
+      bankName: input.bankName?.trim() || this.monnify.lookupBankName(input.bankCode.trim()),
+      accountNumber: input.accountNumber.trim(),
+      resolvedAccountName: input.resolvedAccountName.trim() || this.vendor.businessName,
+      whatsappPhone: input.whatsappPhone?.trim() || this.vendor.whatsappPhone,
+      instagramHandle: input.instagramHandle?.trim() || undefined,
+      cacDocumentUploaded: input.cacDocumentUploaded ?? true,
+      idDocumentUploaded: input.idDocumentUploaded ?? true,
+      status: "VERIFIED",
+      reviewerNotes: "Verified via CAC & Monnify NUBAN Account Name Match",
+      submittedAt: new Date(),
+      reviewedAt: new Date(),
+    };
+
+    this.kycSubmissions.unshift(submission);
+    this.vendor.businessName = submission.businessName;
+    this.vendor.cacNumber = submission.cacNumber;
+    this.vendor.tinNumber = submission.tinNumber;
+    this.vendor.instagramHandle = submission.instagramHandle;
+    this.vendor.bankCode = submission.bankCode;
+    this.vendor.bankName = submission.bankName;
+    this.vendor.bankAccountNumber = submission.accountNumber;
+    this.vendor.bankAccountName = submission.resolvedAccountName;
+    this.vendor.verificationStatus = "VERIFIED";
+
+    if (this.persistence.saveKycSubmission) {
+      this.persistInBackground("saveKycSubmission", () =>
+        this.persistence.saveKycSubmission!(submission)
+      );
+    }
+    this.recordAuditEvent("KYC_VERIFICATION_SUBMITTED", "VENDOR_WEB_DASHBOARD", "VENDOR", submission.cacNumber, {
+      businessName: submission.businessName,
+      cacNumber: submission.cacNumber,
+      status: submission.status,
+    });
+    void this.broadcastStateChange();
+    return submission;
+  }
+
+  public saveTeamMember(input: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: string;
+    status?: "Active" | "Invited" | "Suspended";
+  }): RuntimeTeamMember {
+    const cleanEmail = input.email.trim().toLowerCase();
+    if (!cleanEmail) {
+      throw new Error("Team member email is required.");
+    }
+    const existingIdx = this.teamMembers.findIndex(
+      (m) => m.email.toLowerCase() === cleanEmail
+    );
+    const existing = existingIdx >= 0 ? this.teamMembers[existingIdx] : undefined;
+
+    const role = input.role.trim() || "Store Attendant";
+    const isManagerOrOwner = role === "Owner" || role === "Store Manager";
+    const isAccountant = role === "Accountant";
+
+    const member: RuntimeTeamMember = {
+      id: existing?.id ?? `tm-${Date.now()}`,
+      name: input.name.trim() || cleanEmail.split("@")[0],
+      email: cleanEmail,
+      phone: input.phone?.trim() || existing?.phone,
+      role,
+      status: input.status ?? existing?.status ?? "Active",
+      canManageOrders: true,
+      canManageInventory: !isAccountant,
+      canViewPayouts: isManagerOrOwner || isAccountant,
+      canProcessRefunds: isManagerOrOwner || isAccountant,
+      canOverrideCopilot: true,
+      lastActiveAt: existing?.lastActiveAt ?? new Date(),
+      invitedAt: existing?.invitedAt ?? new Date(),
+    };
+
+    if (existingIdx >= 0) {
+      this.teamMembers[existingIdx] = member;
+    } else {
+      this.teamMembers.push(member);
+    }
+
+    if (this.persistence.saveTeamMember) {
+      this.persistInBackground("saveTeamMember", () =>
+        this.persistence.saveTeamMember!(member)
+      );
+    }
+    this.recordAuditEvent("TEAM_MEMBER_SAVED", "VENDOR_WEB_DASHBOARD", "VENDOR", member.email, {
+      name: member.name,
+      role: member.role,
+      status: member.status,
+    });
+    void this.broadcastStateChange();
+    return member;
+  }
+
+  public deleteTeamMember(idOrEmail: string): boolean {
+    const clean = idOrEmail.trim().toLowerCase();
+    const idx = this.teamMembers.findIndex(
+      (m) => m.id.toLowerCase() === clean || m.email.toLowerCase() === clean
+    );
+    if (idx === -1) return false;
+    const removed = this.teamMembers[idx];
+    this.teamMembers.splice(idx, 1);
+    if (this.persistence.deleteTeamMember) {
+      this.persistInBackground("deleteTeamMember", () =>
+        this.persistence.deleteTeamMember!(idOrEmail)
+      );
+    }
+    this.recordAuditEvent("TEAM_MEMBER_REMOVED", "VENDOR_WEB_DASHBOARD", "VENDOR", removed.email, {
+      name: removed.name,
+      role: removed.role,
+    });
+    void this.broadcastStateChange();
+    return true;
+  }
+
+  public syncNotifications(input: {
+    readKeys?: string[];
+    dismissedKeys?: string[];
+    markAllRead?: boolean;
+  }): RuntimeVendorNotification[] {
+    for (const n of this.notifications) {
+      if (input.markAllRead || input.readKeys?.includes(n.notificationKey) || input.readKeys?.includes(n.id)) {
+        n.isRead = true;
+        n.readAt = new Date();
+      }
+      if (input.dismissedKeys?.includes(n.notificationKey) || input.dismissedKeys?.includes(n.id)) {
+        n.isDismissed = true;
+      }
+    }
+    if (this.persistence.syncNotifications) {
+      this.persistInBackground("syncNotifications", () =>
+        this.persistence.syncNotifications!(input)
+      );
+    }
+    void this.broadcastStateChange();
+    return this.notifications.filter((n) => !n.isDismissed);
+  }
+
+  private recordAuditEvent(
+    eventType: string,
+    actorType: string,
+    entityType: string,
+    entityId: string,
+    payload: Record<string, unknown>
+  ): void {
+    const ev: RuntimeCommerceEvent = {
+      id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      eventType,
+      actorType,
+      entityType,
+      entityId,
+      payload,
+      createdAt: new Date(),
+    };
+    this.commerceEvents.unshift(ev);
+    if (this.commerceEvents.length > 100) {
+      this.commerceEvents.length = 100;
+    }
+    this.persistInBackground("recordEvent", () =>
+      this.persistence.recordEvent({
+        eventType,
+        actorType,
+        entityType,
+        entityId,
+        payload,
+      })
+    );
+  }
+
   public serializeState() {
     const b = this.getAnalyticsBreakdown();
     const activeBuyerSession = Array.from(this.buyerSessions.values())[0] ?? null;
@@ -4769,6 +5896,32 @@ export class CaterlogStage1Engine {
           o.refundedAmountKobo !== undefined ? formatNaira(o.refundedAmountKobo) : undefined,
       })),
       chatMessages: this.chatMessages.slice(-50),
+      marketBoostListing: this.marketBoostListing
+        ? {
+            ...this.marketBoostListing,
+            startingPriceNaira: koboToNaira(this.marketBoostListing.startingPriceKobo),
+            startingPriceFormatted: formatNaira(this.marketBoostListing.startingPriceKobo),
+          }
+        : null,
+      suppliers: this.suppliers,
+      resellerMirrors: this.resellerMirrors,
+      paymentLinks: this.paymentLinks.map((pl) => ({
+        ...pl,
+        amountNaira: koboToNaira(pl.amountKobo),
+        amountFormatted: formatNaira(pl.amountKobo),
+      })),
+      payoutWithdrawals: this.payoutWithdrawals.map((pw) => ({
+        ...pw,
+        amountNaira: koboToNaira(pw.amountKobo),
+        amountFormatted: formatNaira(pw.amountKobo),
+        netAmountNaira: koboToNaira(pw.netAmountKobo),
+        netAmountFormatted: formatNaira(pw.netAmountKobo),
+      })),
+      settlementSplitRules: this.settlementSplitRules,
+      kycSubmissions: this.kycSubmissions,
+      teamMembers: this.teamMembers,
+      notifications: this.notifications.filter((n) => !n.isDismissed),
+      commerceEvents: this.commerceEvents.slice(0, 50),
       integrations: this.getIntegrationStatus(),
       catalogSync: {
         mode: this.catalog.getMode(),
@@ -4779,11 +5932,17 @@ export class CaterlogStage1Engine {
   }
 
   private appendChat(msg: Omit<ChatThreadMessage, "id" | "timestamp">) {
-    this.chatMessages.push({
+    const fullMsg: ChatThreadMessage = {
       ...msg,
       id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date(),
-    });
+    };
+    this.chatMessages.push(fullMsg);
+    if (this.persistence.saveChatMessage) {
+      this.persistInBackground("saveChatMessage", () =>
+        this.persistence.saveChatMessage!(fullMsg)
+      );
+    }
   }
 
   private async broadcastStateChange() {

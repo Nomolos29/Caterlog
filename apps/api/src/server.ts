@@ -6,6 +6,17 @@ import { CaterlogStage1Engine } from "./runtime-engine.ts";
 import { createEngineFromEnv } from "./bootstrap.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
 import { mediaStore } from "./media/media-store.ts";
+import {
+  checkNeonAuthStatus,
+  checkNeonPostgresPool,
+  downloadObjectFromNeonBucket,
+  getNeonBucketPresignedUrl,
+  invokeNeonFunction,
+  resolveNeonFunctionUrl,
+  sealNeonLiveQuery,
+  uploadObjectToNeonBucket,
+  verifyNeonAuthToken,
+} from "./neon/services.ts";
 
 // Load a local `.env` when present so `npm run dev` / `npm start` pick up
 // WhatsApp & Monnify credentials without requiring a manual `export`.
@@ -102,6 +113,163 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
             lastSyncedAt: engine.catalog.getIntegrationStatus().lastSyncedAt,
             publishedItems: engine.catalog.getIntegrationStatus().publishedItems,
           },
+        });
+      }
+
+      // 1b-neon. Neon Services Status & Endpoints (Postgres, Auth, Object Storage, Functions, Realtime)
+      if (req.method === "GET" && path === "/api/v1/neon/status") {
+        const [postgres, auth] = await Promise.all([
+          checkNeonPostgresPool().catch((err) => ({
+            connected: false,
+            error: err instanceof Error ? err.message : String(err),
+          })),
+          checkNeonAuthStatus(),
+        ]);
+        return sendJson(res, 200, {
+          branch: process.env.NEON_BRANCH ?? null,
+          branchId: process.env.NEON_BRANCH_ID ?? null,
+          dataMode: engine.getDataMode(),
+          postgres,
+          auth,
+          objectStorage: {
+            configured: Boolean(
+              process.env.AWS_ENDPOINT_URL_S3 &&
+                process.env.AWS_ACCESS_KEY_ID &&
+                process.env.AWS_SECRET_ACCESS_KEY
+            ),
+            endpoint: process.env.AWS_ENDPOINT_URL_S3 ?? null,
+            region: process.env.AWS_REGION ?? null,
+            bucket: process.env.NEON_STORAGE_BUCKET || "assets",
+          },
+          functions: {
+            configured: Boolean(resolveNeonFunctionUrl("hello")),
+            helloUrl: resolveNeonFunctionUrl("hello"),
+          },
+          realtime: {
+            configured: Boolean(
+              process.env.NEON_REALTIME_URL && process.env.NEON_REALTIME_SECRET
+            ),
+            url: process.env.NEON_REALTIME_URL ?? null,
+          },
+        });
+      }
+
+      if (path === "/api/v1/neon/storage") {
+        if (req.method === "POST") {
+          const rawBody = await readRawBody(req);
+          const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+            key?: string;
+            content?: string;
+            base64?: string;
+            contentType?: string;
+            bucket?: string;
+          };
+          const key = (body.key ?? `uploads/test-${Date.now()}.txt`).trim();
+          const payloadBuffer = body.base64
+            ? Buffer.from(body.base64, "base64")
+            : Buffer.from(body.content ?? "Caterlog Neon Object Storage payload", "utf8");
+          const uploaded = await uploadObjectToNeonBucket({
+            key,
+            body: payloadBuffer,
+            contentType: body.contentType ?? "text/plain",
+            bucket: body.bucket,
+          });
+          if (!uploaded) {
+            throw new HttpError(503, "Neon Object Storage is not configured in environment.");
+          }
+          return sendJson(res, 201, {
+            ok: true,
+            ...uploaded,
+            bytes: payloadBuffer.byteLength,
+          });
+        }
+        if (req.method === "GET") {
+          const key = url.searchParams.get("key");
+          if (!key) {
+            throw new HttpError(400, "Query parameter ?key= is required.");
+          }
+          const downloaded = await downloadObjectFromNeonBucket(key);
+          if (!downloaded) {
+            throw new HttpError(404, `Object "${key}" not found in Neon Object Storage.`);
+          }
+          const presignedUrl = await getNeonBucketPresignedUrl(key, 3600);
+          return sendJson(res, 200, {
+            ok: true,
+            key,
+            bytes: downloaded.byteLength,
+            text: downloaded.toString("utf8"),
+            presignedUrl,
+          });
+        }
+      }
+
+      if (
+        (req.method === "POST" || req.method === "GET") &&
+        path === "/api/v1/neon/realtime/seal"
+      ) {
+        let kind: "orders" | "products" = "orders";
+        let vendorSlug = engine.vendor.slug;
+        if (req.method === "POST") {
+          const rawBody = await readRawBody(req);
+          const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+            kind?: "orders" | "products";
+            table?: "orders" | "products";
+            vendorSlug?: string;
+          };
+          if (body.kind === "products" || body.table === "products") kind = "products";
+          if (body.vendorSlug?.trim()) vendorSlug = body.vendorSlug.trim();
+        } else {
+          if (
+            url.searchParams.get("kind") === "products" ||
+            url.searchParams.get("table") === "products"
+          ) {
+            kind = "products";
+          }
+          const qsVendor = url.searchParams.get("vendorSlug");
+          if (qsVendor?.trim()) vendorSlug = qsVendor.trim();
+        }
+        const sealed = await sealNeonLiveQuery(kind, vendorSlug);
+        return sendJson(res, 200, {
+          ok: true,
+          ...sealed,
+          table: sealed.kind,
+          vendorId: engine.vendor.id,
+          sealed: sealed.sealedQuery,
+        });
+      }
+
+      if (req.method === "GET" && path === "/api/v1/neon/functions/hello") {
+        const format = url.searchParams.get("format") === "text" ? "/" : "/status?format=json";
+        const result = await invokeNeonFunction("hello", format);
+        return sendJson(res, 200, {
+          ok: result.status >= 200 && result.status < 300,
+          ...result,
+        });
+      }
+
+      if (req.method === "GET" && path === "/api/v1/neon/auth/status") {
+        const authStatus = await checkNeonAuthStatus();
+        return sendJson(res, 200, { ok: authStatus.configured, ...authStatus });
+      }
+
+      if (req.method === "POST" && path === "/api/v1/neon/auth/verify") {
+        const authHeader = req.headers.authorization;
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as { token?: string };
+        const token = authHeader?.toLowerCase().startsWith("bearer ")
+          ? authHeader.slice(7).trim()
+          : body.token?.trim();
+        if (!token) {
+          throw new HttpError(401, "Missing Bearer token.");
+        }
+        const verified = await verifyNeonAuthToken(token);
+        if (!verified) {
+          throw new HttpError(401, "Invalid or expired Neon Auth JWT.");
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          userId: verified.userId,
+          claims: verified.payload,
         });
       }
 
@@ -339,6 +507,10 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
             changes?: Array<{
               field?: string;
               value?: {
+                metadata?: {
+                  display_phone_number?: string;
+                  phone_number_id?: string;
+                };
                 statuses?: Array<{
                   id?: string;
                   status?: "sent" | "delivered" | "read" | "failed";
@@ -373,6 +545,13 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           for (const entry of body.entry ?? []) {
             for (const change of entry.changes ?? []) {
               const val = change.value;
+              if (
+                val?.metadata?.phone_number_id &&
+                val.metadata.phone_number_id !== "105992837465001" &&
+                engine.vendor.whatsappPhoneId !== val.metadata.phone_number_id
+              ) {
+                engine.vendor.whatsappPhoneId = val.metadata.phone_number_id;
+              }
 
               // Handle Meta WhatsApp message delivery/read status ticks (`sent`, `delivered`, `read`, `failed`)
               if (val?.statuses && val.statuses.length > 0) {
@@ -639,6 +818,18 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
 
       // 7. Dashboard REST API: Full Vendor State (`GET /api/v1/vendor/state`)
       if (req.method === "GET" && path === "/api/v1/vendor/state") {
+        if (
+          url.searchParams.get("refresh") === "true" ||
+          url.searchParams.get("sync") === "true"
+        ) {
+          await engine.syncFromDatabase();
+        }
+        return sendJson(res, 200, engine.serializeState());
+      }
+
+      // 7a. Dashboard REST API: Explicit Database-to-Dashboard Sync (`POST /api/v1/vendor/sync`)
+      if (req.method === "POST" && path === "/api/v1/vendor/sync") {
+        await engine.syncFromDatabase();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -660,6 +851,21 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           reservationTtlMinutes?: number;
         };
         engine.updateSettings(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, engine.serializeState());
+      }
+
+      // 8a. Dashboard REST API: Update Profile (`PATCH /api/v1/vendor/profile`)
+      if (req.method === "PATCH" && path === "/api/v1/vendor/profile") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          businessName?: string;
+          whatsappPhone?: string;
+          instagramHandle?: string;
+          baseState?: string;
+          baseCity?: string;
+        };
+        engine.updateVendorProfile(body);
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -679,10 +885,15 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           throw new HttpError(401, "Invalid or expired 6-digit withdrawal security code. Please check WhatsApp.");
         }
 
+        const withdrawal = engine.recordWithdrawal({
+          amountNaira: body.amountNaira,
+          bankName: body.bankName,
+          accountNumber: body.accountNumber,
+        });
         const withdrawAmountKobo = nairaToKobo(body.amountNaira || 0);
         await engine.whatsapp.sendTextMessage({
           toPhone: engine.vendor.whatsappPhone,
-          text: `💸 *Settlement Payout Dispatched:*\nAmount: *${formatNaira(withdrawAmountKobo)}*\nBank: *${body.bankName}* (\`${body.accountNumber}\`)\nReference: \`WTH-${Date.now().toString().slice(-6)}\`\n\n_Funds will reflect in your verified settlement account within 10 minutes._`,
+          text: `💸 *Settlement Payout Dispatched:*\nAmount: *${formatNaira(withdrawAmountKobo)}*\nBank: *${body.bankName}* (\`${body.accountNumber}\`)\nReference: \`${withdrawal.reference}\`\n\n_Funds will reflect in your verified settlement account within 10 minutes._`,
           vendorPhoneId: engine.vendor.whatsappPhoneId,
         });
 
@@ -691,7 +902,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           amountNaira: body.amountNaira,
           bankName: body.bankName,
           accountNumber: body.accountNumber,
-          reference: `WTH-${Date.now().toString().slice(-6)}`,
+          reference: withdrawal.reference,
           message: "Withdrawal successfully authorized and queued for bank settlement.",
           state: engine.serializeState(),
         });
@@ -746,6 +957,156 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
+      // 8e. Dashboard REST API: Save Market Boost & Geographic Visibility (`PUT /api/v1/vendor/market-boost`)
+      if (req.method === "PUT" && path === "/api/v1/vendor/market-boost") {
+        const body = JSON.parse(await readRawBody(req));
+        const listing = engine.saveMarketBoost(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "saved",
+          listing,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8e-2. Dashboard REST API: Market Boost Wholesale Pricing Preview (`GET /api/v1/vendor/market-boost/pricing`)
+      if (req.method === "GET" && path === "/api/v1/vendor/market-boost/pricing") {
+        const reseller = url.searchParams.get("reseller") ?? undefined;
+        return sendJson(res, 200, {
+          reseller: reseller ?? "ALL_RESELLERS",
+          catalog: engine.getMarketBoostWholesaleCatalog(reseller),
+        });
+      }
+
+      // 8f. Dashboard REST API: Mirror Supplier Catalog (`POST /api/v1/vendor/network/mirror`)
+      if (req.method === "POST" && path === "/api/v1/vendor/network/mirror") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          supplierIdOrSlug: string;
+          productSkus?: string[];
+          defaultMarkupBps?: number;
+          status?: "ACTIVE" | "PAUSED";
+        };
+        if (!body.supplierIdOrSlug) {
+          throw new HttpError(400, "supplierIdOrSlug is required.");
+        }
+        const result = engine.mirrorSupplierCatalog(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "mirrored",
+          mirror: result.mirror,
+          mirroredProductsCount: result.mirroredProducts.length,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8g. Dashboard REST API: Create Payment Link (`POST /api/v1/vendor/payment-links`)
+      if (req.method === "POST" && path === "/api/v1/vendor/payment-links") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          customerName?: string;
+          customerPhone?: string;
+          productSku?: string;
+          description?: string;
+          amountNaira: number | string;
+        };
+        const link = engine.createPaymentLink(body);
+        return sendJson(res, 201, {
+          status: "created",
+          link: {
+            ...link,
+            amountNaira: Number(link.amountKobo) / 100,
+            amountFormatted: formatNaira(link.amountKobo),
+          },
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8h. Dashboard REST API: Delete Payment Link (`DELETE /api/v1/vendor/payment-links/:slug`)
+      if (req.method === "DELETE" && path.startsWith("/api/v1/vendor/payment-links/")) {
+        const slug = decodeURIComponent(path.replace("/api/v1/vendor/payment-links/", ""));
+        engine.deletePaymentLink(slug);
+        return sendJson(res, 200, engine.serializeState());
+      }
+
+      // 8i. Dashboard REST API: Update Settlement Split Rule (`PUT /api/v1/vendor/split-rules`)
+      if (req.method === "PUT" && path === "/api/v1/vendor/split-rules") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          name?: string;
+          supplierSubAccountCode?: string;
+          supplierShareBps: number;
+          resellerShareBps: number;
+          platformFeeBps?: number;
+        };
+        const rule = engine.saveSplitRule(body);
+        return sendJson(res, 200, {
+          status: "updated",
+          rule,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8j. Dashboard REST API: Submit KYC Verification (`POST /api/v1/vendor/kyc`)
+      if (req.method === "POST" && path === "/api/v1/vendor/kyc") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          businessName: string;
+          cacNumber: string;
+          tinNumber?: string;
+          businessAddress?: string;
+          businessCategory?: string;
+          bankCode: string;
+          bankName?: string;
+          accountNumber: string;
+          resolvedAccountName: string;
+          whatsappPhone?: string;
+          instagramHandle?: string;
+          cacDocumentUploaded?: boolean;
+          idDocumentUploaded?: boolean;
+        };
+        if (!body.cacNumber || !body.accountNumber) {
+          throw new HttpError(400, "CAC number and 10-digit account number are required.");
+        }
+        const submission = engine.submitKyc(body);
+        return sendJson(res, 200, {
+          status: "submitted",
+          submission,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8k. Dashboard REST API: Save/Invite Team Member (`POST /api/v1/vendor/team`)
+      if (req.method === "POST" && path === "/api/v1/vendor/team") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          name: string;
+          email: string;
+          phone?: string;
+          role: string;
+          status?: "Active" | "Invited" | "Suspended";
+        };
+        const member = engine.saveTeamMember(body);
+        return sendJson(res, 200, {
+          status: "saved",
+          member,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8l. Dashboard REST API: Remove Team Member (`DELETE /api/v1/vendor/team/:id`)
+      if (req.method === "DELETE" && path.startsWith("/api/v1/vendor/team/")) {
+        const idOrEmail = decodeURIComponent(path.replace("/api/v1/vendor/team/", ""));
+        engine.deleteTeamMember(idOrEmail);
+        return sendJson(res, 200, engine.serializeState());
+      }
+
+      // 8m. Dashboard REST API: Sync Notifications (`POST /api/v1/vendor/notifications/sync`)
+      if (req.method === "POST" && path === "/api/v1/vendor/notifications/sync") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          readKeys?: string[];
+          dismissedKeys?: string[];
+          markAllRead?: boolean;
+        };
+        engine.syncNotifications(body);
+        return sendJson(res, 200, engine.serializeState());
+      }
+
       // 9. Dashboard REST API: Add Product (`POST /api/v1/vendor/products`)
       if (req.method === "POST" && path === "/api/v1/vendor/products") {
         const body = JSON.parse(await readRawBody(req)) as {
@@ -769,9 +1130,9 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         };
 
         const mappedVariants = body.variants?.map((v) => ({
-          id: v.id || `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: v.id || crypto.randomUUID(),
           name: v.name,
-          skuCode: (v.sku || v.skuCode || `${body.skuCode || "ITEM"}-${v.name.slice(0, 3)}`).toUpperCase(),
+          skuCode: (v.sku || v.skuCode || "").toUpperCase(),
           priceKobo: v.priceNaira !== undefined ? nairaToKobo(v.priceNaira) : undefined,
           stockTotal: Number(v.stock ?? v.stockTotal ?? 0),
           stockReserved: 0,
@@ -800,6 +1161,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           variants: mappedVariants,
           customFields: body.customFields,
         });
+        await engine.flushPersistence();
         return sendJson(res, 201, engine.serializeState());
       }
 
@@ -837,9 +1199,9 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         }
 
         const mappedVariants = body.variants?.map((v) => ({
-          id: v.id || `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: v.id || crypto.randomUUID(),
           name: v.name,
-          skuCode: (v.sku || v.skuCode || `${sku}-${v.name.slice(0, 3)}`).toUpperCase(),
+          skuCode: (v.sku || v.skuCode || "").toUpperCase(),
           priceKobo: v.priceNaira !== undefined ? nairaToKobo(v.priceNaira) : undefined,
           stockTotal: Number(v.stock ?? v.stockTotal ?? 0),
           stockReserved: 0,
@@ -859,6 +1221,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         if (!updated) {
           throw new HttpError(404, `Product SKU "${sku}" not found.`);
         }
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -876,6 +1239,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         if (!updated) {
           throw new HttpError(404, `Product SKU "${sku}" not found.`);
         }
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -886,6 +1250,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         if (!deleted) {
           throw new HttpError(404, `Product SKU "${sku}" not found.`);
         }
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -896,6 +1261,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           feeNaira: number | string;
         };
         engine.upsertShippingZone(body.name, nairaToKobo(body.feeNaira));
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -909,6 +1275,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         if (!deleted) {
           throw new HttpError(404, `Active shipping zone #${code} not found.`);
         }
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -928,6 +1295,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           type: body.type,
           value: koboOrBps,
         });
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -938,6 +1306,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         if (!deactivated) {
           throw new HttpError(404, `Active discount code "${code}" not found.`);
         }
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 

@@ -447,13 +447,19 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
         (this.isMockMode() || !/^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1)/i.test(params.imageUrl)))
     );
 
-    // 1. Interactive Buttons (1 to 3 quick-reply options)
-    if (params.quickReplies && params.quickReplies.length > 0 && params.quickReplies.length <= 3) {
+    const hasImage = Boolean(isPublicImage && (resolvedMediaId || params.imageUrl));
+
+    // 1. Interactive Buttons (1 to 3 quick-reply options, OR whenever an image is attached so Image + Details + Buttons stay in 1 single message)
+    if (
+      params.quickReplies &&
+      params.quickReplies.length > 0 &&
+      (params.quickReplies.length <= 3 || hasImage)
+    ) {
       try {
         await this.sendInteractiveButtonsMessage({
           toPhone: params.toPhone,
           bodyText: params.text,
-          buttons: params.quickReplies.map((qr) => ({
+          buttons: params.quickReplies.slice(0, 3).map((qr) => ({
             id: qr.replyText,
             title: qr.label,
           })),
@@ -468,22 +474,9 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
       }
     }
 
-    // 2. Interactive List (4 to 10 options)
-    if (params.quickReplies && params.quickReplies.length > 3) {
+    // 2. Interactive List (4 to 10 options, text-only messages without an image)
+    if (!hasImage && params.quickReplies && params.quickReplies.length > 3) {
       try {
-        if (isPublicImage && (resolvedMediaId || params.imageUrl)) {
-          try {
-            await this.sendImageMessage({
-              toPhone: params.toPhone,
-              mediaId: resolvedMediaId,
-              imageUrl: params.imageUrl,
-              vendorPhoneId: params.vendorPhoneId,
-            });
-          } catch {
-            // Ignore image send failure, proceed with list
-          }
-        }
-
         await this.sendInteractiveListMessage({
           toPhone: params.toPhone,
           headerText: params.headerText,
@@ -507,8 +500,8 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
       }
     }
 
-    // 3. Standalone Image with Caption
-    if (isPublicImage && (resolvedMediaId || params.imageUrl)) {
+    // 3. Standalone Image with Caption (single message containing both image and text details)
+    if (hasImage) {
       try {
         await this.sendImageMessage({
           toPhone: params.toPhone,

@@ -22,6 +22,199 @@ export interface RuntimeVendor {
   bankAccountNumber?: string;
   bankAccountName?: string;
   monnifySubAccountCode?: string;
+  cacNumber?: string;
+  tinNumber?: string;
+  instagramHandle?: string;
+  baseState?: string;
+  baseCity?: string;
+}
+
+export interface RuntimeWholesaleDiscountRule {
+  id: string;
+  name: string;
+  discountType: "PERCENTAGE" | "FLAT_NAIRA";
+  value: number; // percentage e.g. 10 (10%) or Naira e.g. 500
+  scope: "ENTIRE_MIRROR_CATALOG" | "CATEGORY" | "SPECIFIC_PRODUCTS";
+  targetCategories?: string[];
+  targetProductSkus?: string[];
+  resellerScope: "ALL_RESELLERS" | "SPECIFIC_RESELLERS";
+  targetResellers?: string[];
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface RuntimeMarketBoostListing {
+  id: string;
+  vendorId: string;
+  isPublished: boolean;
+  businessName: string;
+  category: string;
+  baseState: string;
+  baseCity: string;
+  shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
+  allowInterstate: boolean;
+  coveredStates: string[];
+  description: string;
+  moq: string;
+  startingPriceKobo: bigint;
+  fulfillmentMethod: string;
+  deliveryNote: string;
+  featuredTags: string[];
+  mirroredCategories: string[];
+  mirroredProductSkus: string[];
+  wholesaleDiscountRules: RuntimeWholesaleDiscountRule[];
+  subscriptionPlan: "STARTER" | "GROWTH" | "ENTERPRISE";
+  updatedAt: Date;
+}
+
+export interface RuntimeSupplierCatalogProduct {
+  sku: string;
+  name: string;
+  wholesalePriceNaira: number;
+  suggestedRetailNaira: number;
+  stock: number;
+  moq: number;
+  category: string;
+}
+
+export interface RuntimeSupplierProfile {
+  id: string;
+  slug: string;
+  name: string;
+  verified: boolean;
+  cacNumber: string;
+  category: string;
+  location: string;
+  state: string;
+  shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
+  allowInterstate: boolean;
+  coveredStates: string[];
+  warehouseAddress: string;
+  phone: string;
+  whatsapp: string;
+  rating: number;
+  totalFulfilled: number;
+  subAccountCode: string;
+  leadTime: string;
+  cutoffTime: string;
+  wholesaleTerms: string[];
+  catalogProducts: RuntimeSupplierCatalogProduct[];
+}
+
+export interface RuntimeResellerMirror {
+  id: string;
+  resellerVendorId: string;
+  supplierId: string;
+  supplierSlug?: string;
+  supplierName?: string;
+  mirroredProductSkus: string[];
+  defaultMarkupBps: number;
+  status: "ACTIVE" | "PAUSED";
+  lastSyncedAt: Date;
+}
+
+export interface RuntimePaymentLink {
+  id: string;
+  slug: string;
+  customerName?: string;
+  customerPhone?: string;
+  productSku?: string;
+  description?: string;
+  amountKobo: bigint;
+  checkoutUrl: string;
+  isActive: boolean;
+  timesUsed: number;
+  expiresAt?: Date;
+  createdAt: Date;
+}
+
+export interface RuntimePayoutWithdrawal {
+  id: string;
+  reference: string;
+  amountKobo: bigint;
+  feeKobo: bigint;
+  netAmountKobo: bigint;
+  bankCode?: string;
+  bankName: string;
+  accountNumber: string;
+  accountName?: string;
+  status: "PENDING" | "DISPATCHED" | "SETTLED" | "FAILED";
+  verifiedByOtp: boolean;
+  createdAt: Date;
+  settledAt?: Date;
+}
+
+export interface RuntimeSettlementSplitRule {
+  id: string;
+  name: string;
+  supplierSubAccountCode?: string;
+  supplierShareBps: number;
+  resellerShareBps: number;
+  platformFeeBps: number;
+  isActive: boolean;
+  updatedAt: Date;
+}
+
+export interface RuntimeKycSubmission {
+  id: string;
+  businessName: string;
+  cacNumber: string;
+  tinNumber?: string;
+  businessAddress?: string;
+  businessCategory?: string;
+  bankCode: string;
+  bankName?: string;
+  accountNumber: string;
+  resolvedAccountName: string;
+  whatsappPhone?: string;
+  instagramHandle?: string;
+  cacDocumentUploaded: boolean;
+  idDocumentUploaded: boolean;
+  status: "UNVERIFIED" | "PENDING_REVIEW" | "VERIFIED" | "REJECTED";
+  reviewerNotes?: string;
+  submittedAt: Date;
+  reviewedAt?: Date;
+}
+
+export interface RuntimeTeamMember {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: string;
+  status: "Active" | "Invited" | "Suspended";
+  canManageOrders: boolean;
+  canManageInventory: boolean;
+  canViewPayouts: boolean;
+  canProcessRefunds: boolean;
+  canOverrideCopilot: boolean;
+  lastActiveAt?: Date;
+  invitedAt: Date;
+}
+
+export interface RuntimeVendorNotification {
+  id: string;
+  notificationKey: string;
+  title: string;
+  message: string;
+  category: "ORDERS" | "PAYOUTS" | "INVENTORY" | "COPILOT" | "SYSTEM";
+  isRead: boolean;
+  isDismissed: boolean;
+  linkText?: string;
+  targetView?: string;
+  targetRef?: string;
+  createdAt: Date;
+  readAt?: Date;
+}
+
+export interface RuntimeCommerceEvent {
+  id: string;
+  eventType: string;
+  actorType: string;
+  entityType: string;
+  entityId: string;
+  payload: Record<string, unknown>;
+  createdAt: Date;
 }
 
 export interface RuntimeProductVariant {
@@ -183,4 +376,16 @@ export interface RuntimeSnapshot {
   orders: RuntimeOrder[];
   /** Provider transaction references already applied (durable idempotency). */
   processedTransactionRefs: string[];
+  chatMessages?: ChatThreadMessage[];
+  buyerSessions?: BuyerConversationSession[];
+  marketBoostListing?: RuntimeMarketBoostListing | null;
+  suppliers?: RuntimeSupplierProfile[];
+  resellerMirrors?: RuntimeResellerMirror[];
+  paymentLinks?: RuntimePaymentLink[];
+  payoutWithdrawals?: RuntimePayoutWithdrawal[];
+  settlementSplitRules?: RuntimeSettlementSplitRule[];
+  kycSubmissions?: RuntimeKycSubmission[];
+  teamMembers?: RuntimeTeamMember[];
+  notifications?: RuntimeVendorNotification[];
+  commerceEvents?: RuntimeCommerceEvent[];
 }

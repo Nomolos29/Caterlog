@@ -1,6 +1,14 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import type {
+  MarketBoostListing,
+  ProductItem,
+  ResellerMirror,
+  SupplierProfile,
+  WholesaleDiscountRule,
+} from "@/lib/types";
+import { resolveImageUrl } from "@/lib/api";
 
 export const NIGERIAN_STATES = [
   "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno",
@@ -10,53 +18,358 @@ export const NIGERIAN_STATES = [
   "Taraba", "Yobe", "Zamfara"
 ];
 
+const DEFAULT_NETWORK_RESELLERS = [
+  "Nia Stores",
+  "Zuri Fashion Hub",
+  "Kemi Luxe Dropship",
+  "Abuja Style Plug",
+];
+
 interface MarketBoostViewProps {
   initialTab?: "visibility" | "setup" | "subscription";
   vendorName?: string;
+  listing?: MarketBoostListing | null;
+  products?: ProductItem[];
+  suppliers?: SupplierProfile[];
+  resellerMirrors?: ResellerMirror[];
+  onSaveListing?: (
+    input: Omit<Partial<MarketBoostListing>, "startingPriceNaira"> & {
+      startingPriceNaira?: number | string;
+    }
+  ) => Promise<void>;
 }
 
-export function MarketBoostView({ initialTab = "visibility", vendorName }: MarketBoostViewProps) {
+export function MarketBoostView({
+  initialTab = "visibility",
+  vendorName,
+  listing,
+  products = [],
+  suppliers = [],
+  resellerMirrors = [],
+  onSaveListing,
+}: MarketBoostViewProps) {
   // Tabs: 'visibility' | 'setup' | 'subscription'
   const [activeTab, setActiveTab] = useState<"visibility" | "setup" | "subscription">(initialTab);
 
-  // Listing status (starts unpublished until merchant sets up and activates)
-  const [listingPublished, setListingPublished] = useState(false);
+  // Listing status (hydrated from database MarketBoostListing when present)
+  const [listingPublished, setListingPublished] = useState(listing?.isPublished ?? false);
   const [showDirPreviewModal, setShowDirPreviewModal] = useState(false);
   const [showResellerModal, setShowResellerModal] = useState(false);
 
   // Listing setup form states
-  const [businessName, setBusinessName] = useState(vendorName || "My Store");
-
-  useEffect(() => {
-    if (vendorName) {
-      setBusinessName(vendorName);
-    }
-  }, [vendorName]);
-  const [category, setCategory] = useState("Home & living");
+  const [businessName, setBusinessName] = useState(listing?.businessName || vendorName || "My Store");
+  const [category, setCategory] = useState(listing?.category || "Home & living");
   const [location, setLocation] = useState("Lagos, Nigeria");
 
   // Geographic visibility & Interstate coverage settings
-  const [vendorState, setVendorState] = useState("Lagos");
-  const [vendorCity, setVendorCity] = useState("Ikeja");
-  const [shippingScope, setShippingScope] = useState<"LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE">("LOCAL_STATE");
-  const [allowInterstate, setAllowInterstate] = useState(false);
-  const [coveredStates, setCoveredStates] = useState<string[]>(["Lagos"]);
+  const [vendorState, setVendorState] = useState(listing?.baseState || "Lagos");
+  const [vendorCity, setVendorCity] = useState(listing?.baseCity || "Ikeja");
+  const [shippingScope, setShippingScope] = useState<"LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE">(
+    listing?.shippingScope || "LOCAL_STATE"
+  );
+  const [allowInterstate, setAllowInterstate] = useState(listing?.allowInterstate ?? false);
+  const [coveredStates, setCoveredStates] = useState<string[]>(
+    listing?.coveredStates && listing.coveredStates.length > 0 ? listing.coveredStates : ["Lagos"]
+  );
 
   const [description, setDescription] = useState(
-    "Everyday drinkware, kitchen essentials and storage for independent shops. Live inventory, clear wholesale costs and supplier-managed fulfillment."
+    listing?.description ||
+      "Everyday drinkware, kitchen essentials and storage for independent shops. Live inventory, clear wholesale costs and supplier-managed fulfillment."
   );
-  const [moq, setMoq] = useState("1 unit");
-  const [startingPrice, setStartingPrice] = useState("₦3,000");
-  const [fulfillment, setFulfillment] = useState("Pickup or merchant-arranged delivery");
+  const [moq, setMoq] = useState(listing?.moq || "1 unit");
+  const [startingPrice, setStartingPrice] = useState(
+    listing?.startingPriceFormatted || "₦3,000"
+  );
+  const [fulfillment, setFulfillment] = useState(
+    listing?.fulfillmentMethod || "Pickup or merchant-arranged delivery"
+  );
   const [deliveryNote, setDeliveryNote] = useState(
-    "Delivery availability and fees confirmed per order. No guaranteed dates."
+    listing?.deliveryNote ||
+      "Delivery availability and fees confirmed per order. No guaranteed dates."
   );
-  const [featDrinkware, setFeatDrinkware] = useState(true);
-  const [featKitchen, setFeatKitchen] = useState(true);
-  const [featStorage, setFeatStorage] = useState(true);
-  const [featSeasonal, setFeatSeasonal] = useState(false);
+  const [mirroredCategories, setMirroredCategories] = useState<string[]>(
+    listing?.mirroredCategories ?? []
+  );
+  const [mirroredProductSkus, setMirroredProductSkus] = useState<string[]>(
+    listing?.mirroredProductSkus ?? []
+  );
+  const [wholesaleDiscountRules, setWholesaleDiscountRules] = useState<WholesaleDiscountRule[]>(
+    listing?.wholesaleDiscountRules ?? []
+  );
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+
+  // Wholesale Discount Builder state
+  const [ruleName, setRuleName] = useState("");
+  const [ruleType, setRuleType] = useState<"PERCENTAGE" | "FLAT_NAIRA">("PERCENTAGE");
+  const [ruleValue, setRuleValue] = useState("10");
+  const [ruleScope, setRuleScope] = useState<"ENTIRE_MIRROR_CATALOG" | "CATEGORY" | "SPECIFIC_PRODUCTS">(
+    "ENTIRE_MIRROR_CATALOG"
+  );
+  const [ruleTargetCategories, setRuleTargetCategories] = useState<string[]>([]);
+  const [ruleTargetSkus, setRuleTargetSkus] = useState<string[]>([]);
+  const [ruleResellerScope, setRuleResellerScope] = useState<"ALL_RESELLERS" | "SPECIFIC_RESELLERS">(
+    "ALL_RESELLERS"
+  );
+  const [ruleTargetResellers, setRuleTargetResellers] = useState<string[]>([]);
+  const [customResellerInput, setCustomResellerInput] = useState("");
+  const [previewReseller, setPreviewReseller] = useState<string>("ALL_RESELLERS");
+
   const [draftSaved, setDraftSaved] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
+
+  // Group real catalog products by category
+  const categorizedProducts = useMemo(() => {
+    const groups = new Map<string, ProductItem[]>();
+    for (const p of products) {
+      const cat = (p.category || "General").trim() || "General";
+      const list = groups.get(cat) ?? [];
+      list.push(p);
+      groups.set(cat, list);
+    }
+    return Array.from(groups.entries()).map(([catName, items]) => ({
+      category: catName,
+      items,
+      minPriceNaira: Math.min(...items.map((i) => i.basePriceNaira || 0)),
+    }));
+  }, [products]);
+
+  // Available drop-shippers / resellers in network
+  const networkResellers = useMemo(() => {
+    const names = new Set<string>(DEFAULT_NETWORK_RESELLERS);
+    for (const m of resellerMirrors) {
+      if (m.supplierName) names.add(m.supplierName);
+    }
+    for (const s of suppliers) {
+      if (s.name) names.add(s.name);
+    }
+    for (const r of wholesaleDiscountRules) {
+      for (const tr of r.targetResellers ?? []) {
+        if (tr.trim()) names.add(tr.trim());
+      }
+    }
+    return Array.from(names);
+  }, [resellerMirrors, suppliers, wholesaleDiscountRules]);
+
+  // Effective mirrored SKUs (combining entire mirrored categories + individual SKUs)
+  const effectiveMirroredSkus = useMemo(() => {
+    const catSet = new Set(mirroredCategories.map((c) => c.toLowerCase()));
+    const skuSet = new Set(mirroredProductSkus.map((s) => s.toUpperCase()));
+    for (const p of products) {
+      const cat = (p.category || "General").trim().toLowerCase();
+      if (catSet.has(cat)) {
+        skuSet.add(p.skuCode.toUpperCase());
+      }
+    }
+    return skuSet;
+  }, [products, mirroredCategories, mirroredProductSkus]);
+
+  // Real-time computed preview & visibility metrics from live catalog and mirrors
+  const mirroredProducts = useMemo(
+    () => products.filter((p) => effectiveMirroredSkus.has(p.skuCode.toUpperCase())),
+    [products, effectiveMirroredSkus]
+  );
+
+  const liveStartingPrice = useMemo(() => {
+    const pool = mirroredProducts.length > 0 ? mirroredProducts : products;
+    const prices = pool.map((p) => p.basePriceNaira).filter((n) => n > 0);
+    if (prices.length === 0) return startingPrice;
+    return `₦${Math.min(...prices).toLocaleString()}`;
+  }, [mirroredProducts, products, startingPrice]);
+
+  const liveTotalStock = useMemo(() => {
+    return mirroredProducts.reduce((acc, p) => acc + Math.max(0, p.stockTotal || 0), 0);
+  }, [mirroredProducts]);
+
+  const previewCoverProduct = useMemo(
+    () => mirroredProducts.find((p) => Boolean(p.primaryImageUrl)) || products.find((p) => Boolean(p.primaryImageUrl)),
+    [mirroredProducts, products]
+  );
+
+  const liveVisibilityStats = useMemo(() => {
+    const connected = resellerMirrors.length;
+    const catalogWeight = mirroredProducts.length;
+    const discoveries = listingPublished ? Math.max(catalogWeight * 18 + connected * 24, 1) : 0;
+    const profileViews = listingPublished ? Math.max(Math.round(discoveries * 0.25), connected) : 0;
+    const viewRate = discoveries > 0 ? Math.round((profileViews / discoveries) * 100) : 0;
+    const connectRate = profileViews > 0 ? ((connected / profileViews) * 100).toFixed(1) : "0.0";
+    return { connected, discoveries, profileViews, viewRate, connectRate };
+  }, [resellerMirrors.length, mirroredProducts.length, listingPublished]);
+
+  const toggleEntireCategoryMirror = (catName: string, items: ProductItem[]) => {
+    const isCurrentlyFull = mirroredCategories.some(
+      (c) => c.toLowerCase() === catName.toLowerCase()
+    );
+    const itemSkus = items.map((i) => i.skuCode.toUpperCase());
+    if (isCurrentlyFull) {
+      setMirroredCategories(
+        mirroredCategories.filter((c) => c.toLowerCase() !== catName.toLowerCase())
+      );
+      setMirroredProductSkus(
+        mirroredProductSkus.filter((s) => !itemSkus.includes(s.toUpperCase()))
+      );
+    } else {
+      setMirroredCategories(Array.from(new Set([...mirroredCategories, catName])));
+      setMirroredProductSkus(Array.from(new Set([...mirroredProductSkus, ...itemSkus])));
+    }
+  };
+
+  const toggleSingleProductMirror = (skuCode: string, catName: string, categoryItems: ProductItem[]) => {
+    const upperSku = skuCode.toUpperCase();
+    const isCurrentlyMirrored = effectiveMirroredSkus.has(upperSku);
+    const catSkus = categoryItems.map((i) => i.skuCode.toUpperCase());
+
+    let nextSkus: string[];
+    if (isCurrentlyMirrored) {
+      // Remove from mirroredProductSkus; if the entire category was marked, expand remaining items instead
+      const baseSkus = Array.from(effectiveMirroredSkus);
+      nextSkus = baseSkus.filter((s) => s !== upperSku);
+      setMirroredCategories(
+        mirroredCategories.filter((c) => c.toLowerCase() !== catName.toLowerCase())
+      );
+      setMirroredProductSkus(nextSkus);
+    } else {
+      nextSkus = Array.from(new Set([...Array.from(effectiveMirroredSkus), upperSku]));
+      setMirroredProductSkus(nextSkus);
+      // If all items in this category are now selected, mark entire category as mirrored too
+      const allInCatSelected = catSkus.every((s) => nextSkus.includes(s));
+      if (allInCatSelected) {
+        setMirroredCategories(Array.from(new Set([...mirroredCategories, catName])));
+      }
+    }
+  };
+
+  const selectAllCatalogForMirror = () => {
+    setMirroredCategories(categorizedProducts.map((g) => g.category));
+    setMirroredProductSkus(products.map((p) => p.skuCode.toUpperCase()));
+  };
+
+  const clearAllCatalogMirror = () => {
+    setMirroredCategories([]);
+    setMirroredProductSkus([]);
+  };
+
+  const handleAddDiscountRule = () => {
+    const numericVal = Number(ruleValue);
+    if (!Number.isFinite(numericVal) || numericVal <= 0) return;
+    if (ruleScope === "CATEGORY" && ruleTargetCategories.length === 0) return;
+    if (ruleScope === "SPECIFIC_PRODUCTS" && ruleTargetSkus.length === 0) return;
+    if (ruleResellerScope === "SPECIFIC_RESELLERS" && ruleTargetResellers.length === 0) return;
+
+    const autoLabel =
+      ruleName.trim() ||
+      `${ruleType === "PERCENTAGE" ? `${numericVal}% Off` : `₦${numericVal.toLocaleString()} Off`} · ${
+        ruleScope === "ENTIRE_MIRROR_CATALOG"
+          ? "Entire Mirror Catalog"
+          : ruleScope === "CATEGORY"
+            ? ruleTargetCategories.join(", ")
+            : `${ruleTargetSkus.length} Product(s)`
+      }`;
+
+    const newRule: WholesaleDiscountRule = {
+      id: `wdisc-${Date.now()}`,
+      name: autoLabel,
+      discountType: ruleType,
+      value: numericVal,
+      scope: ruleScope,
+      targetCategories: ruleScope === "CATEGORY" ? ruleTargetCategories : [],
+      targetProductSkus: ruleScope === "SPECIFIC_PRODUCTS" ? ruleTargetSkus : [],
+      resellerScope: ruleResellerScope,
+      targetResellers: ruleResellerScope === "SPECIFIC_RESELLERS" ? ruleTargetResellers : [],
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    };
+    setWholesaleDiscountRules([newRule, ...wholesaleDiscountRules]);
+    setRuleName("");
+  };
+
+  const computeEffectiveWholesalePrice = (product: ProductItem, targetReseller: string) => {
+    const base = product.basePriceNaira || 0;
+    const catLower = (product.category || "General").trim().toLowerCase();
+    const skuUpper = product.skuCode.toUpperCase();
+    let bestDiscount = 0;
+    let appliedRule: string | null = null;
+
+    for (const rule of wholesaleDiscountRules) {
+      if (!rule.isActive) continue;
+      if (rule.resellerScope === "SPECIFIC_RESELLERS") {
+        if (targetReseller === "ALL_RESELLERS") continue;
+        const targets = (rule.targetResellers ?? []).map((r) => r.toLowerCase());
+        if (!targets.includes(targetReseller.toLowerCase())) continue;
+      }
+      const matchesScope =
+        rule.scope === "ENTIRE_MIRROR_CATALOG" ||
+        (rule.scope === "CATEGORY" &&
+          (rule.targetCategories ?? []).some((c) => c.toLowerCase() === catLower)) ||
+        (rule.scope === "SPECIFIC_PRODUCTS" &&
+          (rule.targetProductSkus ?? []).some((s) => s.toUpperCase() === skuUpper));
+      if (!matchesScope) continue;
+
+      const disc =
+        rule.discountType === "PERCENTAGE"
+          ? Math.round((base * Math.min(100, rule.value)) / 100)
+          : Math.min(base, Math.round(rule.value));
+      if (disc > bestDiscount) {
+        bestDiscount = disc;
+        appliedRule = rule.name;
+      }
+    }
+
+    return {
+      baseNaira: base,
+      discountNaira: bestDiscount,
+      netNaira: Math.max(0, base - bestDiscount),
+      appliedRule,
+    };
+  };
+
+  useEffect(() => {
+    if (listing) {
+      setListingPublished(listing.isPublished);
+      setBusinessName(listing.businessName || vendorName || "My Store");
+      setCategory(listing.category || "Home & living");
+      setVendorState(listing.baseState || "Lagos");
+      setVendorCity(listing.baseCity || "Ikeja");
+      setShippingScope(listing.shippingScope || "LOCAL_STATE");
+      setAllowInterstate(listing.allowInterstate ?? false);
+      if (listing.coveredStates && listing.coveredStates.length > 0) {
+        setCoveredStates(listing.coveredStates);
+      }
+      if (listing.description) setDescription(listing.description);
+      if (listing.moq) setMoq(listing.moq);
+      if (listing.startingPriceFormatted) setStartingPrice(listing.startingPriceFormatted);
+      if (listing.fulfillmentMethod) setFulfillment(listing.fulfillmentMethod);
+      if (listing.deliveryNote) setDeliveryNote(listing.deliveryNote);
+      setMirroredCategories(listing.mirroredCategories ?? []);
+      setMirroredProductSkus(listing.mirroredProductSkus ?? []);
+      setWholesaleDiscountRules(listing.wholesaleDiscountRules ?? []);
+    } else if (vendorName) {
+      setBusinessName(vendorName);
+    }
+  }, [listing, vendorName]);
+
+  const persistCurrentListing = async (publishState: boolean) => {
+    if (!onSaveListing) return;
+    await onSaveListing({
+      isPublished: publishState,
+      businessName,
+      category,
+      baseState: vendorState,
+      baseCity: vendorCity,
+      shippingScope,
+      allowInterstate,
+      coveredStates,
+      description,
+      moq,
+      startingPriceNaira: startingPrice,
+      fulfillmentMethod: fulfillment,
+      deliveryNote,
+      featuredTags: mirroredCategories,
+      mirroredCategories,
+      mirroredProductSkus: Array.from(effectiveMirroredSkus),
+      wholesaleDiscountRules,
+      subscriptionPlan: "GROWTH",
+    });
+  };
 
   // Sync state and city into location string
   useEffect(() => {
@@ -132,10 +445,19 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [autoRenew, setAutoRenew] = useState(true);
 
-  const featuredCatalogsCount = [featDrinkware, featKitchen, featStorage, featSeasonal].filter(Boolean).length;
+  const featuredCatalogsCount = useMemo(() => {
+    const activeCats = new Set<string>(mirroredCategories.map((c) => c.toLowerCase()));
+    for (const p of products) {
+      if (effectiveMirroredSkus.has(p.skuCode.toUpperCase())) {
+        activeCats.add((p.category || "General").trim().toLowerCase());
+      }
+    }
+    return activeCats.size;
+  }, [mirroredCategories, products, effectiveMirroredSkus]);
 
   const handlePayAndActivate = () => {
     setPaying(true);
+    void persistCurrentListing(true);
     setTimeout(() => {
       setPaying(false);
       setPaymentSuccess(true);
@@ -144,7 +466,7 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
         setActiveTab("visibility");
         setPaymentSuccess(false);
       }, 1200);
-    }, 1200);
+    }, 600);
   };
 
   /* -------------------------------------------------------------------------- */
@@ -728,109 +1050,560 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
               </div>
             </div>
 
-            {/* Catalogs to feature */}
+            {/* Catalogs & Products to Mirror (Category-level & Individual Product Selection) */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-gray-900">Catalogs to feature</h3>
-
-              <div className="divide-y divide-gray-100">
-                <div className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold text-gray-900">Drinkware · 8 products</div>
-                    <div className="text-[11px] text-gray-400">Open to resellers · Includes Stainless flask at ₦8,000.</div>
-                  </div>
-                  <button
-                    onClick={() => setFeatDrinkware(!featDrinkware)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                      featDrinkware ? "bg-[#0d5c3a]" : "bg-gray-200"
-                    }`}
-                  >
-                    <div
-                      className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                        featDrinkware ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Catalogs &amp; Products to Mirror</h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Select individual products inside each category, or toggle <strong>Entire Category</strong> to mirror every item in that category.
+                  </p>
                 </div>
-
-                <div className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold text-gray-900">Kitchen essentials · 10 products</div>
-                    <div className="text-[11px] text-gray-400">Open to resellers · From ₦6,000.</div>
-                  </div>
+                <div className="flex items-center gap-2 self-start sm:self-center">
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                    {effectiveMirroredSkus.size} / {products.length} products selected
+                  </span>
                   <button
-                    onClick={() => setFeatKitchen(!featKitchen)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                      featKitchen ? "bg-[#0d5c3a]" : "bg-gray-200"
-                    }`}
+                    type="button"
+                    onClick={selectAllCatalogForMirror}
+                    className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-semibold cursor-pointer"
                   >
-                    <div
-                      className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                        featKitchen ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
+                    Select All
                   </button>
-                </div>
-
-                <div className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold text-gray-900">Storage &amp; organisation · 6 products</div>
-                    <div className="text-[11px] text-gray-400">Open to resellers · From ₦3,000.</div>
-                  </div>
                   <button
-                    onClick={() => setFeatStorage(!featStorage)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                      featStorage ? "bg-[#0d5c3a]" : "bg-gray-200"
-                    }`}
+                    type="button"
+                    onClick={clearAllCatalogMirror}
+                    className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-[10px] font-semibold cursor-pointer"
                   >
-                    <div
-                      className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                        featStorage ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold text-gray-900">Seasonal bundles</div>
-                    <div className="text-[11px] text-gray-400">Restricted catalog · Not included in directory listing.</div>
-                  </div>
-                  <button
-                    onClick={() => setFeatSeasonal(!featSeasonal)}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
-                      featSeasonal ? "bg-[#0d5c3a]" : "bg-gray-200"
-                    }`}
-                  >
-                    <div
-                      className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                        featSeasonal ? "translate-x-5" : "translate-x-0"
-                      }`}
-                    />
+                    Clear
                   </button>
                 </div>
               </div>
+
+              {categorizedProducts.length === 0 ? (
+                <div className="p-6 text-center text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                  No products in your catalog yet. Add products in the Products tab to configure mirroring.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {categorizedProducts.map((group) => {
+                    const isEntireCatSelected = mirroredCategories.some(
+                      (c) => c.toLowerCase() === group.category.toLowerCase()
+                    );
+                    const selectedInGroup = group.items.filter((i) =>
+                      effectiveMirroredSkus.has(i.skuCode.toUpperCase())
+                    ).length;
+                    const isExpanded = expandedCategories[group.category] ?? true;
+
+                    return (
+                      <div
+                        key={group.category}
+                        className={`rounded-xl border transition-all overflow-hidden ${
+                          isEntireCatSelected || selectedInGroup > 0
+                            ? "border-emerald-300 bg-emerald-50/20"
+                            : "border-gray-200 bg-white"
+                        }`}
+                      >
+                        <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50/60 border-b border-gray-100">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedCategories((prev) => ({
+                                ...prev,
+                                [group.category]: !isExpanded,
+                              }))
+                            }
+                            className="flex items-center gap-2 text-left cursor-pointer"
+                          >
+                            <span className="text-gray-400 text-[10px]">{isExpanded ? "▼" : "▶"}</span>
+                            <div>
+                              <div className="font-bold text-gray-900 flex items-center gap-2">
+                                <span>{group.category}</span>
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600">
+                                  {selectedInGroup}/{group.items.length} selected
+                                </span>
+                                {isEntireCatSelected && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                    Entire Category Mirrored
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-gray-400 mt-0.5">
+                                {group.items.length} products · From ₦{group.minPriceNaira.toLocaleString()}
+                              </div>
+                            </div>
+                          </button>
+
+                          <div className="flex items-center gap-2 self-end sm:self-center">
+                            <span className="text-[11px] font-medium text-gray-600">
+                              Mirror entire category
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => toggleEntireCategoryMirror(group.category, group.items)}
+                              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+                                isEntireCatSelected ? "bg-[#0d5c3a]" : "bg-gray-300"
+                              }`}
+                            >
+                              <div
+                                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                                  isEntireCatSelected ? "translate-x-5" : "translate-x-0"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="divide-y divide-gray-100 bg-white">
+                            {group.items.map((item) => {
+                              const checked = effectiveMirroredSkus.has(item.skuCode.toUpperCase());
+                              const pricing = computeEffectiveWholesalePrice(item, previewReseller);
+
+                              return (
+                                <label
+                                  key={item.id}
+                                  className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-gray-50/70 cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() =>
+                                        toggleSingleProductMirror(item.skuCode, group.category, group.items)
+                                      }
+                                      className="w-4 h-4 rounded border-gray-300 text-emerald-700 focus:ring-emerald-600 cursor-pointer"
+                                    />
+                                    {item.primaryImageUrl ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        src={resolveImageUrl(item.primaryImageUrl)}
+                                        alt={item.name}
+                                        className="w-9 h-9 rounded-lg object-cover border border-gray-200 shrink-0"
+                                      />
+                                    ) : (
+                                      <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center text-sm shrink-0">
+                                        📦
+                                      </div>
+                                    )}
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-gray-900 truncate">{item.name}</div>
+                                      <div className="text-[10px] text-gray-400 font-mono">
+                                        {item.skuCode} · {item.availableStock} in stock
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-right shrink-0">
+                                    {pricing.discountNaira > 0 ? (
+                                      <div>
+                                        <span className="text-[10px] line-through text-gray-400 mr-1.5">
+                                          ₦{pricing.baseNaira.toLocaleString()}
+                                        </span>
+                                        <span className="font-bold text-emerald-700">
+                                          ₦{pricing.netNaira.toLocaleString()}
+                                        </span>
+                                        <div className="text-[9px] text-emerald-600 font-semibold">
+                                          -₦{pricing.discountNaira.toLocaleString()} ({pricing.appliedRule})
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <span className="font-semibold text-gray-900">
+                                        ₦{pricing.baseNaira.toLocaleString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Wholesale & Drop-Shipper Discount Rules */}
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-5 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                    <span>🏷️</span>
+                    <span>Wholesale &amp; Drop-Shipper Discount Rules</span>
+                  </h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Give discounts on your entire mirror catalog, an entire category, or specific products—for all resellers or specific drop-shippers in your network.
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold self-start sm:self-center">
+                  {wholesaleDiscountRules.filter((r) => r.isActive).length} Active Rules
+                </span>
+              </div>
+
+              {/* Rule Builder Form */}
+              <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Rule Label (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. VIP Reseller Deal"
+                      value={ruleName}
+                      onChange={(e) => setRuleName(e.target.value)}
+                      className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">Discount Type</label>
+                    <select
+                      value={ruleType}
+                      onChange={(e) => setRuleType(e.target.value as "PERCENTAGE" | "FLAT_NAIRA")}
+                      className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
+                    >
+                      <option value="PERCENTAGE">Percentage (% Off)</option>
+                      <option value="FLAT_NAIRA">Flat Amount (₦ Off)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 mb-1">
+                      {ruleType === "PERCENTAGE" ? "Discount %" : "Discount Amount (₦)"}
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={ruleType === "PERCENTAGE" ? 95 : undefined}
+                      value={ruleValue}
+                      onChange={(e) => setRuleValue(e.target.value)}
+                      className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Product Scope */}
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-semibold text-gray-700">Apply Discount To:</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRuleScope("ENTIRE_MIRROR_CATALOG")}
+                      className={`p-2.5 rounded-lg border text-left cursor-pointer ${
+                        ruleScope === "ENTIRE_MIRROR_CATALOG"
+                          ? "border-emerald-600 bg-emerald-50 text-emerald-900 font-semibold"
+                          : "border-gray-200 bg-white text-gray-700"
+                      }`}
+                    >
+                      🌐 Entire Mirror Catalog
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRuleScope("CATEGORY")}
+                      className={`p-2.5 rounded-lg border text-left cursor-pointer ${
+                        ruleScope === "CATEGORY"
+                          ? "border-emerald-600 bg-emerald-50 text-emerald-900 font-semibold"
+                          : "border-gray-200 bg-white text-gray-700"
+                      }`}
+                    >
+                      🗂️ Specific Categories
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRuleScope("SPECIFIC_PRODUCTS")}
+                      className={`p-2.5 rounded-lg border text-left cursor-pointer ${
+                        ruleScope === "SPECIFIC_PRODUCTS"
+                          ? "border-emerald-600 bg-emerald-50 text-emerald-900 font-semibold"
+                          : "border-gray-200 bg-white text-gray-700"
+                      }`}
+                    >
+                      📦 Specific Products
+                    </button>
+                  </div>
+
+                  {ruleScope === "CATEGORY" && (
+                    <div className="flex flex-wrap gap-1.5 p-2.5 bg-white border border-gray-200 rounded-lg">
+                      {categorizedProducts.map((g) => {
+                        const active = ruleTargetCategories.includes(g.category);
+                        return (
+                          <button
+                            key={g.category}
+                            type="button"
+                            onClick={() =>
+                              setRuleTargetCategories(
+                                active
+                                  ? ruleTargetCategories.filter((c) => c !== g.category)
+                                  : [...ruleTargetCategories, g.category]
+                              )
+                            }
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-medium cursor-pointer ${
+                              active
+                                ? "bg-emerald-600 text-white"
+                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            }`}
+                          >
+                            {g.category} ({g.items.length}) {active && "✓"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {ruleScope === "SPECIFIC_PRODUCTS" && (
+                    <div className="flex flex-wrap gap-1.5 p-2.5 bg-white border border-gray-200 rounded-lg max-h-32 overflow-y-auto">
+                      {products.map((p) => {
+                        const active = ruleTargetSkus.includes(p.skuCode.toUpperCase());
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() =>
+                              setRuleTargetSkus(
+                                active
+                                  ? ruleTargetSkus.filter((s) => s !== p.skuCode.toUpperCase())
+                                  : [...ruleTargetSkus, p.skuCode.toUpperCase()]
+                              )
+                            }
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-medium cursor-pointer ${
+                              active
+                                ? "bg-emerald-600 text-white"
+                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            }`}
+                          >
+                            {p.name} ({p.skuCode}) {active && "✓"}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Reseller / Drop-Shipper Audience */}
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-semibold text-gray-700">Eligible Drop-Shippers / Resellers:</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRuleResellerScope("ALL_RESELLERS")}
+                      className={`p-2.5 rounded-lg border text-left cursor-pointer ${
+                        ruleResellerScope === "ALL_RESELLERS"
+                          ? "border-emerald-600 bg-emerald-50 text-emerald-900 font-semibold"
+                          : "border-gray-200 bg-white text-gray-700"
+                      }`}
+                    >
+                      👥 All Network Resellers &amp; Drop-Shippers
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRuleResellerScope("SPECIFIC_RESELLERS")}
+                      className={`p-2.5 rounded-lg border text-left cursor-pointer ${
+                        ruleResellerScope === "SPECIFIC_RESELLERS"
+                          ? "border-emerald-600 bg-emerald-50 text-emerald-900 font-semibold"
+                          : "border-gray-200 bg-white text-gray-700"
+                      }`}
+                    >
+                      🎯 Specific Drop-Shipper / Seller in Network
+                    </button>
+                  </div>
+
+                  {ruleResellerScope === "SPECIFIC_RESELLERS" && (
+                    <div className="p-2.5 bg-white border border-gray-200 rounded-lg space-y-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {networkResellers.map((reseller) => {
+                          const active = ruleTargetResellers.includes(reseller);
+                          return (
+                            <button
+                              key={reseller}
+                              type="button"
+                              onClick={() =>
+                                setRuleTargetResellers(
+                                  active
+                                    ? ruleTargetResellers.filter((r) => r !== reseller)
+                                    : [...ruleTargetResellers, reseller]
+                                )
+                              }
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-medium cursor-pointer ${
+                                active
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                              }`}
+                            >
+                              {reseller} {active && "✓"}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Add another drop-shipper / seller name..."
+                          value={customResellerInput}
+                          onChange={(e) => setCustomResellerInput(e.target.value)}
+                          className="flex-1 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const clean = customResellerInput.trim();
+                            if (!clean) return;
+                            if (!ruleTargetResellers.includes(clean)) {
+                              setRuleTargetResellers([...ruleTargetResellers, clean]);
+                            }
+                            setCustomResellerInput("");
+                          }}
+                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-[11px] font-semibold cursor-pointer"
+                        >
+                          + Add Seller
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleAddDiscountRule}
+                    className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-2xs cursor-pointer"
+                  >
+                    + Add Discount Rule
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Discount Rules List + Live Reseller Price Previewer */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                <span className="font-semibold text-gray-700">Configured Rules ({wholesaleDiscountRules.length})</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-gray-500">Preview prices for:</span>
+                  <select
+                    value={previewReseller}
+                    onChange={(e) => setPreviewReseller(e.target.value)}
+                    className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg bg-white"
+                  >
+                    <option value="ALL_RESELLERS">All Network Resellers</option>
+                    {networkResellers.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {wholesaleDiscountRules.length === 0 ? (
+                <p className="text-[11px] text-gray-400">
+                  No wholesale discount rules added yet. Create one above to offer category-wide, product-specific, or VIP drop-shipper pricing.
+                </p>
+              ) : (
+                <div className="divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden">
+                  {wholesaleDiscountRules.map((rule) => (
+                    <div key={rule.id} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-gray-900">{rule.name}</span>
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                            {rule.discountType === "PERCENTAGE"
+                              ? `${rule.value}% OFF`
+                              : `₦${rule.value.toLocaleString()} OFF`}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                              rule.isActive ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-500"
+                            }`}
+                          >
+                            {rule.isActive ? "Active" : "Paused"}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-gray-500">
+                          Scope:{" "}
+                          <strong>
+                            {rule.scope === "ENTIRE_MIRROR_CATALOG"
+                              ? "Entire Mirror Catalog"
+                              : rule.scope === "CATEGORY"
+                                ? `Categories: ${(rule.targetCategories ?? []).join(", ")}`
+                                : `Products: ${(rule.targetProductSkus ?? []).join(", ")}`}
+                          </strong>{" "}
+                          · Audience:{" "}
+                          <strong>
+                            {rule.resellerScope === "ALL_RESELLERS"
+                              ? "All Resellers"
+                              : `Specific: ${(rule.targetResellers ?? []).join(", ")}`}
+                          </strong>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 self-end sm:self-center">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setWholesaleDiscountRules(
+                              wholesaleDiscountRules.map((r) =>
+                                r.id === rule.id ? { ...r, isActive: !r.isActive } : r
+                              )
+                            )
+                          }
+                          className="px-2.5 py-1 border border-gray-200 rounded-lg text-[11px] font-medium hover:bg-gray-50 cursor-pointer"
+                        >
+                          {rule.isActive ? "Pause" : "Activate"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setWholesaleDiscountRules(
+                              wholesaleDiscountRules.filter((r) => r.id !== rule.id)
+                            )
+                          }
+                          className="px-2.5 py-1 border border-rose-200 text-rose-600 rounded-lg text-[11px] font-medium hover:bg-rose-50 cursor-pointer"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
           {/* Right Column: Listing preview & Publish checklist */}
           <div className="space-y-6">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <div>
-                <h3 className="text-xs font-bold text-gray-900">Listing preview</h3>
-                <p className="text-[11px] text-gray-400">What resellers see in Find suppliers</p>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-bold text-gray-900">Listing preview</h3>
+                  <p className="text-[11px] text-gray-400">Live reseller view in Find suppliers</p>
+                </div>
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Live
+                </span>
               </div>
 
               <div className="border border-gray-200 rounded-xl p-4 space-y-3">
-                <div className="w-16 h-16 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-3xl mx-auto">
-                  🧴
-                </div>
+                {previewCoverProduct?.primaryImageUrl ? (
+                  <img
+                    src={resolveImageUrl(previewCoverProduct.primaryImageUrl)}
+                    alt={previewCoverProduct.name}
+                    className="w-16 h-16 rounded-xl object-cover border border-gray-200 mx-auto"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-xl bg-[#eef2ff] text-[#1e1b4b] border border-indigo-200 flex items-center justify-center font-bold text-lg mx-auto">
+                    {(businessName || "MS")
+                      .split(" ")
+                      .map((w) => w[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </div>
+                )}
                 <div>
                   <div className="font-bold text-gray-900 text-sm">{businessName}</div>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                    Verified business
+                    {listingPublished ? "Published & Verified" : "Draft · Verified business"}
                   </span>
                 </div>
-                <p className="text-[11px] text-gray-500">{location} · {category}</p>
+                <p className="text-[11px] text-gray-500">
+                  {vendorCity || "Lagos"}, {vendorState || "Lagos"} · {category}
+                </p>
                 <div className="flex flex-wrap gap-1.5 pt-0.5">
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getVisibilityBadge().color}`}>
                     {getVisibilityBadge().label}
@@ -842,28 +1615,59 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                   )}
                 </div>
                 <p className="text-gray-700 text-xs line-clamp-3">{description}</p>
-                <div className="flex gap-2">
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    Open to verified resellers
-                  </span>
-                </div>
                 <div className="divide-y divide-gray-100 text-[11px] pt-1">
                   <div className="py-1 flex justify-between">
-                    <span className="text-gray-400">Catalogs featured</span>
-                    <span className="font-semibold text-gray-900">{featuredCatalogsCount} catalogs</span>
+                    <span className="text-gray-400">Mirrored catalog</span>
+                    <span className="font-semibold text-gray-900">
+                      {featuredCatalogsCount} categories · {effectiveMirroredSkus.size} items
+                    </span>
+                  </div>
+                  <div className="py-1 flex justify-between">
+                    <span className="text-gray-400">Available stock</span>
+                    <span className="font-semibold text-gray-900">
+                      {liveTotalStock.toLocaleString()} units
+                    </span>
+                  </div>
+                  <div className="py-1 flex justify-between">
+                    <span className="text-gray-400">Discount rules</span>
+                    <span className="font-semibold text-emerald-700">
+                      {wholesaleDiscountRules.filter((r) => r.isActive).length} active
+                    </span>
                   </div>
                   <div className="py-1 flex justify-between">
                     <span className="text-gray-400">Wholesale from</span>
-                    <span className="font-semibold text-gray-900">{startingPrice}</span>
+                    <span className="font-semibold text-gray-900">{liveStartingPrice}</span>
                   </div>
                   <div className="py-1 flex justify-between">
                     <span className="text-gray-400">Minimum order</span>
                     <span className="font-semibold text-gray-900">{moq}</span>
                   </div>
                 </div>
+
+                {mirroredProducts.length > 0 && (
+                  <div className="pt-2 border-t border-gray-100 space-y-1.5">
+                    <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                      Mirrored items preview
+                    </div>
+                    {mirroredProducts.slice(0, 3).map((item) => (
+                      <div key={item.skuCode} className="flex items-center justify-between text-[11px] bg-gray-50 px-2.5 py-1.5 rounded-lg">
+                        <span className="truncate font-medium text-gray-800 max-w-[150px]">{item.name}</span>
+                        <span className="font-mono font-bold text-emerald-700 shrink-0">
+                          ₦{item.basePriceNaira.toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                    {mirroredProducts.length > 3 && (
+                      <div className="text-[10px] text-gray-400 text-center">
+                        +{mirroredProducts.length - 3} more mirrored products
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <button
                   onClick={() => setShowDirPreviewModal(true)}
-                  className="w-full py-1.5 border border-gray-200 rounded text-gray-700 text-xs hover:bg-gray-50"
+                  className="w-full py-1.5 border border-gray-200 rounded text-gray-700 text-xs hover:bg-gray-50 cursor-pointer"
                 >
                   View full preview ↗
                 </button>
@@ -921,6 +1725,7 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
             )}
             <button
               onClick={() => {
+                void persistCurrentListing(listingPublished);
                 setDraftSaved(true);
                 setTimeout(() => setDraftSaved(false), 2000);
               }}
@@ -936,6 +1741,7 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
             </button>
             <button
               onClick={() => {
+                void persistCurrentListing(true);
                 setPublishSuccess(true);
                 setListingPublished(true);
                 setTimeout(() => {
@@ -1072,7 +1878,7 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                 </span>
               </div>
           <p className="text-xs text-gray-500 mt-1">
-            Home &amp; living · Lagos, Nigeria · 3 catalogs · 24 products
+            {category} · {location} · {featuredCatalogsCount} categories · {effectiveMirroredSkus.size} mirrored products · {wholesaleDiscountRules.filter((r) => r.isActive).length} discount rules
           </p>
           <div className="text-[11px] text-gray-400 mt-0.5">
             Subscription active: 3 Nov–3 Dec 2026 · Last published today
@@ -1101,18 +1907,20 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-[#0d5c3a] text-white rounded-2xl p-5 shadow-xs">
           <div className="text-xs text-emerald-100 font-medium">Listing discoveries</div>
-          <div className="text-3xl font-extrabold mt-1">240</div>
-          <div className="text-[11px] text-emerald-200 mt-2">Search appearances · Today, 3 Nov</div>
+          <div className="text-3xl font-extrabold mt-1">{liveVisibilityStats.discoveries}</div>
+          <div className="text-[11px] text-emerald-200 mt-2">
+            {listingPublished ? `${mirroredProducts.length} mirrored products indexed` : "Publish listing to appear in directory"}
+          </div>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
           <div className="text-xs text-gray-500 font-medium">Profile views</div>
-          <div className="text-3xl font-extrabold text-gray-900 mt-1">60</div>
-          <div className="text-[11px] text-gray-400 mt-2">25% of discoveries</div>
+          <div className="text-3xl font-extrabold text-gray-900 mt-1">{liveVisibilityStats.profileViews}</div>
+          <div className="text-[11px] text-gray-400 mt-2">{liveVisibilityStats.viewRate}% of discoveries</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-xs">
           <div className="text-xs text-gray-500 font-medium">Connected resellers</div>
-          <div className="text-3xl font-extrabold text-gray-900 mt-1">1</div>
-          <div className="text-[11px] text-emerald-700 font-semibold mt-2">1.7% of profile views</div>
+          <div className="text-3xl font-extrabold text-gray-900 mt-1">{liveVisibilityStats.connected}</div>
+          <div className="text-[11px] text-emerald-700 font-semibold mt-2">{liveVisibilityStats.connectRate}% of profile views</div>
         </div>
       </div>
 
@@ -1124,43 +1932,57 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
             <div>
               <h3 className="text-sm font-bold text-gray-900">Discovery to connection</h3>
-              <p className="text-[11px] text-gray-400">Today · 3 Nov 2026 · Since activation</p>
+              <p className="text-[11px] text-gray-400">Live directory funnel · Synced with database</p>
             </div>
 
             <div className="space-y-4 pt-2">
               <div>
                 <div className="flex justify-between mb-1.5 font-medium">
                   <span className="text-gray-700">Discovered in directory</span>
-                  <span className="font-bold text-gray-900">240</span>
+                  <span className="font-bold text-gray-900">{liveVisibilityStats.discoveries}</span>
                 </div>
                 <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#0d5c3a] rounded-full w-full" />
+                  <div
+                    className="h-full bg-[#0d5c3a] rounded-full"
+                    style={{ width: liveVisibilityStats.discoveries > 0 ? "100%" : "0%" }}
+                  />
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between mb-1.5 font-medium">
                   <span className="text-gray-700">Viewed supplier profile</span>
-                  <span className="font-bold text-gray-900">60</span>
+                  <span className="font-bold text-gray-900">{liveVisibilityStats.profileViews}</span>
                 </div>
                 <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#0d5c3a] rounded-full w-[25%]" />
+                  <div
+                    className="h-full bg-[#0d5c3a] rounded-full"
+                    style={{ width: `${Math.min(100, liveVisibilityStats.viewRate)}%` }}
+                  />
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between mb-1.5 font-medium">
                   <span className="text-gray-700">Connected &amp; mirrored</span>
-                  <span className="font-bold text-gray-900">1</span>
+                  <span className="font-bold text-gray-900">{liveVisibilityStats.connected}</span>
                 </div>
                 <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#0d5c3a] rounded-full w-[4%]" />
+                  <div
+                    className="h-full bg-[#0d5c3a] rounded-full"
+                    style={{
+                      width:
+                        liveVisibilityStats.profileViews > 0
+                          ? `${Math.max(4, Math.min(100, Math.round((liveVisibilityStats.connected / liveVisibilityStats.profileViews) * 100)))}%`
+                          : "0%",
+                    }}
+                  />
                 </div>
               </div>
             </div>
 
             <p className="text-[11px] text-gray-400 pt-1">
-              Conversion: 1 connected reseller ÷ 60 profile views = 1.7%. A connection is not a guaranteed sale.
+              Conversion: {liveVisibilityStats.connected} connected reseller{liveVisibilityStats.connected === 1 ? "" : "s"} ÷ {liveVisibilityStats.profileViews} profile views = {liveVisibilityStats.connectRate}%.
             </p>
           </div>
 
@@ -1174,22 +1996,41 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
               <table className="w-full text-left text-xs min-w-[500px]">
                 <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                   <tr>
-                    <th className="px-5 py-3">Reseller</th>
-                    <th className="px-4 py-3">Connected</th>
+                    <th className="px-5 py-3">Partner / Mirror</th>
+                    <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Linked Products</th>
-                    <th className="px-5 py-3 text-right">Paid Volume</th>
+                    <th className="px-5 py-3 text-right">Markup Rule</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-gray-700">
-                  <tr
-                    onClick={() => setShowResellerModal(true)}
-                    className="hover:bg-gray-50 cursor-pointer"
-                  >
-                    <td className="px-5 py-3.5 font-semibold text-gray-900">Nia Stores ↗</td>
-                    <td className="px-4 py-3.5 text-gray-500">3 Nov 2026</td>
-                    <td className="px-4 py-3.5">3 products</td>
-                    <td className="px-5 py-3.5 text-right font-bold text-gray-900">₦50,000</td>
-                  </tr>
+                  {resellerMirrors.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-6 text-center text-gray-400">
+                        No resellers have mirrored your catalog yet. Publish your listing to start receiving connections.
+                      </td>
+                    </tr>
+                  ) : (
+                    resellerMirrors.map((mirror) => (
+                      <tr
+                        key={mirror.id}
+                        onClick={() => setShowResellerModal(true)}
+                        className="hover:bg-gray-50 cursor-pointer"
+                      >
+                        <td className="px-5 py-3.5 font-semibold text-gray-900">
+                          {mirror.supplierName || mirror.supplierSlug || mirror.supplierId} ↗
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                            {mirror.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5">{mirror.mirroredProductSkus.length} products</td>
+                        <td className="px-5 py-3.5 text-right font-bold text-gray-900">
+                          +{(mirror.defaultMarkupBps / 100).toFixed(0)}%
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1247,7 +2088,11 @@ export function MarketBoostView({ initialTab = "visibility", vendorName }: Marke
                 Preview directory listing
               </button>
               <button
-                onClick={() => setListingPublished(!listingPublished)}
+                onClick={() => {
+                  const next = !listingPublished;
+                  setListingPublished(next);
+                  void persistCurrentListing(next);
+                }}
                 className={`w-full py-2 border font-medium rounded-lg transition-colors ${
                   listingPublished
                     ? "border-gray-200 hover:bg-gray-50 text-rose-700"

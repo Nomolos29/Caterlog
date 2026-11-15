@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { CheckIcon } from "../icons";
 import { EmptyState } from "../ui/empty-state";
-import type { OrderItem, ProductItem, ChatMessageItem } from "@/lib/types";
+import type { OrderItem, ProductItem, ChatMessageItem, VendorNotificationItem } from "@/lib/types";
 
 export interface NotificationRecord {
   id: string;
@@ -21,6 +21,12 @@ interface NotificationsViewProps {
   orders?: OrderItem[];
   products?: ProductItem[];
   chatMessages?: ChatMessageItem[];
+  dbNotifications?: VendorNotificationItem[];
+  onSyncNotifications?: (input: {
+    readKeys?: string[];
+    dismissedKeys?: string[];
+    markAllRead?: boolean;
+  }) => Promise<boolean>;
   onNavigateToOrder?: (code: string) => void;
   onNavigateToPayments?: () => void;
   onNavigateToProducts?: () => void;
@@ -30,15 +36,40 @@ export function NotificationsView({
   orders = [],
   products = [],
   chatMessages = [],
+  dbNotifications = [],
+  onSyncNotifications,
   onNavigateToOrder,
   onNavigateToPayments,
   onNavigateToProducts,
 }: NotificationsViewProps) {
   const [filter, setFilter] = useState<"ALL" | "UNREAD" | "ORDERS" | "PAYOUTS" | "INVENTORY">("ALL");
 
-  // Track user reads & dismissals
-  const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
-  const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
+  // Track user reads & dismissals hydrated from DB
+  const [readIds, setReadIds] = useState<Set<string>>(
+    () => new Set(dbNotifications.filter((n) => n.isRead).map((n) => n.notificationKey))
+  );
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(
+    () => new Set(dbNotifications.filter((n) => n.isDismissed).map((n) => n.notificationKey))
+  );
+
+  useEffect(() => {
+    if (dbNotifications && dbNotifications.length > 0) {
+      setReadIds((prev) => {
+        const next = new Set(prev);
+        for (const n of dbNotifications) {
+          if (n.isRead) next.add(n.notificationKey);
+        }
+        return next;
+      });
+      setDeletedIds((prev) => {
+        const next = new Set(prev);
+        for (const n of dbNotifications) {
+          if (n.isDismissed) next.add(n.notificationKey);
+        }
+        return next;
+      });
+    }
+  }, [dbNotifications]);
 
   // Dynamically derive live notification items from orders, products, and chat
   const notifications: NotificationRecord[] = useMemo(() => {
@@ -148,15 +179,25 @@ export function NotificationsView({
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const handleMarkAllRead = () => {
-    setReadIds(new Set(notifications.map((n) => n.id)));
+    const allIds = notifications.map((n) => n.id);
+    setReadIds(new Set(allIds));
+    if (onSyncNotifications) {
+      void onSyncNotifications({ readKeys: allIds, markAllRead: true });
+    }
   };
 
   const handleMarkAsRead = (id: string) => {
     setReadIds((prev) => new Set([...prev, id]));
+    if (onSyncNotifications) {
+      void onSyncNotifications({ readKeys: [id] });
+    }
   };
 
   const handleDeleteNotification = (id: string) => {
     setDeletedIds((prev) => new Set([...prev, id]));
+    if (onSyncNotifications) {
+      void onSyncNotifications({ dismissedKeys: [id] });
+    }
   };
 
   const filteredNotifications = useMemo(() => {
@@ -203,10 +244,8 @@ export function NotificationsView({
         )}
       </div>
 
-      {/* Main Grid: Notifications Feed on Left, Preferences on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left 8 Cols: Filter Strip & Notifications List */}
-        <div className="lg:col-span-8 space-y-4">
+      {/* Main Notifications Feed */}
+      <div className="space-y-4">
           {/* Filter Tabs */}
           <div className="flex border-b border-gray-200 text-xs font-semibold gap-4 overflow-x-auto pb-0.5">
             {[
@@ -331,74 +370,6 @@ export function NotificationsView({
             </div>
           )}
         </div>
-
-        {/* Right 4 Cols: Notification Delivery Channels & Preferences */}
-        <div className="lg:col-span-4 space-y-6">
-          <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs space-y-5">
-            <div>
-              <h2 className="text-base font-bold text-gray-900">Alert Preferences</h2>
-              <p className="text-xs text-gray-500 mt-0.5">Control how and where you receive business alerts.</p>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              {/* WhatsApp Push */}
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-bold text-gray-900">WhatsApp Instant Alerts</div>
-                  <div className="text-[11px] text-gray-500 mt-0.5">
-                    Receive 1-tap alerts on your phone whenever an order is paid.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={waNotifications}
-                  onChange={(e) => setWaNotifications(e.target.checked)}
-                  className="rounded text-emerald-600 cursor-pointer mt-0.5"
-                />
-              </div>
-
-              {/* Email Digest */}
-              <div className="flex items-start justify-between gap-3 border-t border-gray-100 pt-3">
-                <div>
-                  <div className="font-bold text-gray-900">Daily Financial Digest</div>
-                  <div className="text-[11px] text-gray-500 mt-0.5">
-                    Email summary of Monnify split settlements at 9:00 PM WAT.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={emailDigest}
-                  onChange={(e) => setEmailDigest(e.target.checked)}
-                  className="rounded text-emerald-600 cursor-pointer mt-0.5"
-                />
-              </div>
-
-              {/* Audio Chime */}
-              <div className="flex items-start justify-between gap-3 border-t border-gray-100 pt-3">
-                <div>
-                  <div className="font-bold text-gray-900">Dashboard Audio Alert</div>
-                  <div className="text-[11px] text-gray-500 mt-0.5">
-                    Play a sound chime when a live WhatsApp buyer message arrives.
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={soundAlerts}
-                  onChange={(e) => setSoundAlerts(e.target.checked)}
-                  className="rounded text-emerald-600 cursor-pointer mt-0.5"
-                />
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-gray-100">
-              <span className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1.5">
-                <CheckIcon className="w-3.5 h-3.5" />
-                <span>Preferences saved automatically</span>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

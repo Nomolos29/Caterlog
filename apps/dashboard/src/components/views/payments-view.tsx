@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
-import type { OrderItem, VendorProfile } from "@/lib/types";
+import type { OrderItem, VendorProfile, PayoutWithdrawalItem, SettlementSplitRuleItem } from "@/lib/types";
 import { EmptyState } from "../ui/empty-state";
 import { api } from "@/lib/api";
 
@@ -10,6 +10,9 @@ interface PaymentsViewProps {
   initialOrderCode?: string;
   orders?: OrderItem[];
   vendor?: VendorProfile;
+  payoutWithdrawals?: PayoutWithdrawalItem[];
+  settlementSplitRules?: SettlementSplitRuleItem[];
+  onSaveSplitRule?: (input: { supplierShareBps: number; resellerShareBps: number }) => Promise<boolean>;
   onNavigateToOrder?: (orderCode: string) => void;
   onSimulateTransfer?: (orderCode: string, amountNaira: number) => Promise<void>;
 }
@@ -87,6 +90,9 @@ export function PaymentsView({
   initialOrderCode,
   orders = [],
   vendor,
+  payoutWithdrawals = [],
+  settlementSplitRules = [],
+  onSaveSplitRule,
   onNavigateToOrder,
   onSimulateTransfer,
 }: PaymentsViewProps) {
@@ -152,6 +158,18 @@ export function PaymentsView({
   useEffect(() => {
     setTransactions(buildTransactions(orders));
   }, [orders]);
+
+  // Split Rules Configuration State
+  const initialSupplierPct = Math.round((settlementSplitRules[0]?.supplierShareBps ?? 7500) / 100);
+  const [splitSupplierPct, setSplitSupplierPct] = useState<number>(initialSupplierPct);
+  const [splitScope, setSplitScope] = useState<string>("All linked supplier products");
+  const [savingRule, setSavingRule] = useState(false);
+
+  useEffect(() => {
+    if (settlementSplitRules[0]?.supplierShareBps !== undefined) {
+      setSplitSupplierPct(Math.round(settlementSplitRules[0].supplierShareBps / 100));
+    }
+  }, [settlementSplitRules]);
 
   useEffect(() => {
     if (initialOrderCode) {
@@ -749,47 +767,47 @@ export function PaymentsView({
   }
 
   /* -------------------------------------------------------------------------- */
-  /* Screen 11: Payments · Payout accounts and splits                           */
+  /* Screen 11A: Payments · Payout accounts                                     */
   /* -------------------------------------------------------------------------- */
-  if (activeTab === "accounts" || activeTab === "rules") {
+  if (activeTab === "accounts") {
     return (
       <div className="space-y-6 max-w-6xl mx-auto pb-24">
         {/* Header */}
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Payments / Payout accounts</div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-            Payout accounts &amp; split setup
-          </h1>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Validate both recipients before enabling automated split checkout.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="text-xs text-gray-500 mb-1">Payments / Payout accounts</div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              Payout accounts &amp; bank setup
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Manage your settlement NUBAN, Monnify subaccount, and payout withdrawals.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowWithdrawModal(true)}
+            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg transition-colors shadow-xs cursor-pointer self-start sm:self-auto"
+          >
+            Withdraw funds
+          </button>
         </div>
 
         {/* Tab Strip */}
         <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
           <button
             onClick={() => setActiveTab("splits")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             Split transactions
           </button>
           <button
             onClick={() => setActiveTab("accounts")}
-            className={`pb-2.5 ${
-              activeTab === "accounts"
-                ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold"
-                : "text-gray-500 hover:text-gray-900"
-            }`}
+            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
           >
             Payout accounts
           </button>
           <button
             onClick={() => setActiveTab("rules")}
-            className={`pb-2.5 ${
-              activeTab === "rules"
-                ? "border-b-2 border-emerald-600 text-emerald-700 font-semibold"
-                : "text-gray-500 hover:text-gray-900"
-            }`}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             Split rules
           </button>
@@ -831,7 +849,7 @@ export function PaymentsView({
 
             <button
               onClick={() => setShowVerificationModal(true)}
-              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
+              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg transition-colors cursor-pointer"
             >
               View verification
             </button>
@@ -936,62 +954,59 @@ export function PaymentsView({
           </div>
         </div>
 
-        {/* 2 Column Bottom: Automatic Split Rule & Readiness Checks */}
+        {/* 2 Column Bottom: Payout Withdrawals & Gateway Readiness Checks */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Automatic split rule card */}
+          {/* Recent Payout Withdrawals */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900">Automatic split rule</h3>
-              <p className="text-[11px] text-gray-400">
-                Supplier cost first; your markup goes to your reseller subaccount
-              </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Payout withdrawals</h3>
+                <p className="text-[11px] text-gray-400">
+                  Recent bank disbursements from your settlement balance
+                </p>
+              </div>
+              <span className="text-[11px] font-semibold text-gray-500">
+                {payoutWithdrawals.length} recorded
+              </span>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 mb-1">Applies to</label>
-              <select className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white">
-                <option>All linked Aroko Wholesale products</option>
-              </select>
-            </div>
-
-            <div className="divide-y divide-gray-100">
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Customer pays · 2 flasks</span>
-                <span className="font-semibold text-gray-900">₦20,000</span>
+            {payoutWithdrawals.length === 0 ? (
+              <div className="p-4 rounded-xl bg-gray-50 border border-gray-100 text-gray-500 text-center">
+                No manual payout withdrawals yet. Automatic split settlements go directly to your linked NUBAN.
               </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Aroko receives · 2 × ₦8,000</span>
-                <span className="font-semibold text-gray-900">₦16,000</span>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {payoutWithdrawals.slice(0, 5).map((pw) => (
+                  <div key={pw.id} className="py-2.5 flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-gray-900">
+                        {pw.amountFormatted || `₦${(pw.amountNaira ?? 0).toLocaleString()}`} · {pw.bankName}
+                      </div>
+                      <div className="text-[11px] text-gray-400 font-mono">
+                        •••• {pw.accountNumber.slice(-4)} · {pw.reference}
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
+                        pw.status === "SETTLED"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : pw.status === "FAILED"
+                          ? "bg-rose-100 text-rose-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {pw.status}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Nia gross reseller margin</span>
-                <span className="font-semibold text-gray-900">₦4,000</span>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Gateway fee · borne by Nia</span>
-                <span className="font-semibold text-rose-600">-₦300</span>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Nia net allocation</span>
-                <span className="font-bold text-emerald-700 text-sm">₦3,700</span>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1">
-              <div className="font-bold text-blue-900 flex items-center gap-1.5">
-                <span>ℹ</span>
-                <span>Split at payment, settle separately</span>
-              </div>
-              <p className="text-[11px] text-blue-800 leading-relaxed">
-                Payment success does not mean bank settlement is complete. Recipient payouts can be pending or fail independently.
-              </p>
-            </div>
+            )}
           </div>
 
           {/* Readiness checks card */}
           <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-gray-900">Readiness checks</h3>
+              <h3 className="text-sm font-bold text-gray-900">Gateway readiness checks</h3>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
                 Current checkout ready
               </span>
@@ -1035,7 +1050,7 @@ export function PaymentsView({
                   <span>Gateway subaccount ready</span>
                 </div>
                 <p className="text-[11px] text-emerald-800 leading-relaxed">
-                  SUB-NS-002 provisioned and linked to Monnify escrow split router.
+                  {vendor?.monnifySubAccountCode || "SUB-NS-002"} provisioned and linked to Monnify escrow split router.
                 </p>
               </div>
             )}
@@ -1043,7 +1058,7 @@ export function PaymentsView({
             <button
               onClick={handleRetryGateway}
               disabled={gatewayChecking || gatewayTimeoutResolved}
-              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg transition-colors"
+              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg transition-colors cursor-pointer"
             >
               {gatewayChecking
                 ? "Checking gateway..."
@@ -1082,32 +1097,213 @@ export function PaymentsView({
             </div>
           </div>
         )}
+      </div>
+    );
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Screen 11B: Payments · Split rules                                         */
+  /* -------------------------------------------------------------------------- */
+  if (activeTab === "rules") {
+    const clampedSupplierPct = Math.max(10, Math.min(95, splitSupplierPct));
+    const resellerPct = 100 - clampedSupplierPct;
+    const sampleTotal = 20000;
+    const sampleSupplier = Math.round((sampleTotal * clampedSupplierPct) / 100);
+    const sampleResellerGross = sampleTotal - sampleSupplier;
+    const sampleGatewayFee = Math.round(sampleTotal * 0.015);
+    const sampleResellerNet = Math.max(0, sampleResellerGross - sampleGatewayFee);
+
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto pb-24">
+        {/* Header */}
+        <div>
+          <div className="text-xs text-gray-500 mb-1">Payments / Split rules</div>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+            Automated split rules
+          </h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Define how checkout funds are automatically routed between supplier cost and reseller margin.
+          </p>
+        </div>
+
+        {/* Tab Strip */}
+        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
+          <button
+            onClick={() => setActiveTab("splits")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Split transactions
+          </button>
+          <button
+            onClick={() => setActiveTab("accounts")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Payout accounts
+          </button>
+          <button
+            onClick={() => setActiveTab("rules")}
+            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
+          >
+            Split rules
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Rule Editor Card */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-5 text-xs">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Default split ratio</h3>
+                <p className="text-[11px] text-gray-400">
+                  Supplier cost settles first; remainder routes to your reseller subaccount
+                </p>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                Active Rule
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 mb-1">Applies to</label>
+              <select
+                value={splitScope}
+                onChange={(e) => setSplitScope(e.target.value)}
+                className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white"
+              >
+                <option value="All linked supplier products">All linked supplier products</option>
+                <option value="Mirrored marketplace catalog">Mirrored marketplace catalog</option>
+                <option value="Direct WhatsApp reseller orders">Direct WhatsApp reseller orders</option>
+              </select>
+            </div>
+
+            <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-100">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-gray-700">Supplier share</span>
+                <span className="font-mono font-bold text-gray-900">
+                  {clampedSupplierPct}% ({clampedSupplierPct * 100} bps)
+                </span>
+              </div>
+              <input
+                type="range"
+                min={10}
+                max={95}
+                step={1}
+                value={clampedSupplierPct}
+                onChange={(e) => setSplitSupplierPct(Number(e.target.value))}
+                className="w-full accent-emerald-600 cursor-pointer"
+              />
+              <div className="flex items-center justify-between text-[11px] text-gray-500">
+                <span>Reseller margin share: <strong className="text-emerald-700">{resellerPct}%</strong> ({resellerPct * 100} bps)</span>
+                <span>Platform fee: <strong>1.5%</strong></span>
+              </div>
+            </div>
+
+            <div className="divide-y divide-gray-100">
+              <div className="py-2 flex justify-between">
+                <span className="text-gray-500">Sample customer checkout</span>
+                <span className="font-semibold text-gray-900">₦{sampleTotal.toLocaleString()}</span>
+              </div>
+              <div className="py-2 flex justify-between">
+                <span className="text-gray-500">Supplier receives ({clampedSupplierPct}%)</span>
+                <span className="font-semibold text-gray-900">₦{sampleSupplier.toLocaleString()}</span>
+              </div>
+              <div className="py-2 flex justify-between">
+                <span className="text-gray-500">Reseller gross margin ({resellerPct}%)</span>
+                <span className="font-semibold text-gray-900">₦{sampleResellerGross.toLocaleString()}</span>
+              </div>
+              <div className="py-2 flex justify-between">
+                <span className="text-gray-500">Gateway fee (1.5% · borne by reseller)</span>
+                <span className="font-semibold text-rose-600">-₦{sampleGatewayFee.toLocaleString()}</span>
+              </div>
+              <div className="py-2 flex justify-between">
+                <span className="text-gray-500">Reseller net allocation</span>
+                <span className="font-bold text-emerald-700 text-sm">₦{sampleResellerNet.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Configured Rules List & Info */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-gray-900">Configured split rules</h3>
+              <span className="text-[11px] text-gray-500">
+                {settlementSplitRules.length} rule{settlementSplitRules.length === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            {settlementSplitRules.length === 0 ? (
+              <div className="p-4 rounded-xl bg-gray-50 border border-gray-100 text-gray-500">
+                Using default 75% supplier / 25% reseller split. Save below to persist a custom rule.
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {settlementSplitRules.map((rule) => (
+                  <div key={rule.id} className="py-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-gray-900">
+                        Rule #{rule.id.slice(0, 8)} · {(rule.supplierShareBps / 100).toFixed(0)}% / {(rule.resellerShareBps / 100).toFixed(0)}%
+                      </div>
+                      <div className="text-[11px] text-gray-400">
+                        Supplier {rule.supplierShareBps} bps · Reseller {rule.resellerShareBps} bps · Platform {rule.platformFeeBps} bps
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                      ACTIVE
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="p-3.5 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1">
+              <div className="font-bold text-blue-900 flex items-center gap-1.5">
+                <span>ℹ</span>
+                <span>Split at payment, settle separately</span>
+              </div>
+              <p className="text-[11px] text-blue-800 leading-relaxed">
+                Payment success does not mean bank settlement is complete. Recipient payouts settle independently to each verified Monnify subaccount.
+              </p>
+            </div>
+          </div>
+        </div>
 
         {/* Sticky Bottom Bar */}
         <div className="fixed bottom-0 left-0 lg:left-64 right-0 bg-white border-t border-gray-200 py-3 px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 z-30 shadow-lg text-xs">
           <span className="text-gray-400 text-[11px] text-center sm:text-left">
-            Recipient changes affect future payments only. Existing transaction allocations remain recorded against their original recipients.
+            Split rule changes apply to future checkout transactions only.
           </span>
           <div className="flex items-center gap-2 shrink-0">
             {configSaved && (
               <span className="text-xs font-semibold text-emerald-700 mr-2">
-                ✓ Split configuration saved
+                ✓ Split rule saved
               </span>
             )}
             <button
               onClick={() => setActiveTab("splits")}
-              className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
             >
               Discard changes
             </button>
             <button
-              onClick={() => {
-                setConfigSaved(true);
-                setTimeout(() => setConfigSaved(false), 2500);
+              disabled={savingRule}
+              onClick={async () => {
+                if (onSaveSplitRule) {
+                  setSavingRule(true);
+                  try {
+                    await onSaveSplitRule({
+                      supplierShareBps: clampedSupplierPct * 100,
+                      resellerShareBps: resellerPct * 100,
+                    });
+                    setConfigSaved(true);
+                    setTimeout(() => setConfigSaved(false), 2500);
+                  } finally {
+                    setSavingRule(false);
+                  }
+                }
               }}
-              className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs"
+              className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 rounded-lg transition-colors shadow-xs cursor-pointer"
             >
-              Save split configuration
+              {savingRule ? "Saving..." : "Save split rule"}
             </button>
           </div>
         </div>

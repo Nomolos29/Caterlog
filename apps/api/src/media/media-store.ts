@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
+import { prisma } from "@caterlog/database";
+import {
+  uploadObjectToNeonBucket,
+  getNeonBucketPresignedUrl,
+} from "../neon/services.ts";
 
 export interface StoredMediaItem {
   mediaId: string;
@@ -10,6 +15,7 @@ export interface StoredMediaItem {
   phash: string;
   createdAt: Date;
   publicUrl?: string;
+  storageKey?: string;
 }
 
 export class MediaStore {
@@ -82,8 +88,48 @@ export class MediaStore {
       const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
       const filePath = path.join(this.storageDir, `${mediaId}.${ext}`);
       fs.writeFileSync(filePath, params.buffer);
+
+      // Persist to Neon Object Storage (`assets` bucket) when configured on the branch
+      const storageKey = `media/${mediaId}.${ext}`;
+      if (!params.publicUrl && process.env.AWS_ENDPOINT_URL_S3) {
+        const uploaded = await uploadObjectToNeonBucket({
+          key: storageKey,
+          body: params.buffer,
+          contentType,
+        });
+        if (uploaded) {
+          item.storageKey = uploaded.key;
+          item.publicUrl = uploaded.presignedUrl;
+        }
+      }
+
+      if (process.env.DATA_MODE === "database") {
+        void prisma.mediaAsset
+          .upsert({
+            where: { mediaId },
+            create: {
+              mediaId,
+              storageKey: item.storageKey ?? storageKey,
+              bucket: process.env.NEON_OBJECT_STORAGE_BUCKET ?? "assets",
+              contentType,
+              sizeBytes: params.buffer.length,
+              phash,
+              publicUrl: item.publicUrl ?? null,
+            },
+            update: {
+              storageKey: item.storageKey ?? storageKey,
+              contentType,
+              sizeBytes: params.buffer.length,
+              phash,
+              publicUrl: item.publicUrl ?? null,
+            },
+          })
+          .catch(() => {
+            // Non-blocking metadata sync
+          });
+      }
     } catch {
-      // Memory cache remains active if disk write is not permitted
+      // Memory cache remains active if disk write or object storage upload is not permitted
     }
 
     return item;
@@ -97,6 +143,15 @@ export class MediaStore {
     const item = this.getMedia(mediaId);
     if (!item) return null;
     if (item.publicUrl) return item.publicUrl;
+
+    // 0. If stored in Neon Object Storage, generate a fresh presigned GET URL
+    if (item.storageKey) {
+      const presigned = await getNeonBucketPresignedUrl(item.storageKey, 3600);
+      if (presigned) {
+        item.publicUrl = presigned;
+        return presigned;
+      }
+    }
 
     // 1. Check if public tunnel or domain is configured
     const tunnelUrl = process.env.PUBLIC_API_URL || process.env.TUNNEL_URL || process.env.API_BASE_URL;

@@ -262,7 +262,9 @@ export class MonnifyPaymentAdapter implements PaymentProviderPort {
                 .filter(Boolean),
             }
           : {}),
-        ...(req.vendorSubAccountCode
+        ...(req.incomeSplitConfig && req.incomeSplitConfig.length > 0
+          ? { incomeSplitConfig: req.incomeSplitConfig }
+          : req.vendorSubAccountCode
           ? {
               incomeSplitConfig: [
                 {

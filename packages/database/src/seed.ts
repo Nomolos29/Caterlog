@@ -14,7 +14,18 @@ async function main() {
   // 1. Upsert Demo Nigerian Vendor: Amaka Luxury Shoes (Lagos)
   const vendor = await prisma.vendor.upsert({
     where: { slug: "amaka-shoes" },
-    update: {},
+    update: {
+      settlementBankCode: "058",
+      settlementBankName: "GTBank",
+      settlementAccountNum: "0123456789",
+      settlementAccountName: "AMAKA LUXURY ENTERPRISES",
+      monnifySubAccountCode: "MFY_SUB_AMAKA_001",
+      cacNumber: "RC-1849204",
+      tinNumber: "24910293-0001",
+      instagramHandle: "@amakaluxuryshoes",
+      baseState: "Lagos",
+      baseCity: "Lekki Phase 1",
+    },
     create: {
       slug: "amaka-shoes",
       businessName: "Amaka Luxury Shoes",
@@ -25,9 +36,15 @@ async function main() {
       copilotIdleSeconds: 60,      // Configurable default: 60s
       reservationTtlMinutes: 15,   // Configurable default: 15 mins
       settlementBankCode: "058",   // GTBank
+      settlementBankName: "GTBank",
       settlementAccountNum: "0123456789",
       settlementAccountName: "AMAKA LUXURY ENTERPRISES",
       monnifySubAccountCode: "MFY_SUB_AMAKA_001",
+      cacNumber: "RC-1849204",
+      tinNumber: "24910293-0001",
+      instagramHandle: "@amakaluxuryshoes",
+      baseState: "Lagos",
+      baseCity: "Lekki Phase 1",
       verificationStatus: VerificationStatus.VERIFIED,
       verifiedAt: new Date(),
     },
@@ -217,6 +234,387 @@ async function main() {
   console.log(`✅ Seeded vendor "${vendor.businessName}" (${vendor.whatsappPhone})`);
   console.log(`✅ Seeded ${createdProducts.length} products, ${shippingZonesData.length} shipping zones, 2 discounts`);
   console.log(`✅ Seeded active pending order ${pendingOrder.shortCode} (NUBAN: 8092341102, Total: ₦28,500)`);
+
+  // 7. Seed Product Variants for SHOE-01
+  for (const [suffix, label, stock] of [
+    ["38-GLD", "Size 38 / Gold", 2],
+    ["39-GLD", "Size 39 / Gold", 2],
+    ["40-GLD", "Size 40 / Gold", 1],
+  ] as const) {
+    await prisma.productVariant.upsert({
+      where: {
+        productId_skuSuffix: {
+          productId: zaraHeel.id,
+          skuSuffix: suffix,
+        },
+      },
+      update: { stockTotal: stock },
+      create: {
+        productId: zaraHeel.id,
+        name: label,
+        skuSuffix: suffix,
+        priceKobo: zaraHeel.basePriceKobo,
+        stockTotal: stock,
+        stockReserved: suffix === "39-GLD" ? 1 : 0,
+      },
+    });
+  }
+
+  // 8. Seed Paid Order ORD-881 + PaymentInvoice + PaymentTransaction
+  const mainlandZone = await prisma.shippingZone.findUniqueOrThrow({
+    where: { vendorId_name: { vendorId: vendor.id, name: "Mainland" } },
+  });
+  const hermesSlide = createdProducts[1]!;
+
+  const paidOrder = await prisma.order.upsert({
+    where: { vendorId_shortCode: { vendorId: vendor.id, shortCode: "ORD-881" } },
+    update: {},
+    create: {
+      vendorId: vendor.id,
+      customerId: customer.id,
+      shortCode: "ORD-881",
+      channel: SalesChannel.WHATSAPP_CHAT,
+      status: OrderStatus.PAID,
+      subtotalKobo: nairaToKobo(18500),
+      shippingZoneId: mainlandZone.id,
+      shippingFeeKobo: mainlandZone.feeKobo,
+      totalAmountKobo: nairaToKobo(21000),
+      amountPaidKobo: nairaToKobo(21000),
+      deliveryAddress: "22 Allen Avenue, Ikeja, Lagos",
+      deliveryLandmark: "Opposite Alade Market Gate",
+      alternatePhone: "+2348022334455",
+      paymentTransactionRef: "MNFY|SEED|ORD881|001",
+      paidAt: new Date(Date.now() - 40 * 60 * 1000),
+      paymentExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      items: {
+        create: {
+          productId: hermesSlide.id,
+          productNameSnap: hermesSlide.name,
+          quantity: 1,
+          unitPriceKobo: hermesSlide.basePriceKobo,
+          lineTotalKobo: hermesSlide.basePriceKobo,
+        },
+      },
+    },
+  });
+
+  const paidInvoice = await prisma.paymentInvoice.upsert({
+    where: { invoiceReference: "CAT_INV_881_SEED" },
+    update: {},
+    create: {
+      orderId: paidOrder.id,
+      provider: "MONNIFY",
+      invoiceReference: "CAT_INV_881_SEED",
+      expectedAmountKobo: nairaToKobo(21000),
+      accountNumber: "8044556677",
+      bankName: "Moniepoint MFB",
+      accountName: "CATERLOG / AMAKA LUXURY SHOES",
+      status: "PAID",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    },
+  });
+
+  await prisma.paymentTransaction.upsert({
+    where: { providerTransactionRef: "MNFY|SEED|ORD881|001" },
+    update: {},
+    create: {
+      invoiceId: paidInvoice.id,
+      providerTransactionRef: "MNFY|SEED|ORD881|001",
+      paymentReference: "CAT_INV_881_SEED",
+      amountPaidKobo: nairaToKobo(21000),
+      settlementAmountKobo: nairaToKobo(20685),
+      payerName: "Chidinma Okafor",
+      payerBankName: "GTBank",
+      paymentMethod: "ACCOUNT_TRANSFER",
+      webhookSignatureValid: true,
+      serverVerifiedAt: new Date(),
+      rawVerificationJson: { paymentStatus: "PAID", seed: true },
+    },
+  });
+
+  // 9. Seed ChatSession & ChatMessage thread
+  const chatSession = await prisma.chatSession.upsert({
+    where: {
+      vendorId_buyerWhatsappPhone: {
+        vendorId: vendor.id,
+        buyerWhatsappPhone: customer.whatsappPhone,
+      },
+    },
+    update: { buyerName: customer.name },
+    create: {
+      vendorId: vendor.id,
+      buyerWhatsappPhone: customer.whatsappPhone,
+      buyerName: customer.name,
+      activeProductId: zaraHeel.id,
+      activeOrderId: pendingOrder.id,
+      quantity: 1,
+      conversationState: "AWAITING_PAYMENT",
+      lastBuyerMessageAt: new Date(),
+    },
+  });
+
+  const existingMsgCount = await prisma.chatMessage.count({ where: { vendorId: vendor.id } });
+  if (existingMsgCount === 0) {
+    await prisma.chatMessage.createMany({
+      data: [
+        {
+          vendorId: vendor.id,
+          chatSessionId: chatSession.id,
+          channel: "BUYER_SHOP_WA",
+          sender: "BUYER",
+          fromPhone: customer.whatsappPhone,
+          text: "Hi Amaka! Do you still have Zara Block Heel (Gold) in Size 39?",
+        },
+        {
+          vendorId: vendor.id,
+          chatSessionId: chatSession.id,
+          channel: "BUYER_SHOP_WA",
+          sender: "CATERLOG_BOT",
+          fromPhone: vendor.whatsappPhone,
+          text: "✅ Yes! Zara Block Heel (Gold) is in stock (₦25,000). Reserved 1 unit under ORD-882 with dedicated Moniepoint account 8092341102.",
+        },
+      ],
+    });
+  }
+
+  // 10. Seed CommerceEvent & MediaAsset
+  const existingEvents = await prisma.commerceEvent.count({ where: { vendorId: vendor.id } });
+  if (existingEvents === 0) {
+    await prisma.commerceEvent.create({
+      data: {
+        vendorId: vendor.id,
+        eventType: "ORDER_CREATED",
+        actorType: "COPILOT_AUTO",
+        entityType: "ORDER",
+        entityId: pendingOrder.id,
+        payload: { shortCode: pendingOrder.shortCode, totalKobo: "2850000" },
+      },
+    });
+  }
+
+  await prisma.mediaAsset.upsert({
+    where: { mediaId: "media-seed-shoe-01" },
+    update: {},
+    create: {
+      mediaId: "media-seed-shoe-01",
+      vendorId: vendor.id,
+      storageKey: "media/media-seed-shoe-01.jpg",
+      bucket: "assets",
+      contentType: "image/jpeg",
+      sizeBytes: 48210,
+      phash: zaraHeel.imagePhash ?? "f8c39a71b2e409d1",
+      publicUrl: zaraHeel.primaryImageUrl,
+    },
+  });
+
+  // 11. Seed MarketBoostListing (Geographic Visibility & Interstate Coverage)
+  await prisma.marketBoostListing.upsert({
+    where: { vendorId: vendor.id },
+    update: {},
+    create: {
+      vendorId: vendor.id,
+      isPublished: true,
+      businessName: vendor.businessName,
+      category: "Fashion & Footwear",
+      baseState: "Lagos",
+      baseCity: "Lekki Phase 1",
+      shippingScope: "SELECTED_STATES",
+      allowInterstate: true,
+      coveredStates: ["Lagos", "Ogun", "Oyo", "FCT - Abuja", "Rivers"],
+      description:
+        "Imported luxury heels, leather slides, and structured mini bags with live WhatsApp inventory reservation.",
+      moq: "1 unit",
+      startingPriceKobo: nairaToKobo(18500),
+      fulfillmentMethod: "Same-day Lagos dispatch & 48h DHL interstate",
+      deliveryNote: "Verified escrow split via Monnify upon buyer transfer.",
+      featuredTags: ["Footwear", "Luxury Slides", "Mini Bags"],
+      subscriptionPlan: "GROWTH",
+    },
+  });
+
+  // 12. Seed Wholesale SupplierProfile & ResellerCatalogMirror
+  const supplier = await prisma.supplierProfile.upsert({
+    where: { slug: "aroko-wholesale" },
+    update: {},
+    create: {
+      slug: "aroko-wholesale",
+      name: "Aroko Wholesale",
+      verified: true,
+      cacNumber: "RC-1928401",
+      category: "Kitchenware & Home Living",
+      location: "Lagos, Nigeria",
+      state: "Lagos",
+      shippingScope: "LOCAL_STATE",
+      allowInterstate: false,
+      coveredStates: ["Lagos"],
+      warehouseAddress:
+        "Warehouse 3B, International Trade Fair Complex, Badagry Expressway, Lagos",
+      phone: "+2348028881920",
+      whatsapp: "2348028881920",
+      rating: 4.9,
+      totalFulfilled: 1420,
+      subAccountCode: "SUB-AW-001",
+      leadTime: "Same day dispatch if ordered before 1:00 PM",
+      cutoffTime: "1:00 PM WAT daily",
+      wholesaleTerms: {
+        moqDropship: 1,
+        moqWholesale: 5,
+        settlementTerms: "Instant escrow split via Monnify",
+        suggestedMargin: "25% - 35%",
+      },
+      catalogProducts: [
+        {
+          sku: "AW-FL750",
+          name: "Stainless Steel Vacuum Flask · 750ml",
+          wholesaleCost: 8000,
+          suggestedRetail: 10000,
+          stock: 42,
+        },
+      ],
+    },
+  });
+
+  await prisma.resellerCatalogMirror.upsert({
+    where: {
+      resellerVendorId_supplierId: {
+        resellerVendorId: vendor.id,
+        supplierId: supplier.id,
+      },
+    },
+    update: {},
+    create: {
+      resellerVendorId: vendor.id,
+      supplierId: supplier.id,
+      mirroredProductSkus: ["AW-FL750"],
+      defaultMarkupBps: 2500,
+      status: "ACTIVE",
+    },
+  });
+
+  // 13. Seed PaymentLink, PayoutWithdrawal, SettlementSplitRule
+  await prisma.paymentLink.upsert({
+    where: { slug: "amaka-shoes-vip-checkout" },
+    update: {},
+    create: {
+      vendorId: vendor.id,
+      slug: "amaka-shoes-vip-checkout",
+      customerName: "Chidinma Okafor",
+      customerPhone: customer.whatsappPhone,
+      productSku: "SHOE-01",
+      description: "Express checkout link for Zara Block Heel (Gold)",
+      amountKobo: nairaToKobo(25000),
+      checkoutUrl: "https://caterlog.store/pay/amaka-shoes?amt=25000",
+      isActive: true,
+      timesUsed: 1,
+    },
+  });
+
+  await prisma.payoutWithdrawal.upsert({
+    where: { reference: "WTH-881001" },
+    update: {},
+    create: {
+      vendorId: vendor.id,
+      reference: "WTH-881001",
+      amountKobo: nairaToKobo(50000),
+      feeKobo: nairaToKobo(100),
+      netAmountKobo: nairaToKobo(49900),
+      bankCode: "058",
+      bankName: "GTBank",
+      accountNumber: "0123456789",
+      accountName: "AMAKA LUXURY ENTERPRISES",
+      status: "SETTLED",
+      verifiedByOtp: true,
+      settledAt: new Date(),
+    },
+  });
+
+  const existingSplitRules = await prisma.settlementSplitRule.count({
+    where: { vendorId: vendor.id },
+  });
+  if (existingSplitRules === 0) {
+    await prisma.settlementSplitRule.create({
+      data: {
+        vendorId: vendor.id,
+        name: "Default Wholesale Dropship Split (80/18.5/1.5)",
+        supplierSubAccountCode: "SUB-AW-001",
+        supplierShareBps: 8000,
+        resellerShareBps: 1850,
+        platformFeeBps: 150,
+        isActive: true,
+      },
+    });
+  }
+
+  // 14. Seed VendorKycSubmission, TeamMember & VendorNotification
+  const existingKyc = await prisma.vendorKycSubmission.count({ where: { vendorId: vendor.id } });
+  if (existingKyc === 0) {
+    await prisma.vendorKycSubmission.create({
+      data: {
+        vendorId: vendor.id,
+        businessName: vendor.businessName,
+        cacNumber: "RC-1849204",
+        tinNumber: "24910293-0001",
+        businessAddress: "14 Admiralty Way, Lekki Phase 1, Lagos",
+        businessCategory: "Fashion & Footwear",
+        bankCode: "058",
+        bankName: "GTBank",
+        accountNumber: "0123456789",
+        resolvedAccountName: "AMAKA LUXURY ENTERPRISES",
+        whatsappPhone: vendor.whatsappPhone,
+        instagramHandle: "@amakaluxuryshoes",
+        status: VerificationStatus.VERIFIED,
+        reviewedAt: new Date(),
+      },
+    });
+  }
+
+  await prisma.teamMember.upsert({
+    where: {
+      vendorId_email: {
+        vendorId: vendor.id,
+        email: "owner@amakaluxury.ng",
+      },
+    },
+    update: {},
+    create: {
+      vendorId: vendor.id,
+      name: "Amaka Nwosu (Owner)",
+      email: "owner@amakaluxury.ng",
+      phone: vendor.whatsappPhone,
+      role: "Owner",
+      status: "Active",
+      canManageOrders: true,
+      canManageInventory: true,
+      canViewPayouts: true,
+      canProcessRefunds: true,
+      canOverrideCopilot: true,
+      lastActiveAt: new Date(),
+    },
+  });
+
+  await prisma.vendorNotification.upsert({
+    where: {
+      vendorId_notificationKey: {
+        vendorId: vendor.id,
+        notificationKey: "notif-paid-ORD-881",
+      },
+    },
+    update: {},
+    create: {
+      vendorId: vendor.id,
+      notificationKey: "notif-paid-ORD-881",
+      title: "Payment Verified: ORD-881",
+      message:
+        "Monnify verified ₦21,000 transfer from Chidinma Okafor. Escrow split allocated.",
+      category: "PAYOUTS",
+      isRead: false,
+      linkText: "View Settlement",
+      targetView: "payments",
+      targetRef: "ORD-881",
+    },
+  });
+
+  console.log("✅ Seeded all extended tables (Variants, Paid Order, Chat, Media, MarketBoost, Supplier Network, PaymentLinks, Payouts, KYC, Team, Notifications)");
 }
 
 main()

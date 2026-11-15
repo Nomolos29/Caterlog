@@ -5,7 +5,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 // ---------------------------------------------------------
@@ -71,6 +71,7 @@ model Vendor {
 
   // Settlement & Monnify Subaccount
   settlementBankCode     String?
+  settlementBankName     String?
   settlementAccountNum   String?
   settlementAccountName  String?
   monnifySubAccountCode  String?            @unique
@@ -78,6 +79,11 @@ model Vendor {
   // Stage 2 Hook: Identity & Trust Badge
   verificationStatus     VerificationStatus @default(UNVERIFIED)
   kycIdentityHash        String?            @unique
+  cacNumber              String?
+  tinNumber              String?
+  instagramHandle        String?
+  baseState              String?            @default("Lagos")
+  baseCity               String?            @default("Ikeja")
   verifiedAt             DateTime?
 
   // Stage 3 Hook: Storefront Theme Manifest
@@ -93,7 +99,21 @@ model Vendor {
   customers              Customer[]
   orders                 Order[]
   chatSessions           ChatSession[]
+  chatMessages           ChatMessage[]
   commerceEvents         CommerceEvent[]
+  mediaAssets            MediaAsset[]
+  otpVerifications       OtpVerification[]
+  authSessions           VendorAuthSession[]
+  marketBoostListing     MarketBoostListing?
+  supplierProfile        SupplierProfile?
+  resellerMirrors        ResellerCatalogMirror[]
+  paymentLinks           PaymentLink[]
+  payoutWithdrawals      PayoutWithdrawal[]
+  settlementSplitRules   SettlementSplitRule[]
+  kycSubmissions         VendorKycSubmission[]
+  teamMembers            TeamMember[]
+  notifications          VendorNotification[]
+  orderRefunds           OrderRefund[]
 
   @@index([whatsappPhone])
 }
@@ -132,6 +152,7 @@ model Product {
   primaryImageUrl String
   imageGallery    Json               @default("[]")
   imagePhash      String?            // 64-bit hex perceptual hash for matching WhatsApp Status replies
+  customFields    Json?
 
   // Atomic stock counters
   stockTotal      Int                @default(0)
@@ -249,9 +270,18 @@ model Order {
   reservationReleased Boolean            @default(false)
 
   // Delivery Metadata
-  deliveryAddress     String?
-  riderName           String?
-  riderPhone          String?
+  deliveryAddress       String?
+  deliveryLandmark      String?
+  alternatePhone        String?
+  riderName             String?
+  riderPhone            String?
+
+  // Payment & Refund Metadata
+  paymentTransactionRef String?
+  refundReference       String?
+  refundedAmountKobo    BigInt?
+  refundReason          String?
+  refundedAt            DateTime?
 
   // Timestamps
   paymentExpiresAt    DateTime?
@@ -268,6 +298,7 @@ model Order {
   items               OrderItem[]
   reservations        StockReservation[]
   invoices            PaymentInvoice[]
+  refunds             OrderRefund[]
 
   @@unique([vendorId, shortCode])
   @@index([vendorId, status, createdAt])
@@ -359,19 +390,47 @@ model PaymentTransaction {
 // ---------------------------------------------------------
 
 model ChatSession {
-  id                   String    @id @default(uuid()) @db.Uuid
-  vendorId             String    @db.Uuid
-  buyerWhatsappPhone   String
-  copilotPaused        Boolean   @default(false)
-  lastVendorMessageAt  DateTime?
-  lastBuyerMessageAt   DateTime?
-  activeProductId      String?   @db.Uuid
-  conversationState    String    @default("IDLE")
-  updatedAt            DateTime  @updatedAt
+  id                    String        @id @default(uuid()) @db.Uuid
+  vendorId              String        @db.Uuid
+  buyerWhatsappPhone    String
+  buyerName             String?
+  copilotPaused         Boolean       @default(false)
+  lastVendorMessageAt   DateTime?
+  lastBuyerMessageAt    DateTime?
+  activeProductId       String?       @db.Uuid
+  activeVariantId       String?       @db.Uuid
+  activeOrderId         String?       @db.Uuid
+  quantity              Int?
+  discountCode          String?
+  cartItems             Json?         // Active multi-item shopping cart array
+  conversationState     String        @default("IDLE")
+  assistanceInquiry     String?
+  assistanceRequestedAt DateTime?
+  updatedAt             DateTime      @updatedAt
 
-  vendor               Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  vendor                Vendor        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  messages              ChatMessage[]
 
   @@unique([vendorId, buyerWhatsappPhone])
+}
+
+model ChatMessage {
+  id            String       @id @default(uuid()) @db.Uuid
+  vendorId      String       @db.Uuid
+  chatSessionId String?      @db.Uuid
+  channel       String       @default("BUYER_SHOP_WA") // "VENDOR_ADMIN_WA" | "BUYER_SHOP_WA"
+  sender        String       // "VENDOR" | "BUYER" | "CATERLOG_BOT"
+  fromPhone     String
+  text          String
+  imageUrl      String?
+  quickReplies  Json?
+  createdAt     DateTime     @default(now())
+
+  vendor        Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  chatSession   ChatSession? @relation(fields: [chatSessionId], references: [id], onDelete: SetNull)
+
+  @@index([vendorId, createdAt])
+  @@index([chatSessionId, createdAt])
 }
 
 model CommerceEvent {
@@ -387,5 +446,301 @@ model CommerceEvent {
   vendor      Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([vendorId, eventType, createdAt])
+}
+
+// ---------------------------------------------------------
+// 7. MEDIA ASSETS & OBJECT STORAGE METADATA
+// ---------------------------------------------------------
+
+model MediaAsset {
+  id          String   @id @default(uuid()) @db.Uuid
+  mediaId     String   @unique // External/Meta media ID or generated UUID
+  vendorId    String?  @db.Uuid
+  storageKey  String   // Key inside Neon Object Storage bucket ("assets")
+  bucket      String   @default("assets")
+  contentType String
+  sizeBytes   Int
+  phash       String   // 64-bit hex perceptual hash for WhatsApp Status matching
+  publicUrl   String?
+  createdAt   DateTime @default(now())
+
+  vendor      Vendor?  @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+
+  @@index([vendorId, phash])
+}
+
+// ---------------------------------------------------------
+// 8. WHATSAPP 6-DIGIT OTPs & AUTHENTICATION SESSIONS
+// ---------------------------------------------------------
+
+model OtpVerification {
+  id          String    @id @default(uuid()) @db.Uuid
+  vendorId    String?   @db.Uuid
+  phone       String
+  code        String    // 6-digit security PIN sent on WhatsApp
+  purpose     String    @default("LOGIN") // "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS"
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  vendor      Vendor?   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([phone, purpose, expiresAt])
+}
+
+model VendorAuthSession {
+  id          String    @id @default(uuid()) @db.Uuid
+  vendorId    String    @db.Uuid
+  token       String    @unique
+  email       String?
+  phone       String?
+  userAgent   String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  vendor      Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, expiresAt])
+}
+
+// ---------------------------------------------------------
+// 9. MARKET BOOST & GEOGRAPHIC VISIBILITY (INTERSTATE COVERAGE)
+// ---------------------------------------------------------
+
+model MarketBoostListing {
+  id                String   @id @default(uuid()) @db.Uuid
+  vendorId          String   @unique @db.Uuid
+  isPublished       Boolean  @default(false)
+  businessName      String
+  category          String   @default("Fashion & Footwear")
+  baseState         String   @default("Lagos")
+  baseCity          String   @default("Ikeja")
+  shippingScope     String   @default("LOCAL_STATE") // "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE"
+  allowInterstate   Boolean  @default(false)
+  coveredStates     Json     @default("[\"Lagos\"]") // Array of Nigerian states where catalog can be mirrored
+  description       String?
+  moq               String   @default("1 unit")
+  startingPriceKobo BigInt   @default(300000)
+  fulfillmentMethod String   @default("Pickup or merchant-arranged delivery")
+  deliveryNote           String?
+  featuredTags           Json     @default("[]")
+  mirroredCategories     Json     @default("[]") // Categories where the entire category is mirrored
+  mirroredProductSkus    Json     @default("[]") // Specific product SKUs selected for mirroring
+  wholesaleDiscountRules Json     @default("[]") // Discount rules by catalog/category/product and all/specific resellers
+  subscriptionPlan       String   @default("STARTER") // "STARTER" | "GROWTH" | "ENTERPRISE"
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  vendor            Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([isPublished, baseState, shippingScope])
+}
+
+// ---------------------------------------------------------
+// 10. WHOLESALE SUPPLIER NETWORK & RESELLER CATALOG MIRRORING
+// ---------------------------------------------------------
+
+model SupplierProfile {
+  id               String                  @id @default(uuid()) @db.Uuid
+  vendorId         String?                 @unique @db.Uuid
+  slug             String                  @unique
+  name             String
+  verified         Boolean                 @default(true)
+  cacNumber        String?
+  category         String
+  location         String
+  state            String                  @default("Lagos")
+  shippingScope    String                  @default("LOCAL_STATE") // "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE"
+  allowInterstate  Boolean                 @default(false)
+  coveredStates    Json                    @default("[\"Lagos\"]")
+  warehouseAddress String?
+  phone            String
+  whatsapp         String
+  rating           Float                   @default(4.9)
+  totalFulfilled   Int                     @default(0)
+  subAccountCode   String?
+  leadTime         String?
+  cutoffTime       String?
+  wholesaleTerms   Json?
+  catalogProducts  Json                    @default("[]")
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  vendor           Vendor?                 @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  mirrors          ResellerCatalogMirror[]
+
+  @@index([state, shippingScope])
+}
+
+model ResellerCatalogMirror {
+  id                  String          @id @default(uuid()) @db.Uuid
+  resellerVendorId    String          @db.Uuid
+  supplierId          String          @db.Uuid
+  mirroredProductSkus Json            @default("[]")
+  defaultMarkupBps    Int             @default(2000) // 20.00%
+  status              String          @default("ACTIVE") // "ACTIVE" | "PAUSED"
+  lastSyncedAt        DateTime        @default(now())
+  createdAt           DateTime        @default(now())
+
+  resellerVendor      Vendor          @relation(fields: [resellerVendorId], references: [id], onDelete: Cascade)
+  supplier            SupplierProfile @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([resellerVendorId, supplierId])
+}
+
+// ---------------------------------------------------------
+// 11. PAYMENT LINKS, PAYOUT WITHDRAWALS, REFUNDS & SPLIT RULES
+// ---------------------------------------------------------
+
+model PaymentLink {
+  id            String    @id @default(uuid()) @db.Uuid
+  vendorId      String    @db.Uuid
+  slug          String    @unique
+  customerName  String?
+  customerPhone String?
+  productSku    String?
+  description   String?
+  amountKobo    BigInt
+  checkoutUrl   String
+  isActive      Boolean   @default(true)
+  timesUsed     Int       @default(0)
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  vendor        Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, isActive])
+}
+
+model PayoutWithdrawal {
+  id            String    @id @default(uuid()) @db.Uuid
+  vendorId      String    @db.Uuid
+  reference     String    @unique // e.g. "WTH-492810"
+  amountKobo    BigInt
+  feeKobo       BigInt    @default(0)
+  netAmountKobo BigInt
+  bankCode      String?
+  bankName      String
+  accountNumber String
+  accountName   String?
+  status        String    @default("DISPATCHED") // "PENDING" | "DISPATCHED" | "SETTLED" | "FAILED"
+  verifiedByOtp Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  settledAt     DateTime?
+
+  vendor        Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, createdAt])
+}
+
+model SettlementSplitRule {
+  id                     String   @id @default(uuid()) @db.Uuid
+  vendorId               String   @db.Uuid
+  name                   String
+  supplierSubAccountCode String?
+  supplierShareBps       Int      @default(8000) // 80.00%
+  resellerShareBps       Int      @default(1850) // 18.50%
+  platformFeeBps         Int      @default(150)  // 1.50%
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  vendor                 Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, isActive])
+}
+
+model OrderRefund {
+  id                String    @id @default(uuid()) @db.Uuid
+  orderId           String    @db.Uuid
+  vendorId          String    @db.Uuid
+  refundReference   String    @unique
+  providerRefundRef String?
+  amountKobo        BigInt
+  reason            String?
+  status            String    @default("COMPLETED") // "PENDING" | "COMPLETED" | "FAILED"
+  restoredStock     Boolean   @default(true)
+  initiatedBy       String    @default("VENDOR_DASHBOARD")
+  createdAt         DateTime  @default(now())
+  completedAt       DateTime?
+
+  order             Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vendor            Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, createdAt])
+  @@index([orderId])
+}
+
+// ---------------------------------------------------------
+// 12. KYC COMPLIANCE, TEAM MEMBERS & NOTIFICATIONS
+// ---------------------------------------------------------
+
+model VendorKycSubmission {
+  id                  String             @id @default(uuid()) @db.Uuid
+  vendorId            String             @db.Uuid
+  businessName        String
+  cacNumber           String
+  tinNumber           String?
+  businessAddress     String?
+  businessCategory    String?
+  bankCode            String
+  bankName            String?
+  accountNumber       String
+  resolvedAccountName String
+  whatsappPhone       String?
+  instagramHandle     String?
+  cacDocumentUploaded Boolean            @default(true)
+  idDocumentUploaded  Boolean            @default(true)
+  status              VerificationStatus @default(PENDING_REVIEW)
+  reviewerNotes       String?
+  submittedAt         DateTime           @default(now())
+  reviewedAt          DateTime?
+
+  vendor              Vendor             @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, status])
+}
+
+model TeamMember {
+  id                 String    @id @default(uuid()) @db.Uuid
+  vendorId           String    @db.Uuid
+  name               String
+  email              String
+  phone              String?
+  role               String    @default("Store Attendant") // "Owner" | "Store Manager" | "Store Attendant" | "Accountant" | "Dispatch Coordinator"
+  status             String    @default("Active") // "Active" | "Invited" | "Suspended"
+  canManageOrders    Boolean   @default(true)
+  canManageInventory Boolean   @default(true)
+  canViewPayouts     Boolean   @default(false)
+  canProcessRefunds  Boolean   @default(false)
+  canOverrideCopilot Boolean   @default(true)
+  lastActiveAt       DateTime?
+  invitedAt          DateTime  @default(now())
+
+  vendor             Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorId, email])
+}
+
+model VendorNotification {
+  id              String    @id @default(uuid()) @db.Uuid
+  vendorId        String    @db.Uuid
+  notificationKey String    // e.g. "notif-paid-ORD-882"
+  title           String
+  message         String
+  category        String    @default("ORDERS") // "ORDERS" | "PAYOUTS" | "INVENTORY" | "COPILOT" | "SYSTEM"
+  isRead          Boolean   @default(false)
+  isDismissed     Boolean   @default(false)
+  linkText        String?
+  targetView      String?
+  targetRef       String?
+  createdAt       DateTime  @default(now())
+  readAt          DateTime?
+
+  vendor          Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorId, notificationKey])
+  @@index([vendorId, isRead, createdAt])
 }
 

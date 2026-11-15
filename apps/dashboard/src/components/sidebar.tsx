@@ -23,6 +23,7 @@ export type NavView =
   | "network"
   | "customers"
   | "payments"
+  | "profile"
   | "market-boost"
   | "analytics"
   | "team"
@@ -64,12 +65,14 @@ export function Sidebar({
     { id: "market-boost", label: "Market Boost", icon: <MarketBoostIcon className="w-5 h-5" /> },
     { id: "analytics", label: "Analytics", icon: <AnalyticsIcon className="w-5 h-5" /> },
     { id: "team", label: "Team & Audit", icon: <TeamIcon className="w-5 h-5" /> },
-    { id: "verification", label: "Verification", icon: <ShieldCheckIcon className="w-5 h-5" /> },
     { id: "notifications", label: "Notifications", icon: <BellIcon className="w-5 h-5" /> },
     { id: "settings", label: "Settings", icon: <SettingsIcon className="w-5 h-5" /> },
   ];
 
   const isReseller = activeWorkspace === "reseller";
+  const visibleNavItems = isReseller
+    ? navItems.filter((item) => !["market-boost", "analytics", "team"].includes(item.id))
+    : navItems;
 
   const handleItemClick = (id: NavView) => {
     onSelectView(id);
@@ -101,7 +104,7 @@ export function Sidebar({
 
         {/* Main Navigation List */}
         <nav className="p-3 space-y-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = currentView === item.id;
             return (
               <button

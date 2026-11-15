@@ -302,7 +302,7 @@ export function TopNav({
                   <button
                     onClick={() => {
                       setNotificationsOpen(false);
-                      onNavigateToView?.("settings");
+                      onNavigateToView?.("notification-settings");
                     }}
                     className="text-gray-400 hover:text-gray-700 cursor-pointer"
                   >
@@ -320,73 +320,53 @@ export function TopNav({
                 setProfileOpen(!profileOpen);
                 setNotificationsOpen(false);
               }}
-              className="w-7 h-7 rounded-full bg-[#eef2ff] text-[#1e1b4b] border border-indigo-200 flex items-center justify-center font-bold text-xs hover:ring-2 hover:ring-emerald-400 transition-all ml-1 cursor-pointer"
+              className="flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full hover:bg-gray-100 transition-all ml-1 cursor-pointer"
               title="Merchant Account"
             >
-              {initials}
+              <span className="w-7 h-7 rounded-full bg-[#eef2ff] text-[#1e1b4b] border border-indigo-200 flex items-center justify-center font-bold text-xs">
+                {initials}
+              </span>
+              <svg
+                className={`w-3.5 h-3.5 text-gray-500 transition-transform duration-150 ${
+                  profileOpen ? "rotate-180" : ""
+                }`}
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                  clipRule="evenodd"
+                />
+              </svg>
             </button>
 
             {/* Profile Dropdown */}
             {profileOpen && (
-              <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-gray-100 p-4 z-50">
-                <div className="flex items-center gap-3 pb-3 border-b border-gray-100">
-                  <div className="w-10 h-10 rounded-full bg-[#eef2ff] text-[#1e1b4b] flex items-center justify-center font-bold text-sm shrink-0">
+              <div className="absolute right-0 mt-2 w-56 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-gray-100 p-3 z-50">
+                <div className="flex items-center gap-3 pb-3 border-b border-gray-100 px-1">
+                  <div className="w-9 h-9 rounded-full bg-[#eef2ff] text-[#1e1b4b] flex items-center justify-center font-bold text-xs shrink-0">
                     {initials}
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs font-bold text-gray-900 truncate">{vendor.businessName}</div>
-                    <button
-                      onClick={() => {
-                        onNavigateToView?.("verification");
-                        setProfileOpen(false);
-                      }}
-                      className="text-[11px] text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1 cursor-pointer"
-                    >
+                    <div className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
                       <CheckIcon className="w-3 h-3" />
-                      <span>CAC Verified Merchant →</span>
-                    </button>
+                      <span>Verified Merchant</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="py-2 space-y-1">
+                <div className="pt-2 space-y-1">
                   <button
                     onClick={() => {
-                      onNavigateToView?.("verification");
+                      onNavigateToView?.("profile-settings");
                       setProfileOpen(false);
                     }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+                    className="w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors"
                   >
-                    Business Verification (KYC)
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      onNavigateToView?.("shipping");
-                      setProfileOpen(false);
-                    }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
-                  >
-                    Delivery &amp; Shipping Zones
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      onNavigateToView?.("team");
-                      setProfileOpen(false);
-                    }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
-                  >
-                    Team &amp; Activity Audit Log
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      onNavigateToView?.("notifications");
-                      setProfileOpen(false);
-                    }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
-                  >
-                    Notification Center
+                    Edit Profile
                   </button>
 
                   <button
@@ -394,29 +374,20 @@ export function TopNav({
                       onNavigateToView?.("settings");
                       setProfileOpen(false);
                     }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+                    className="w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors"
                   >
-                    Settings &amp; Webhooks
+                    Settings
                   </button>
 
-                  <a
-                    href="https://wa.me/2348000000000"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block px-2 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
-                  >
-                    Merchant Support (WhatsApp)
-                  </a>
-
-                  <div className="pt-2 border-t border-gray-100">
+                  <div className="pt-1.5 mt-1 border-t border-gray-100">
                     <button
                       onClick={() => {
                         setProfileOpen(false);
                         onSignOut?.();
                       }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 cursor-pointer flex items-center justify-between transition-colors"
+                      className="w-full text-left px-2.5 py-2 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 cursor-pointer flex items-center justify-between transition-colors"
                     >
-                      <span>Sign out</span>
+                      <span>Logout</span>
                       <span className="text-[10px] text-gray-400">Esc</span>
                     </button>
                   </div>
