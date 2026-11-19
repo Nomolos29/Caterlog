@@ -87,6 +87,39 @@ export interface RefundResult {
   createdAt: Date;
 }
 
+/** Result of a NUBAN name enquiry (who owns this account number?). */
+export interface ResolvedBankAccount {
+  bankCode: string;
+  accountNumber: string;
+  accountName: string;
+}
+
+export type BvnAccountMatchStatus = "FULL_MATCH" | "PARTIAL_MATCH" | "NO_MATCH";
+
+/** Result of checking that a bank account is owned by the holder of a BVN. */
+export interface BvnAccountMatchResult {
+  matchStatus: BvnAccountMatchStatus;
+  /** Account holder name as returned by the provider (used as the identity anchor). */
+  accountName: string;
+  matchPercentage?: number;
+}
+
+/**
+ * Identity verification capabilities used by payout security
+ * (name enquiry + BVN↔account ownership match).
+ */
+export interface IdentityVerificationPort {
+  resolveAccountName(bankCode: string, accountNumber: string): Promise<ResolvedBankAccount>;
+  matchBvnToAccount(input: {
+    bvn: string;
+    bankCode: string;
+    accountNumber: string;
+  }): Promise<BvnAccountMatchResult>;
+}
+
+/** Default holder name returned by mock-mode name enquiries that were not explicitly seeded. */
+export const MOCK_DEFAULT_ACCOUNT_HOLDER = "ADAEZE AMAKA OKONKWO";
+
 /**
  * Monnify Payment Provider Adapter (Implements `PaymentProviderPort` from `@caterlog/commerce-core`).
  *
@@ -99,7 +132,7 @@ export interface RefundResult {
  * - `sandbox` — real Monnify sandbox (`sandbox.monnify.com`) with `MK_TEST_*` keys.
  * - `live`    — production Monnify (`api.monnify.com`).
  */
-export class MonnifyPaymentAdapter implements PaymentProviderPort {
+export class MonnifyPaymentAdapter implements PaymentProviderPort, IdentityVerificationPort {
   /** In-memory ledger used only in `mock` mode for local end-to-end testing. */
   private readonly mockTransactions = new Map<string, ServerVerifiedPaymentRecord>();
   private readonly mode: IntegrationMode;
@@ -388,6 +421,124 @@ export class MonnifyPaymentAdapter implements PaymentProviderPort {
       "50211": "Kuda Microfinance Bank",
     };
     return banks[bankCode] ?? "Commercial Bank";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Identity verification (name enquiry + BVN ↔ account match)
+  // ---------------------------------------------------------------------------
+
+  /** mock mode: `${bankCode}:${accountNumber}` → holder name. */
+  private readonly mockAccountNames = new Map<string, string>();
+  /** mock mode: BVN → registered full name. */
+  private readonly mockBvnNames = new Map<string, string>();
+
+  /** Registers the holder name a mock-mode name enquiry should return. */
+  public seedMockAccountName(bankCode: string, accountNumber: string, accountName: string): void {
+    if (!this.isMockMode()) throw new Error("seedMockAccountName is only available in MONNIFY_MODE=mock.");
+    this.mockAccountNames.set(`${bankCode}:${accountNumber}`, accountName.toUpperCase());
+  }
+
+  /** Registers the full name a mock-mode BVN lookup should return. */
+  public seedMockBvn(bvn: string, fullName: string): void {
+    if (!this.isMockMode()) throw new Error("seedMockBvn is only available in MONNIFY_MODE=mock.");
+    this.mockBvnNames.set(bvn, fullName.toUpperCase());
+  }
+
+  /**
+   * NUBAN name enquiry. The returned `accountName` comes from the bank switch,
+   * never from the client, so it can be trusted for identity matching.
+   */
+  public async resolveAccountName(
+    bankCode: string,
+    accountNumber: string
+  ): Promise<ResolvedBankAccount> {
+    const cleanAccount = accountNumber.replace(/\D/g, "");
+    if (cleanAccount.length !== 10) {
+      throw new Error("A valid 10-digit NUBAN account number is required.");
+    }
+    if (!/^\d{3,6}$/.test(bankCode.trim())) {
+      throw new Error("A valid bank code is required.");
+    }
+
+    if (this.isMockMode()) {
+      return {
+        bankCode,
+        accountNumber: cleanAccount,
+        accountName:
+          this.mockAccountNames.get(`${bankCode}:${cleanAccount}`) ?? MOCK_DEFAULT_ACCOUNT_HOLDER,
+      };
+    }
+
+    const params = new URLSearchParams({ accountNumber: cleanAccount, bankCode });
+    const json = await this.request<{
+      accountNumber?: string;
+      accountName?: string;
+      bankCode?: string;
+    }>(`/api/v1/disbursements/account/validate?${params.toString()}`, { method: "GET" });
+    const body = json.responseBody;
+    if (!body?.accountName) {
+      throw new Error("Bank account name enquiry returned no account name.");
+    }
+    return {
+      bankCode: body.bankCode ?? bankCode,
+      accountNumber: body.accountNumber ?? cleanAccount,
+      accountName: body.accountName.toUpperCase(),
+    };
+  }
+
+  /**
+   * Confirms that the bank account belongs to the holder of the BVN
+   * (Monnify `POST /api/v1/vas/bvn-account-match`, live contracts only).
+   */
+  public async matchBvnToAccount(input: {
+    bvn: string;
+    bankCode: string;
+    accountNumber: string;
+  }): Promise<BvnAccountMatchResult> {
+    const bvn = input.bvn.replace(/\D/g, "");
+    if (bvn.length !== 11) throw new Error("A valid 11-digit BVN is required.");
+
+    if (this.isMockMode()) {
+      const account = await this.resolveAccountName(input.bankCode, input.accountNumber);
+      const bvnName = this.mockBvnNames.get(bvn) ?? MOCK_DEFAULT_ACCOUNT_HOLDER;
+      const bvnTokens = new Set(bvnName.split(/\s+/));
+      const accountTokens = account.accountName.split(/\s+/);
+      const overlap = accountTokens.filter((t) => bvnTokens.has(t)).length;
+      const matchStatus: BvnAccountMatchStatus =
+        overlap === accountTokens.length && overlap > 0
+          ? "FULL_MATCH"
+          : overlap >= 2
+          ? "PARTIAL_MATCH"
+          : "NO_MATCH";
+      return {
+        matchStatus,
+        accountName: account.accountName,
+        matchPercentage: Math.round((overlap / Math.max(1, accountTokens.length)) * 100),
+      };
+    }
+
+    const json = await this.request<{
+      accountName?: string;
+      matchStatus?: string;
+      matchPercentage?: number;
+    }>("/api/v1/vas/bvn-account-match", {
+      method: "POST",
+      body: { bvn, bankCode: input.bankCode, accountNumber: input.accountNumber },
+    });
+    const body = json.responseBody;
+    const raw = (body?.matchStatus ?? "").toUpperCase();
+    const matchStatus: BvnAccountMatchStatus =
+      raw === "FULL_MATCH" || raw === "MATCHED" || raw === "MATCH"
+        ? "FULL_MATCH"
+        : raw === "PARTIAL_MATCH"
+        ? "PARTIAL_MATCH"
+        : "NO_MATCH";
+
+    let accountName = body?.accountName?.toUpperCase();
+    if (!accountName) {
+      accountName = (await this.resolveAccountName(input.bankCode, input.accountNumber)).accountName;
+    }
+    return { matchStatus, accountName, matchPercentage: body?.matchPercentage };
   }
 
   private readonly mockRefunds = new Map<string, RefundResult>();

@@ -1,5 +1,71 @@
 export type CopilotMode = "COPILOT" | "FULL_AUTO" | "MANUAL";
 
+export type SubscriptionPlanId =
+  | "FREE"
+  | "RESELLER"
+  | "STARTER"
+  | "GROWTH"
+  | "PRO"
+  | "SCALE";
+export type BillingCycle = "MONTHLY" | "ANNUALLY";
+export type TrustTierLevel = 0 | 1 | 2;
+
+export interface SubscriptionInfo {
+  planId: SubscriptionPlanId;
+  planName: string;
+  billingCycle: BillingCycle;
+  status: "ACTIVE" | "PAST_DUE" | "TRIALING" | "CANCELLED";
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  cancelAtPeriodEnd: boolean;
+  priceNaira: number;
+  priceUsd?: number;
+  platformFeeBps: number;
+  maxProducts: number;
+  maxTeamSeats: number;
+  copilotTier: "KEYWORD" | "FULL_AUTO" | "MULTI_AGENT";
+  hasCustomDomain: boolean;
+  hasResellerMirroring: boolean;
+  hasPhashStatusMatching: boolean;
+  hasMarketBoost?: boolean;
+  hasConciergeShipping?: boolean;
+  pickupStationEnabled?: boolean;
+  scheduledPickupWindows?: string[];
+  shieldedBuyerSupport?: boolean;
+  paymentMethod?: {
+    type: "CARD" | "DIRECT_DEBIT";
+    brand?: string;
+    last4?: string;
+    bankName?: string;
+    expiry?: string;
+  };
+}
+
+export interface TrustTierInfo {
+  currentTier: TrustTierLevel;
+  tierName: string;
+  settlementSpeed: string;
+  dailyPayoutLimitNaira: number;
+  completedCleanOrders: number;
+  requiredOrdersForNextTier: number;
+  isKycVerified: boolean;
+  isCacVerified: boolean;
+  disputeRatePercent: number;
+  canFastTrackLevel2: boolean;
+}
+
+export interface PlatformInvoiceItem {
+  id: string;
+  invoiceNumber: string;
+  description: string;
+  amountNaira: number;
+  amountFormatted: string;
+  status: "PAID" | "PENDING" | "FAILED";
+  paidAt: string;
+  pdfUrl?: string;
+  planId?: SubscriptionPlanId;
+}
+
 export type OrderStatus =
   | "PENDING_PAYMENT"
   | "PARTIALLY_PAID"
@@ -13,6 +79,12 @@ export type OrderStatus =
 
 export type ChatChannel = "VENDOR_ADMIN_WA" | "BUYER_SHOP_WA";
 export type ChatSender = "VENDOR" | "BUYER" | "CATERLOG_BOT";
+export type SalesChannel =
+  | "WHATSAPP"
+  | "INSTAGRAM"
+  | "FACEBOOK"
+  | "PAYMENT_LINK"
+  | "RESELLER_NETWORK";
 
 export interface QuickReplyOption {
   label: string;
@@ -22,6 +94,7 @@ export interface QuickReplyOption {
 export interface ChatMessage {
   id: string;
   channel: ChatChannel;
+  sourceChannel?: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
   sender: ChatSender;
   fromPhone: string;
   text: string;
@@ -30,11 +103,57 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export type PlatformRole = "reseller" | "starter" | "growth" | "pro";
+
+export function isResellerRole(role?: string): boolean {
+  return role === "reseller";
+}
+
+export function isVendorRole(role?: string): boolean {
+  return (
+    role === "starter" ||
+    role === "growth" ||
+    role === "pro" ||
+    role === "vendor" ||
+    role === "supplier"
+  );
+}
+
+export function roleToPlanId(role: PlatformRole): SubscriptionPlanId {
+  switch (role) {
+    case "reseller":
+      return "RESELLER";
+    case "starter":
+      return "STARTER";
+    case "growth":
+      return "GROWTH";
+    case "pro":
+      return "PRO";
+  }
+}
+
+export function planIdToRole(planId?: string): PlatformRole {
+  switch (planId) {
+    case "RESELLER":
+      return "reseller";
+    case "STARTER":
+    case "FREE":
+      return "starter";
+    case "PRO":
+    case "SCALE":
+    case "ENTERPRISE":
+      return "pro";
+    case "GROWTH":
+    default:
+      return "growth";
+  }
+}
+
 export interface Vendor {
   id: string;
   slug: string;
   businessName: string;
-  role?: "reseller" | "supplier";
+  role?: PlatformRole;
   whatsappPhone: string;
   whatsappPhoneId: string;
   verificationStatus: "VERIFIED" | "PENDING" | "REJECTED";
@@ -49,8 +168,31 @@ export interface Vendor {
   cacNumber?: string;
   tinNumber?: string;
   instagramHandle?: string;
+  instagramConnected?: boolean;
+  instagramBusinessId?: string;
+  facebookPageName?: string;
+  facebookPageId?: string;
+  facebookConnected?: boolean;
   baseState?: string;
   baseCity?: string;
+  verifiedLegalName?: string;
+  isPayoutFrozen?: boolean;
+  payoutFrozenUntil?: string;
+  pendingBankUpdate?: PendingBankUpdateInfo | null;
+  subscription?: SubscriptionInfo;
+  trustTier?: TrustTierInfo;
+  platformInvoices?: PlatformInvoiceItem[];
+}
+
+export interface PendingBankUpdateInfo {
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  requestedAt: string;
+  effectiveAt: string;
+  cancelTokenHash?: string;
+  requestorIp?: string;
 }
 
 export interface ProductVariant {
@@ -180,6 +322,17 @@ export interface Order {
   remainingBalanceNaira: number;
   remainingBalanceFormatted: string;
   overpaidAmountFormatted: string;
+  isDropship?: boolean;
+  supplierSubAccountCode?: string;
+  resellerSubAccountCode?: string;
+  supplierShareKobo?: string;
+  resellerShareKobo?: string;
+  platformFeeKobo?: string;
+  supplierShareNaira?: number;
+  resellerShareNaira?: number;
+  platformFeeNaira?: number;
+  splitSettlementStatus?: "PENDING" | "SETTLED" | "NOT_APPLICABLE";
+  salesChannel?: SalesChannel;
 }
 
 export interface PublicOrderReceipt {
@@ -286,13 +439,21 @@ export interface CartItemSession {
 export interface BuyerSession {
   buyerPhone: string;
   buyerName: string;
+  sourceChannel?: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
   activeProductId?: string;
   activeVariantId?: string;
   activeOrderId?: string;
   quantity?: number;
   discountCode?: string;
   cart?: CartItemSession[];
-  state: "AWAITING_VARIANT" | "AWAITING_QUANTITY" | "AWAITING_SHIPPING_ZONE" | "AWAITING_DELIVERY_ADDRESS" | "CART_ACTIVE" | "NEEDS_ASSISTANCE" | "ASSISTING";
+  state:
+    | "AWAITING_VARIANT"
+    | "AWAITING_QUANTITY"
+    | "AWAITING_SHIPPING_ZONE"
+    | "AWAITING_DELIVERY_ADDRESS"
+    | "CART_ACTIVE"
+    | "NEEDS_ASSISTANCE"
+    | "ASSISTING";
   assistanceInquiry?: string;
   assistanceRequestedAt?: string;
   copilotPaused?: boolean;
@@ -324,6 +485,7 @@ export interface MarketBoostListing {
   shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
   allowInterstate: boolean;
   coveredStates: string[];
+  coveredLgas?: string[];
   description: string;
   moq: string;
   startingPriceKobo: string;
@@ -361,6 +523,7 @@ export interface SupplierProfile {
   shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
   allowInterstate: boolean;
   coveredStates: string[];
+  coveredLgas?: string[];
   warehouseAddress: string;
   phone: string;
   whatsapp: string;
@@ -514,6 +677,9 @@ export interface VendorState {
   teamMembers?: TeamMemberItem[];
   notifications?: VendorNotificationItem[];
   commerceEvents?: CommerceEventItem[];
+  subscription?: SubscriptionInfo;
+  trustTier?: TrustTierInfo;
+  platformInvoices?: PlatformInvoiceItem[];
 }
 
 export interface WhatsAppSimulationResult {
@@ -535,4 +701,3 @@ export type ShippingZoneItem = ShippingZone;
 export type DiscountItem = Discount;
 export type ChatMessageItem = ChatMessage;
 export type VendorAnalytics = Analytics;
-

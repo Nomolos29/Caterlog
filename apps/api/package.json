@@ -14,6 +14,7 @@
     "@caterlog/commerce-core": "*",
     "@caterlog/database": "*",
     "@caterlog/integrations": "*",
+    "@caterlog/shared": "*",
     "bullmq": "^6.7.0"
   },
   "devDependencies": {

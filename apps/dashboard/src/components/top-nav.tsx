@@ -1,6 +1,12 @@
 import React, { useState, useMemo } from "react";
 import { SearchIcon, BellIcon, MenuIcon, CheckIcon } from "./icons";
-import type { VendorProfile, OrderItem, ProductItem } from "@/lib/types";
+import type {
+  VendorProfile,
+  OrderItem,
+  ProductItem,
+  PlatformRole,
+} from "@/lib/types";
+import { isResellerRole } from "@/lib/types";
 
 interface TopNavProps {
   vendor: VendorProfile;
@@ -8,8 +14,9 @@ interface TopNavProps {
   onOpenSimulator?: () => void;
   simulatorOpen?: boolean;
   breadcrumb?: string;
-  activeWorkspace?: "reseller" | "supplier";
+  activeWorkspace?: PlatformRole;
   onToggleWorkspace?: () => void;
+  onSelectRole?: (role: PlatformRole) => void;
   onOpenMobileNav?: () => void;
   orders?: OrderItem[];
   products?: ProductItem[];
@@ -34,8 +41,9 @@ export function TopNav({
   onOpenSimulator,
   simulatorOpen = false,
   breadcrumb = "Overview",
-  activeWorkspace = "reseller",
+  activeWorkspace = "growth",
   onToggleWorkspace,
+  onSelectRole,
   onOpenMobileNav,
   orders = [],
   products = [],
@@ -44,6 +52,7 @@ export function TopNav({
   onNavigateToView,
   onSignOut,
 }: TopNavProps) {
+  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const initials = vendor.businessName
     ? vendor.businessName
         .split(/\s+/)
@@ -51,7 +60,9 @@ export function TopNav({
         .slice(0, 2)
         .map((w) => w[0]?.toUpperCase() || "")
         .join("") || (activeWorkspace === "reseller" ? "NS" : "AW")
-    : activeWorkspace === "reseller" ? "NS" : "AW";
+    : activeWorkspace === "reseller"
+      ? "NS"
+      : "AW";
 
   // Search Palette State
   const [searchOpen, setSearchOpen] = useState(false);
@@ -59,7 +70,9 @@ export function TopNav({
 
   // Notifications State (dynamically derived from live orders and catalog)
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(() => new Set());
+  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const notifications = useMemo<NotificationItem[]>(() => {
     const list: NotificationItem[] = [];
@@ -146,7 +159,8 @@ export function TopNav({
     list.push({
       id: verifId,
       title: "CAC Business Verified",
-      message: "Your Nigerian NUBAN settlement channel is fully verified with Monnify.",
+      message:
+        "Your Nigerian NUBAN settlement channel is fully verified with Monnify.",
       timestamp: "Active",
       read: readNotifIds.has(verifId),
       type: "verification",
@@ -169,13 +183,13 @@ export function TopNav({
     (o) =>
       o.shortCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
       o.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      o.productName.toLowerCase().includes(searchQuery.toLowerCase())
+      o.productName.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   const matchingProducts = products.filter(
     (p) =>
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.skuCode.toLowerCase().includes(searchQuery.toLowerCase())
+      p.skuCode.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   return (
@@ -192,27 +206,150 @@ export function TopNav({
           </button>
 
           <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
-            <span className="font-semibold text-gray-900 hidden sm:inline">Caterlog</span>
+            <span className="font-semibold text-gray-900 hidden sm:inline">
+              Caterlog
+            </span>
             <span className="text-gray-300 hidden sm:inline">/</span>
-            <span className="truncate max-w-[160px] sm:max-w-none">{breadcrumb}</span>
+            <span className="truncate max-w-[160px] sm:max-w-none">
+              {breadcrumb}
+            </span>
           </div>
         </div>
 
         {/* Right Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Toggle WhatsApp Simulator Live Test Drawer */}
+          {/* Active Workspace / 4-Role Switcher Pill */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setRoleMenuOpen(!roleMenuOpen);
+                setNotificationsOpen(false);
+                setProfileOpen(false);
+              }}
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
+                activeWorkspace === "reseller"
+                  ? "bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100"
+                  : activeWorkspace === "starter"
+                    ? "bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100"
+                    : activeWorkspace === "growth"
+                      ? "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
+                      : "bg-purple-50 text-purple-900 border-purple-200 hover:bg-purple-100"
+              }`}
+              title="Click to switch workspace role (Reseller, Starter, Growth, or Pro)"
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  activeWorkspace === "reseller"
+                    ? "bg-blue-600"
+                    : activeWorkspace === "starter"
+                      ? "bg-amber-600"
+                      : activeWorkspace === "growth"
+                        ? "bg-emerald-600"
+                        : "bg-purple-600"
+                }`}
+              />
+              <span>
+                {activeWorkspace === "reseller"
+                  ? "Reseller ($5)"
+                  : activeWorkspace === "starter"
+                    ? "Starter Vendor ($10)"
+                    : activeWorkspace === "growth"
+                      ? "Growth Vendor ($15)"
+                      : "Pro Concierge ($20)"}
+              </span>
+              <span className="text-[9px] text-gray-400 font-mono ml-0.5">
+                ▼
+              </span>
+            </button>
+
+            {/* 4-Role Popover Menu */}
+            {roleMenuOpen && (
+              <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-gray-100 p-2 z-50 animate-in fade-in duration-100">
+                <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                  Switch Platform Role
+                </div>
+                <div className="space-y-1">
+                  {[
+                    {
+                      id: "reseller" as const,
+                      label: "Reseller / Dropshipper",
+                      price: "$5/mo",
+                      desc: "Mirror supplier catalogs with zero inventory",
+                      color: "blue",
+                    },
+                    {
+                      id: "starter" as const,
+                      label: "Starter Vendor",
+                      price: "$10/mo",
+                      desc: "Solo brand storefront + self-managed shipping",
+                      color: "amber",
+                    },
+                    {
+                      id: "growth" as const,
+                      label: "Growth Vendor",
+                      price: "$15/mo",
+                      desc: "Market Boost directory + pickup station hubs",
+                      color: "emerald",
+                    },
+                    {
+                      id: "pro" as const,
+                      label: "Pro Concierge",
+                      price: "$20/mo",
+                      desc: "3 daily pickup sweeps + concierge support + team",
+                      color: "purple",
+                    },
+                  ].map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => {
+                        setRoleMenuOpen(false);
+                        if (onSelectRole) onSelectRole(r.id);
+                        else onToggleWorkspace?.();
+                      }}
+                      className={`w-full text-left p-2 rounded-xl text-xs transition-colors cursor-pointer flex flex-col gap-0.5 ${
+                        activeWorkspace === r.id
+                          ? "bg-indigo-50/70 border border-indigo-200 text-indigo-950 font-bold"
+                          : "hover:bg-gray-50 text-gray-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs">{r.label}</span>
+                        <span className="text-[10px] font-semibold text-gray-500 font-mono">
+                          {r.price}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-gray-400 font-normal leading-tight">
+                        {r.desc}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Toggle Omnichannel Simulator Live Test Drawer */}
           <button
             onClick={onOpenSimulator}
-            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium border transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer shadow-2xs active:scale-95 ${
               simulatorOpen
-                ? "bg-emerald-50 text-emerald-800 border-emerald-300"
-                : "bg-gray-50 hover:bg-gray-100 text-gray-600 border-gray-200"
+                ? "bg-emerald-50 text-emerald-900 border-emerald-400 ring-2 ring-emerald-200/50"
+                : "bg-gradient-to-r from-emerald-50 via-pink-50 to-blue-50 hover:from-emerald-100 hover:via-pink-100 hover:to-blue-100 text-gray-800 border-gray-200"
             }`}
-            title="Open interactive WhatsApp Simulation Drawer"
+            title="Open Omnichannel Live Simulator (WhatsApp, Instagram & Facebook)"
           >
-            <span className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500 animate-pulse" : "bg-amber-400"}`} />
-            <span className="hidden sm:inline">WhatsApp Simulator</span>
-            <span className="sm:hidden">Simulator</span>
+            <span
+              className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500 animate-pulse" : "bg-amber-400"}`}
+            />
+            <span className="hidden md:inline font-bold">
+              Omnichannel Simulator
+            </span>
+            <span className="md:hidden inline font-semibold">Simulator</span>
+            <div className="hidden sm:flex items-center gap-1 ml-0.5 text-[10px] text-gray-500">
+              <span>🟢</span>
+              <span>📸</span>
+              <span>🔵</span>
+            </div>
           </button>
 
           {/* Quick Search Button */}
@@ -245,7 +382,9 @@ export function TopNav({
               <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] sm:w-96 max-w-sm bg-white rounded-2xl shadow-xl border border-gray-100 p-4 z-50 animate-in fade-in duration-100">
                 <div className="flex items-center justify-between pb-3 border-b border-gray-100">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-gray-900">Notifications</span>
+                    <span className="text-xs font-bold text-gray-900">
+                      Notifications
+                    </span>
                     {unreadCount > 0 && (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">
                         {unreadCount} new
@@ -264,7 +403,9 @@ export function TopNav({
 
                 <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto my-2">
                   {notifications.map((n) => {
-                    const matchingOrder = orders.find((o) => n.id.includes(o.id));
+                    const matchingOrder = orders.find((o) =>
+                      n.id.includes(o.id),
+                    );
                     return (
                       <div
                         key={n.id}
@@ -280,10 +421,16 @@ export function TopNav({
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-xs font-bold text-gray-900">{n.title}</span>
-                          <span className="text-[10px] text-gray-400 shrink-0">{n.timestamp}</span>
+                          <span className="text-xs font-bold text-gray-900">
+                            {n.title}
+                          </span>
+                          <span className="text-[10px] text-gray-400 shrink-0">
+                            {n.timestamp}
+                          </span>
                         </div>
-                        <p className="text-xs text-gray-600 mt-1 leading-relaxed">{n.message}</p>
+                        <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                          {n.message}
+                        </p>
                       </div>
                     );
                   })}
@@ -350,10 +497,17 @@ export function TopNav({
                     {initials}
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-gray-900 truncate">{vendor.businessName}</div>
-                    <div className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1">
-                      <CheckIcon className="w-3 h-3" />
-                      <span>Verified Merchant</span>
+                    <div className="text-xs font-bold text-gray-900 truncate">
+                      {vendor.businessName}
+                    </div>
+                    <div className="text-[11px] font-bold text-indigo-700">
+                      {activeWorkspace === "reseller"
+                        ? "Reseller"
+                        : activeWorkspace === "starter"
+                          ? "Starter Vendor"
+                          : activeWorkspace === "growth"
+                            ? "Growth Vendor"
+                            : "Pro Concierge"}
                     </div>
                   </div>
                 </div>
@@ -361,12 +515,12 @@ export function TopNav({
                 <div className="pt-2 space-y-1">
                   <button
                     onClick={() => {
-                      onNavigateToView?.("profile-settings");
+                      onNavigateToView?.("profile");
                       setProfileOpen(false);
                     }}
                     className="w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors"
                   >
-                    Edit Profile
+                    Profile Settings
                   </button>
 
                   <button
@@ -423,13 +577,16 @@ export function TopNav({
             <div className="p-3 max-h-80 overflow-y-auto space-y-4">
               {searchQuery.trim() === "" ? (
                 <div className="py-8 text-center text-xs text-gray-400">
-                  Type an order reference (e.g. CT-1042), product name, or customer name...
+                  Type an order reference (e.g. CT-1042), product name, or
+                  customer name...
                 </div>
               ) : (
                 <>
                   {matchingOrders.length > 0 && (
                     <div>
-                      <div className="text-[10px] uppercase font-bold text-gray-400 px-2 mb-1">Orders</div>
+                      <div className="text-[10px] uppercase font-bold text-gray-400 px-2 mb-1">
+                        Orders
+                      </div>
                       <div className="space-y-1">
                         {matchingOrders.slice(0, 4).map((o) => (
                           <div
@@ -444,9 +601,13 @@ export function TopNav({
                               <div className="text-xs font-bold text-gray-900">
                                 {o.shortCode} — {o.customerName}
                               </div>
-                              <div className="text-[11px] text-gray-400">{o.productName}</div>
+                              <div className="text-[11px] text-gray-400">
+                                {o.productName}
+                              </div>
                             </div>
-                            <span className="text-xs font-bold text-gray-900">{o.totalAmountFormatted}</span>
+                            <span className="text-xs font-bold text-gray-900">
+                              {o.totalAmountFormatted}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -455,7 +616,9 @@ export function TopNav({
 
                   {matchingProducts.length > 0 && (
                     <div>
-                      <div className="text-[10px] uppercase font-bold text-gray-400 px-2 mb-1">Products</div>
+                      <div className="text-[10px] uppercase font-bold text-gray-400 px-2 mb-1">
+                        Products
+                      </div>
                       <div className="space-y-1">
                         {matchingProducts.slice(0, 4).map((p) => (
                           <div
@@ -467,21 +630,28 @@ export function TopNav({
                             className="p-2 rounded-xl hover:bg-emerald-50/60 cursor-pointer flex items-center justify-between transition-colors"
                           >
                             <div>
-                              <div className="text-xs font-bold text-gray-900">{p.name}</div>
-                              <div className="text-[11px] text-gray-400 font-mono">{p.skuCode}</div>
+                              <div className="text-xs font-bold text-gray-900">
+                                {p.name}
+                              </div>
+                              <div className="text-[11px] text-gray-400 font-mono">
+                                {p.skuCode}
+                              </div>
                             </div>
-                            <span className="text-xs font-bold text-gray-900">{p.basePriceFormatted}</span>
+                            <span className="text-xs font-bold text-gray-900">
+                              {p.basePriceFormatted}
+                            </span>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
 
-                  {matchingOrders.length === 0 && matchingProducts.length === 0 && (
-                    <div className="py-6 text-center text-xs text-gray-400">
-                      No results matching &quot;{searchQuery}&quot;
-                    </div>
-                  )}
+                  {matchingOrders.length === 0 &&
+                    matchingProducts.length === 0 && (
+                      <div className="py-6 text-center text-xs text-gray-400">
+                        No results matching &quot;{searchQuery}&quot;
+                      </div>
+                    )}
                 </>
               )}
             </div>

@@ -16,6 +16,7 @@ import {
   type DomainOrderStatus,
   type ServerVerifiedPaymentRecord,
 } from "@caterlog/commerce-core";
+import { isTerritoryDeliverable } from "@caterlog/shared";
 import {
   assertValidIntegrationConfig,
   describeIntegrationConfig,
@@ -54,7 +55,24 @@ import type {
   RuntimeTeamMember,
   RuntimeVendor,
   RuntimeVendorNotification,
+  PendingBankUpdate,
+  VendorSession,
+  SubscriptionPlanId,
+  BillingCycle,
+  RuntimeSubscriptionInfo,
+  RuntimePlatformInvoice,
+  RuntimeTrustTierInfo,
 } from "./runtime-types.ts";
+import {
+  hashSecret,
+  verifySecret,
+  randomNumericCode,
+  randomToken,
+  sha256,
+  safeEqual,
+  weakPinReason,
+} from "./security/crypto.ts";
+import { matchAccountName } from "./security/name-match.ts";
 import { createMemoryPersistence } from "./persistence/memory.ts";
 import type { PersistenceStore } from "./persistence/types.ts";
 import type { BackgroundJobScheduler } from "./jobs/types.ts";
@@ -309,7 +327,7 @@ export class CaterlogStage1Engine {
     id: "v-amaka-001",
     slug: "amaka-shoes",
     businessName: "Amaka Luxury Shoes",
-    role: "reseller",
+    role: "growth",
     whatsappPhone: process.env.VENDOR_WHATSAPP_PHONE ?? "+2348031234567",
     whatsappPhoneId: process.env.WHATSAPP_PHONE_NUMBER_ID ?? "105992837465001",
     verificationStatus: "VERIFIED",
@@ -321,6 +339,92 @@ export class CaterlogStage1Engine {
     bankAccountNumber: "8031234567",
     bankAccountName: "Amaka Luxury Shoes Ltd",
     monnifySubAccountCode: "MFY_SUB_AMAKA_001",
+    instagramHandle: "@amakashoes",
+    instagramConnected: true,
+    instagramBusinessId: "IG_BIZ_178414001",
+    facebookPageName: "Amaka Luxury Shoes Official",
+    facebookPageId: "FB_PAGE_104928371",
+    facebookConnected: true,
+    verifiedLegalName: "AMAKA LUXURY SHOES LTD",
+    verifiedBvnHash: undefined,
+    transactionPinHash: undefined,
+    pinFailedAttempts: 0,
+    pinLockedUntil: undefined,
+    pinSetAt: undefined,
+    isPayoutFrozen: false,
+    payoutFrozenUntil: undefined,
+    pendingBankUpdate: null,
+    subscription: {
+      planId: "GROWTH",
+      planName: "Growth Vendor (Market Boost)",
+      billingCycle: "MONTHLY",
+      status: "ACTIVE",
+      currentPeriodStart: "2026-11-01T00:00:00.000Z",
+      currentPeriodEnd: "2026-12-01T00:00:00.000Z",
+      cancelAtPeriodEnd: false,
+      priceNaira: 22500,
+      priceUsd: 15,
+      platformFeeBps: 100,
+      maxProducts: -1,
+      maxTeamSeats: 5,
+      copilotTier: "FULL_AUTO",
+      hasCustomDomain: false,
+      hasResellerMirroring: false,
+      hasPhashStatusMatching: true,
+      hasMarketBoost: true,
+      pickupStationEnabled: true,
+      paymentMethod: {
+        type: "CARD",
+        brand: "Mastercard",
+        last4: "4242",
+        bankName: "Guaranty Trust Bank",
+        expiry: "08/28",
+      },
+    },
+    trustTier: {
+      currentTier: 1,
+      tierName: "Level 1: Dispatch Payouts",
+      settlementSpeed: "50% at Courier Pickup, 50% at Delivery",
+      dailyPayoutLimitNaira: 2000000,
+      completedCleanOrders: 14,
+      requiredOrdersForNextTier: 20,
+      isKycVerified: true,
+      isCacVerified: false,
+      disputeRatePercent: 0.0,
+      canFastTrackLevel2: true,
+    },
+    invoices: [
+      {
+        id: "inv-003",
+        invoiceNumber: "INV-2026-003",
+        description: "Growth Plan Subscription - Nov 2026",
+        amountNaira: 9500,
+        status: "PAID",
+        paidAt: "2026-11-01T08:15:00.000Z",
+        pdfUrl: "/invoices/INV-2026-003.pdf",
+        planId: "GROWTH",
+      },
+      {
+        id: "inv-002",
+        invoiceNumber: "INV-2026-002",
+        description: "Growth Plan Subscription - Oct 2026",
+        amountNaira: 9500,
+        status: "PAID",
+        paidAt: "2026-10-01T08:15:00.000Z",
+        pdfUrl: "/invoices/INV-2026-002.pdf",
+        planId: "GROWTH",
+      },
+      {
+        id: "inv-001",
+        invoiceNumber: "INV-2026-001",
+        description: "Growth Plan Subscription - Sep 2026",
+        amountNaira: 9500,
+        status: "PAID",
+        paidAt: "2026-09-01T08:15:00.000Z",
+        pdfUrl: "/invoices/INV-2026-001.pdf",
+        planId: "GROWTH",
+      },
+    ],
   };
 
   public products: RuntimeProduct[] = [
@@ -459,13 +563,144 @@ export class CaterlogStage1Engine {
 
   public chatMessages: ChatThreadMessage[] = [];
   public marketBoostListing: RuntimeMarketBoostListing | null = null;
-  public suppliers: RuntimeSupplierProfile[] = [];
+  public suppliers: RuntimeSupplierProfile[] = [
+    {
+      id: "sup-1",
+      slug: "aroko-wholesale",
+      name: "Aroko Wholesale",
+      verified: true,
+      cacNumber: "RC-1928401",
+      category: "Kitchenware & Home Living",
+      location: "Lagos, Nigeria",
+      state: "Lagos",
+      shippingScope: "LOCAL_STATE",
+      allowInterstate: false,
+      coveredStates: ["Lagos"],
+      coveredLgas: [],
+      warehouseAddress: "Warehouse 3B, International Trade Fair Complex, Badagry Expressway, Lagos",
+      phone: "+234 803 442 9910",
+      whatsapp: "+2348034429910",
+      rating: 4.9,
+      totalFulfilled: 3420,
+      subAccountCode: "MFY_SUB_AROKO_001",
+      leadTime: "Same-Day Dispatch",
+      cutoffTime: "2:00 PM WAT",
+      wholesaleTerms: [
+        "1 unit dropship MOQ",
+        "Instant Monnify split settlement",
+        "7-day defective replacement",
+      ],
+      catalogProducts: [
+        {
+          sku: "ARK-MUG-01",
+          name: "Aroko Ceramic Coffee Mug Set",
+          wholesalePriceNaira: 12000,
+          suggestedRetailNaira: 16500,
+          stock: 45,
+          moq: 1,
+          category: "Kitchenware",
+        },
+        {
+          sku: "ARK-JAR-02",
+          name: "Bamboo Lid Glass Storage Jar Trio",
+          wholesalePriceNaira: 18500,
+          suggestedRetailNaira: 25000,
+          stock: 30,
+          moq: 1,
+          category: "Home Storage",
+        },
+      ],
+    },
+    {
+      id: "sup-2",
+      slug: "zaria-luxe-textiles",
+      name: "Zaria Luxe Textiles & Footwear",
+      verified: true,
+      cacNumber: "RC-2049182",
+      category: "Fashion & Footwear",
+      location: "Ikeja, Lagos",
+      state: "Lagos",
+      shippingScope: "NATIONWIDE",
+      allowInterstate: true,
+      coveredStates: ["Lagos", "FCT - Abuja", "Rivers", "Kano", "Oyo", "Ogun"],
+      coveredLgas: [],
+      warehouseAddress: "19 Allen Avenue, Ikeja, Lagos",
+      phone: "+234 809 551 1122",
+      whatsapp: "+2348095511122",
+      rating: 4.8,
+      totalFulfilled: 1890,
+      subAccountCode: "MFY_SUB_ZARIA_002",
+      leadTime: "24h Nationwide Hub Dispatch",
+      cutoffTime: "4:00 PM WAT",
+      wholesaleTerms: [
+        "Nationwide GIGL & Shipbubble Hub delivery",
+        "Automated Monnify split settlement",
+      ],
+      catalogProducts: [
+        {
+          sku: "ZLT-SLIP-01",
+          name: "Handcrafted Leather Mule Slippers",
+          wholesalePriceNaira: 15000,
+          suggestedRetailNaira: 22000,
+          stock: 60,
+          moq: 1,
+          category: "Footwear",
+        },
+      ],
+    },
+  ];
   public resellerMirrors: RuntimeResellerMirror[] = [];
   public paymentLinks: RuntimePaymentLink[] = [];
   public payoutWithdrawals: RuntimePayoutWithdrawal[] = [];
   public settlementSplitRules: RuntimeSettlementSplitRule[] = [];
   public kycSubmissions: RuntimeKycSubmission[] = [];
-  public teamMembers: RuntimeTeamMember[] = [];
+  public teamMembers: RuntimeTeamMember[] = [
+    {
+      id: "tm-owner",
+      name: "Amaka Okonkwo (Store Owner)",
+      email: "owner@caterlog.store",
+      phone: "+2348091234567",
+      role: "Owner",
+      status: "Active",
+      canManageOrders: true,
+      canManageInventory: true,
+      canViewPayouts: true,
+      canProcessRefunds: true,
+      canOverrideCopilot: true,
+      lastActiveAt: new Date(),
+      invitedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+    },
+    {
+      id: "tm-rider",
+      name: "Chinedu Eze (Dispatch Rider)",
+      email: "rider@caterlog.store",
+      phone: "+2348031112222",
+      role: "Dispatch Coordinator",
+      status: "Active",
+      canManageOrders: true,
+      canManageInventory: false,
+      canViewPayouts: false,
+      canProcessRefunds: false,
+      canOverrideCopilot: false,
+      lastActiveAt: new Date(),
+      invitedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
+    },
+    {
+      id: "tm-catalog",
+      name: "Tolu Adebayo (Catalog Editor)",
+      email: "catalog@caterlog.store",
+      phone: "+2348052223333",
+      role: "Catalog Editor",
+      status: "Active",
+      canManageOrders: false,
+      canManageInventory: true,
+      canViewPayouts: false,
+      canProcessRefunds: false,
+      canOverrideCopilot: false,
+      lastActiveAt: new Date(),
+      invitedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+    },
+  ];
   public notifications: RuntimeVendorNotification[] = [];
   public commerceEvents: RuntimeCommerceEvent[] = [];
 
@@ -549,6 +784,170 @@ export class CaterlogStage1Engine {
       });
     }
     return { token: record.token, vendorSlug: record.vendorSlug };
+  }
+
+  private readonly activeSessions = new Map<string, VendorSession>();
+
+  public createVendorSession(input?: {
+    phone?: string;
+    email?: string;
+    staffMemberId?: string;
+    staffName?: string;
+    staffRole?: string;
+    isOwner?: boolean;
+    permissions?: {
+      canManageOrders: boolean;
+      canManageInventory: boolean;
+      canViewPayouts: boolean;
+      canProcessRefunds: boolean;
+      canOverrideCopilot: boolean;
+    };
+    ipAddress?: string;
+    userAgent?: string;
+    ttlDays?: number;
+  }): { token: string; session: VendorSession } {
+    const rawToken = randomToken(32);
+    const tokenHash = sha256(rawToken);
+    const ttlDays = input?.ttlDays ?? 7;
+    const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
+    const isOwner = input?.isOwner ?? true;
+    const session: VendorSession = {
+      tokenHash,
+      vendorSlug: this.vendor.slug,
+      phone: input?.phone ?? this.vendor.whatsappPhone,
+      email: input?.email ?? `${this.vendor.slug}@caterlog.store`,
+      staffMemberId: input?.staffMemberId,
+      staffName: input?.staffName ?? this.vendor.businessName,
+      staffRole: input?.staffRole ?? (isOwner ? "Owner" : "Store Attendant"),
+      isOwner,
+      permissions: input?.permissions ?? {
+        canManageOrders: true,
+        canManageInventory: true,
+        canViewPayouts: true,
+        canProcessRefunds: true,
+        canOverrideCopilot: true,
+      },
+      createdAt: new Date(),
+      expiresAt,
+      lastActiveAt: new Date(),
+      ipAddress: input?.ipAddress,
+      userAgent: input?.userAgent,
+    };
+    this.activeSessions.set(tokenHash, session);
+    return { token: rawToken, session };
+  }
+
+  public authenticateStaffMember(input: {
+    email: string;
+    ipAddress?: string;
+    userAgent?: string;
+    ttlDays?: number;
+  }): { token: string; session: VendorSession; member: RuntimeTeamMember } {
+    const cleanEmail = input.email.trim().toLowerCase();
+    if (!cleanEmail) {
+      throw new Error("Staff email is required.");
+    }
+    const member = this.teamMembers.find(
+      (m) => m.email.toLowerCase() === cleanEmail || m.id.toLowerCase() === cleanEmail
+    );
+    if (!member) {
+      throw new Error(`No team member found for "${input.email}".`);
+    }
+    if (member.status === "Suspended") {
+      throw new Error(`Staff account "${member.email}" has been suspended by the store owner.`);
+    }
+
+    if (member.status === "Invited") {
+      member.status = "Active";
+    }
+    member.lastActiveAt = new Date();
+    if (this.persistence.saveTeamMember) {
+      this.persistInBackground("saveTeamMember", () =>
+        this.persistence.saveTeamMember!(member)
+      );
+    }
+
+    const isOwner = member.role === "Owner";
+    const { token, session } = this.createVendorSession({
+      email: member.email,
+      phone: member.phone,
+      staffMemberId: member.id,
+      staffName: member.name,
+      staffRole: member.role,
+      isOwner,
+      permissions: {
+        canManageOrders: isOwner ? true : member.canManageOrders,
+        canManageInventory: isOwner ? true : member.canManageInventory,
+        canViewPayouts: isOwner ? true : member.canViewPayouts,
+        canProcessRefunds: isOwner ? true : member.canProcessRefunds,
+        canOverrideCopilot: isOwner ? true : member.canOverrideCopilot,
+      },
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+      ttlDays: input.ttlDays,
+    });
+
+    this.recordAuditEvent(
+      "STAFF_SESSION_AUTHENTICATED",
+      "VENDOR_WEB_DASHBOARD",
+      "VENDOR",
+      member.email,
+      {
+        staffName: member.name,
+        role: member.role,
+        permissions: session.permissions,
+      }
+    );
+    void this.broadcastStateChange();
+    return { token, session, member };
+  }
+
+  public authenticateVendorSession(rawToken: string): VendorSession | null {
+    if (!rawToken || typeof rawToken !== "string") return null;
+    const tokenHash = sha256(rawToken.trim());
+    const session = this.activeSessions.get(tokenHash);
+    if (!session) return null;
+    if (session.expiresAt.getTime() < Date.now()) {
+      this.activeSessions.delete(tokenHash);
+      return null;
+    }
+
+    // If this session belongs to a non-owner staff member, verify they are still active
+    // and dynamically sync their latest permissions from teamMembers.
+    if (!session.isOwner && (session.staffMemberId || session.email)) {
+      const member = this.teamMembers.find(
+        (m) =>
+          (session.staffMemberId && m.id === session.staffMemberId) ||
+          (session.email && m.email.toLowerCase() === session.email.toLowerCase())
+      );
+      if (!member || member.status === "Suspended") {
+        this.activeSessions.delete(tokenHash);
+        return null;
+      }
+      session.staffRole = member.role;
+      session.isOwner = member.role === "Owner";
+      session.permissions = {
+        canManageOrders: session.isOwner ? true : member.canManageOrders,
+        canManageInventory: session.isOwner ? true : member.canManageInventory,
+        canViewPayouts: session.isOwner ? true : member.canViewPayouts,
+        canProcessRefunds: session.isOwner ? true : member.canProcessRefunds,
+        canOverrideCopilot: session.isOwner ? true : member.canOverrideCopilot,
+      };
+      member.lastActiveAt = new Date();
+    }
+
+    session.lastActiveAt = new Date();
+    return session;
+  }
+
+  public revokeVendorSession(rawToken: string): boolean {
+    if (!rawToken || typeof rawToken !== "string") return false;
+    const tokenHash = sha256(rawToken.trim());
+    return this.activeSessions.delete(tokenHash);
+  }
+
+  public revokeAllVendorSessions(): void {
+    this.activeSessions.clear();
   }
 
   constructor(env: EnvLike = process.env) {
@@ -1505,6 +1904,8 @@ export class CaterlogStage1Engine {
    *   or if they explicitly named a valid shipping zone in their initial message—
    *   Caterlog locks stock and issues the Monnify 10-digit NUBAN invoice.
    */
+  private activeSourceChannel: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK" = "WHATSAPP";
+
   public async handleBuyerWhatsAppInquiry(params: {
     buyerPhone: string;
     buyerName?: string;
@@ -1512,11 +1913,20 @@ export class CaterlogStage1Engine {
     quotedStatusImagePhash?: string;
     attachedImageUrl?: string;
     simulateFastForwardIdleTimer?: boolean;
+    sourceChannel?: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
   }): Promise<{
     copilotDecision: ReturnType<typeof evaluateCopilotAction>;
     step?: "PROMPTED_FOR_QUANTITY" | "PROMPTED_FOR_SHIPPING_ZONE" | "INVOICE_CREATED" | "OUT_OF_STOCK" | "ORDER_TRACKED" | "UNMATCHED";
     createdOrder?: RuntimeOrder;
   }> {
+    const existingSession = this.buyerSessions.get(params.buyerPhone);
+    const resolvedChannel: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK" =
+      params.sourceChannel ?? existingSession?.sourceChannel ?? "WHATSAPP";
+    this.activeSourceChannel = resolvedChannel;
+    if (existingSession && params.sourceChannel) {
+      existingSession.sourceChannel = params.sourceChannel;
+    }
+
     const buyerMessageTime = new Date();
     const matchedStatusProduct = params.quotedStatusImagePhash
       ? this.products.find(
@@ -1528,6 +1938,7 @@ export class CaterlogStage1Engine {
 
     this.appendChat({
       channel: "BUYER_SHOP_WA",
+      sourceChannel: resolvedChannel,
       sender: "BUYER",
       fromPhone: params.buyerPhone,
       text: params.quotedStatusImagePhash
@@ -1536,7 +1947,6 @@ export class CaterlogStage1Engine {
       imageUrl: chatImageUrl,
     });
 
-    const existingSession = this.buyerSessions.get(params.buyerPhone);
     const trimmed = params.text.trim().toLowerCase();
 
     // If Co-Pilot is paused for this buyer (vendor is actively assisting them):
@@ -1593,6 +2003,10 @@ export class CaterlogStage1Engine {
         quotedStatusImagePhash: params.quotedStatusImagePhash,
         attachedImageUrl: params.attachedImageUrl,
       });
+      const updatedSess = this.buyerSessions.get(params.buyerPhone);
+      if (updatedSess) {
+        updatedSess.sourceChannel = resolvedChannel;
+      }
       return {
         copilotDecision: decision,
         step: flowResult.step,
@@ -1620,6 +2034,7 @@ export class CaterlogStage1Engine {
         copilotMode: this.vendor.copilotMode,
       });
       if (shouldTakeOver) {
+        this.activeSourceChannel = resolvedChannel;
         await this.processBuyerConversationTurn({
           buyerPhone: params.buyerPhone,
           buyerName: params.buyerName ?? "Chidinma Okafor",
@@ -1627,6 +2042,10 @@ export class CaterlogStage1Engine {
           quotedStatusImagePhash: params.quotedStatusImagePhash,
           attachedImageUrl: params.attachedImageUrl,
         });
+        const updatedSess = this.buyerSessions.get(params.buyerPhone);
+        if (updatedSess) {
+          updatedSess.sourceChannel = resolvedChannel;
+        }
       }
     }, decision.delaySeconds * 1000);
 
@@ -2913,7 +3332,7 @@ export class CaterlogStage1Engine {
     const orderId = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + this.vendor.reservationTtlMinutes * 60 * 1000);
 
-    const incomeSplitConfig = this.computeOrderSplitConfig(
+    const splitResolution = this.computeOrderSplitConfig(
       rawCart.map((it) => ({ productId: it.productId, quantity: it.quantity })),
       pricing.totalAmountKobo
     );
@@ -2927,7 +3346,7 @@ export class CaterlogStage1Engine {
       expectedAmountKobo: pricing.totalAmountKobo,
       expiresAt,
       vendorSubAccountCode: this.vendor.monnifySubAccountCode,
-      incomeSplitConfig,
+      incomeSplitConfig: splitResolution?.incomeSplitConfig,
     });
 
     const orderItems: RuntimeOrderItem[] = rawCart.map((it) => ({
@@ -2975,6 +3394,17 @@ export class CaterlogStage1Engine {
       accountNumber: virtualAccount.accountNumber,
       bankName: virtualAccount.bankName,
       accountName: virtualAccount.accountName,
+      isDropship: splitResolution?.isDropship ?? false,
+      supplierSubAccountCode: splitResolution?.supplierSubAccountCode,
+      resellerSubAccountCode: splitResolution?.resellerSubAccountCode,
+      supplierShareKobo: splitResolution?.supplierShareKobo ?? 0n,
+      resellerShareKobo: splitResolution?.resellerShareKobo ?? pricing.totalAmountKobo,
+      platformFeeKobo: splitResolution?.platformFeeKobo ?? 0n,
+      splitSettlementStatus: splitResolution?.isDropship ? "PENDING" : "NOT_APPLICABLE",
+      salesChannel:
+        this.buyerSessions.get(params.buyerPhone)?.sourceChannel ??
+        this.activeSourceChannel ??
+        "WHATSAPP",
       paymentExpiresAt: expiresAt,
       createdAt: new Date(),
     };
@@ -3525,6 +3955,9 @@ export class CaterlogStage1Engine {
 
     if (decision.nextStatus === "PAID") {
       order.paidAt = new Date();
+      if (order.isDropship) {
+        order.splitSettlementStatus = "SETTLED";
+      }
 
       if (isOversoldOnLatePayment) {
         order.reservationReleased = true; // stock could not be secured
@@ -3650,6 +4083,9 @@ export class CaterlogStage1Engine {
           `📦 Item: *${itemDisplay}* ×${order.quantity} (Remaining available stock: ${product ? product.stockTotal - product.stockReserved : 0})`,
           wasExpired ? "💚 *Late Payment Revived:* Stock was available and order was restored!" : "",
           overpayNote,
+          order.isDropship && order.supplierShareKobo && order.resellerShareKobo
+            ? `⚡ *Monnify Auto-Split Settled:* Supplier (${formatNaira(order.supplierShareKobo)}) · Reseller Margin (${formatNaira(order.resellerShareKobo)}) · Platform Fee (${formatNaira(order.platformFeeKobo ?? 0n)})`
+            : "",
           ``,
           `_Reply \`dispatch ${order.shortCode} <riderPhone>\` when handed to rider._`,
         ].filter(Boolean).join("\n");
@@ -4074,7 +4510,7 @@ export class CaterlogStage1Engine {
 
   public updateVendorProfile(input: {
     businessName?: string;
-    role?: "reseller" | "supplier";
+    role?: "reseller" | "starter" | "growth" | "pro" | "vendor" | "supplier";
     whatsappPhone?: string;
     instagramHandle?: string;
     baseState?: string;
@@ -4083,8 +4519,16 @@ export class CaterlogStage1Engine {
     if (typeof input.businessName === "string" && input.businessName.trim()) {
       this.vendor.businessName = input.businessName.trim();
     }
-    if (input.role === "reseller" || input.role === "supplier") {
-      this.vendor.role = input.role;
+    if (
+      input.role === "reseller" ||
+      input.role === "starter" ||
+      input.role === "growth" ||
+      input.role === "pro" ||
+      input.role === "vendor" ||
+      input.role === "supplier"
+    ) {
+      this.vendor.role =
+        input.role === "supplier" ? "growth" : input.role === "vendor" ? "growth" : input.role;
     }
     if (typeof input.whatsappPhone === "string" && input.whatsappPhone.trim()) {
       const cleanPhone = input.whatsappPhone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
@@ -4108,7 +4552,7 @@ export class CaterlogStage1Engine {
   public onboardVendorProfile(input: {
     businessName: string;
     whatsappPhone: string;
-    role?: "reseller" | "supplier";
+    role?: "reseller" | "starter" | "growth" | "pro" | "vendor" | "supplier";
     isExistingBusiness?: boolean;
     catalogSelection?: "mirror" | "custom";
   }): RuntimeVendor {
@@ -4119,10 +4563,18 @@ export class CaterlogStage1Engine {
 
     this.vendor.businessName = cleanName;
     this.vendor.whatsappPhone = formattedPhone;
-    if (input.role === "reseller" || input.role === "supplier") {
-      this.vendor.role = input.role;
+    if (
+      input.role === "reseller" ||
+      input.role === "starter" ||
+      input.role === "growth" ||
+      input.role === "pro" ||
+      input.role === "vendor" ||
+      input.role === "supplier"
+    ) {
+      this.vendor.role =
+        input.role === "supplier" ? "growth" : input.role === "vendor" ? "growth" : input.role;
     } else if (typeof input.isExistingBusiness === "boolean") {
-      this.vendor.role = input.isExistingBusiness ? "supplier" : "reseller";
+      this.vendor.role = input.isExistingBusiness ? "growth" : "reseller";
     }
     if (cleanSlug) {
       this.vendor.slug = cleanSlug;
@@ -4194,7 +4646,7 @@ export class CaterlogStage1Engine {
   private readonly activeOtps = new Map<string, {
     code: string;
     phone: string;
-    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET";
     expiresAt: number;
     attempts: number;
   }>();
@@ -4205,12 +4657,12 @@ export class CaterlogStage1Engine {
    */
   public generateOtp(
     phone: string,
-    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" = "LOGIN"
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET" = "LOGIN"
   ): string {
     const cleanPhone = phone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
     const formattedPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = randomNumericCode(6);
     const key = `${formattedPhone}:${purpose}`;
     const expiresAtMs = Date.now() + 10 * 60 * 1000; // 10 minutes
     this.activeOtps.set(key, {
@@ -4237,6 +4689,8 @@ export class CaterlogStage1Engine {
       SIGNUP: "Store Activation",
       WITHDRAWAL: "Fund Withdrawal & Payout",
       SETTINGS: "Sensitive Account Settings Update",
+      BANK_CHANGE: "Payout Bank Account Modification",
+      PIN_RESET: "Transaction PIN Reset",
     };
 
     const label = purposeDescriptions[purpose] || "Verification";
@@ -4256,30 +4710,24 @@ export class CaterlogStage1Engine {
   public verifyOtp(
     phone: string,
     inputCode: string,
-    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" = "LOGIN"
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET" = "LOGIN"
   ): boolean {
     const cleanPhone = phone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
     const formattedPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
     const key = `${formattedPhone}:${purpose}`;
-    const record = this.activeOtps.get(key);
+    let record = this.activeOtps.get(key);
 
     if (!record) {
-      // Also allow checking against active vendor phone
-      const vendorKey = `${this.vendor.whatsappPhone}:${purpose}`;
-      const vendorRecord = this.activeOtps.get(vendorKey);
-      if (vendorRecord && vendorRecord.expiresAt > Date.now() && vendorRecord.code === inputCode.trim()) {
-        this.activeOtps.delete(vendorKey);
-        if (this.persistence.consumeOtpVerification) {
-          this.persistInBackground("consumeOtpVerification", async () => {
-            await this.persistence.consumeOtpVerification!({
-              phone: this.vendor.whatsappPhone,
-              code: inputCode.trim(),
-              purpose,
-            });
-          });
-        }
-        return true;
+      // Check against vendor's registered whatsapp phone if target phone formatted matches
+      const vendorClean = this.vendor.whatsappPhone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
+      const vendorFormatted = vendorClean.startsWith("+") ? vendorClean : `+${vendorClean}`;
+      if (vendorFormatted === formattedPhone) {
+        const vendorKey = `${this.vendor.whatsappPhone}:${purpose}`;
+        record = this.activeOtps.get(vendorKey);
       }
+    }
+
+    if (!record) {
       return false;
     }
 
@@ -4288,7 +4736,7 @@ export class CaterlogStage1Engine {
       return false;
     }
 
-    if (record.code !== inputCode.trim()) {
+    if (!safeEqual(record.code, inputCode.trim())) {
       record.attempts += 1;
       if (record.attempts >= 5) {
         this.activeOtps.delete(key);
@@ -4297,6 +4745,9 @@ export class CaterlogStage1Engine {
     }
 
     this.activeOtps.delete(key);
+    const vendorKey = `${this.vendor.whatsappPhone}:${purpose}`;
+    this.activeOtps.delete(vendorKey);
+
     if (this.persistence.consumeOtpVerification) {
       this.persistInBackground("consumeOtpVerification", async () => {
         await this.persistence.consumeOtpVerification!({
@@ -4307,6 +4758,386 @@ export class CaterlogStage1Engine {
       });
     }
     return true;
+  }
+
+  public async setTransactionPin(input: {
+    pin: string;
+    otpCode?: string;
+    currentPin?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const cleanPin = input.pin.trim();
+    const weakReason = weakPinReason(cleanPin, this.vendor.whatsappPhone);
+    if (weakReason) {
+      throw new Error(weakReason);
+    }
+
+    // If PIN is already set, require step-up verification: either current PIN or fresh OTP
+    if (this.vendor.transactionPinHash) {
+      if (input.currentPin) {
+        await this.verifyTransactionPin(input.currentPin);
+      } else if (input.otpCode) {
+        const otpValid = this.verifyOtp(this.vendor.whatsappPhone, input.otpCode, "PIN_RESET");
+        if (!otpValid) {
+          throw new Error("Invalid or expired 6-digit WhatsApp verification code for PIN reset.");
+        }
+      } else {
+        throw new Error("Current transaction PIN or WhatsApp verification code is required to change your PIN.");
+      }
+    }
+
+    const hashed = await hashSecret(cleanPin);
+    this.vendor.transactionPinHash = hashed;
+    this.vendor.pinSetAt = new Date();
+    this.vendor.pinFailedAttempts = 0;
+    this.vendor.pinLockedUntil = undefined;
+
+    this.persistInBackground("saveVendor", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+
+    await this.whatsapp.sendTextMessage({
+      toPhone: this.vendor.whatsappPhone,
+      text: `🔒 *Security Notice:* Your 6-digit Transaction PIN has been set successfully. Never share this PIN with anyone, including Caterlog staff.`,
+      vendorPhoneId: this.vendor.whatsappPhoneId,
+    }).catch(console.error);
+
+    return { success: true, message: "Transaction PIN updated successfully." };
+  }
+
+  public async verifyTransactionPin(pin: string): Promise<boolean> {
+    if (this.vendor.pinLockedUntil && this.vendor.pinLockedUntil.getTime() > Date.now()) {
+      const waitMinutes = Math.ceil((this.vendor.pinLockedUntil.getTime() - Date.now()) / 60000);
+      throw new Error(
+        `Transaction PIN is locked due to multiple incorrect attempts. Try again in ${waitMinutes} minute(s).`
+      );
+    }
+
+    if (!this.vendor.transactionPinHash) {
+      throw new Error("No transaction PIN has been set. Please set up a 6-digit Transaction PIN first.");
+    }
+
+    const cleanPin = pin.trim();
+    const isValid = await verifySecret(cleanPin, this.vendor.transactionPinHash);
+    if (isValid) {
+      this.vendor.pinFailedAttempts = 0;
+      return true;
+    }
+
+    const currentAttempts = (this.vendor.pinFailedAttempts || 0) + 1;
+    this.vendor.pinFailedAttempts = currentAttempts;
+
+    if (currentAttempts >= 3) {
+      this.vendor.pinLockedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h lockout
+      await this.whatsapp.sendTextMessage({
+        toPhone: this.vendor.whatsappPhone,
+        text: `⚠️ *Security Alert:* 3 incorrect Transaction PIN attempts detected. Financial operations on your store have been locked for 24 hours. If this was not you, lock your store immediately: https://caterlog.store/security/freeze`,
+        vendorPhoneId: this.vendor.whatsappPhoneId,
+      }).catch(console.error);
+      throw new Error("Incorrect transaction PIN. Account security locked for 24 hours.");
+    }
+
+    const remaining = 3 - currentAttempts;
+    throw new Error(`Incorrect transaction PIN. ${remaining} attempt(s) remaining.`);
+  }
+
+  public async requestPayoutAccountChange(input: {
+    bankCode: string;
+    accountNumber: string;
+    pin: string;
+    otpCode: string;
+    requestorIp?: string;
+  }): Promise<{
+    status: "linked" | "pending_cooling_off";
+    bankName: string;
+    accountNumber: string;
+    accountName: string;
+    effectiveAt?: Date;
+    cancelToken?: string;
+  }> {
+    if (this.vendor.isPayoutFrozen) {
+      throw new Error("Payouts are currently frozen on this store. Contact support.");
+    }
+
+    // Step-up authentication: PIN + OTP required
+    await this.verifyTransactionPin(input.pin);
+    const otpValid = this.verifyOtp(this.vendor.whatsappPhone, input.otpCode, "BANK_CHANGE");
+    if (!otpValid) {
+      throw new Error("Invalid or expired 6-digit WhatsApp security code.");
+    }
+
+    const cleanAccount = input.accountNumber.trim().replace(/\D/g, "");
+    if (cleanAccount.length !== 10) {
+      throw new Error("A valid 10-digit Nigerian NUBAN account number is required.");
+    }
+
+    // Resolve destination account name via Monnify / NUBAN lookup
+    const resolved = await this.monnify.resolveAccountName(input.bankCode, cleanAccount);
+    const resolvedName = resolved.accountName;
+
+    // Strict Identity Anchor check: Candidate name MUST match verified legal owner
+    const anchorName =
+      this.vendor.verifiedLegalName || this.vendor.bankAccountName || this.vendor.businessName;
+    const matchResult = matchAccountName(anchorName, resolvedName);
+    if (!matchResult.matched) {
+      throw new Error(
+        `Identity Lock Rejection: Destination account name "${resolvedName}" does not match the verified business owner identity "${anchorName}". For your protection, payouts can only be routed to accounts bearing your verified legal name.`
+      );
+    }
+
+    // If this is the vendor's first bank account (no existing account), link immediately
+    if (!this.vendor.bankAccountNumber) {
+      const linkRes = await this.linkVendorBankAccount({
+        bankCode: input.bankCode,
+        accountNumber: cleanAccount,
+      });
+      return {
+        status: "linked",
+        bankName: linkRes.vendor.bankName ?? this.monnify.lookupBankName(input.bankCode),
+        accountNumber: cleanAccount,
+        accountName: resolvedName,
+      };
+    }
+
+    // Existing bank account: Enforce 72-hour cooling-off freeze with WhatsApp panic link
+    const cancelToken = randomToken(32);
+    const cancelTokenHash = sha256(cancelToken);
+    const effectiveAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+
+    const bankName = this.monnify.lookupBankName(input.bankCode);
+    const pending: PendingBankUpdate = {
+      bankCode: input.bankCode,
+      bankName,
+      accountNumber: cleanAccount,
+      accountName: resolvedName,
+      requestedAt: new Date(),
+      effectiveAt,
+      cancelTokenHash,
+      requestorIp: input.requestorIp,
+    };
+
+    this.vendor.pendingBankUpdate = pending;
+    this.persistInBackground("saveVendor", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+
+    // Blast notification across WhatsApp with panic killswitch
+    const maskedOld = this.vendor.bankAccountNumber.slice(-4);
+    const maskedNew = cleanAccount.slice(-4);
+    const panicUrl = `https://caterlog.store/security/freeze?token=${cancelToken}`;
+
+    await this.whatsapp.sendTextMessage({
+      toPhone: this.vendor.whatsappPhone,
+      text: `🚨 *SECURITY NOTICE: Payout Account Change Queued*\n\nA request to change your payout account from *${this.vendor.bankName} (...${maskedOld})* to *${bankName} (...${maskedNew} - ${resolvedName})* was submitted.\n\n⏳ *72-Hour Security Lock:* Funds will NOT be routed to this new account until *${effectiveAt.toUTCString()}*.\n\n🛑 *If you did NOT initiate this change, tap the Emergency Killswitch immediately to freeze your store and prevent payout theft:*\n${panicUrl}`,
+      vendorPhoneId: this.vendor.whatsappPhoneId,
+    }).catch(console.error);
+
+    return {
+      status: "pending_cooling_off",
+      bankName,
+      accountNumber: cleanAccount,
+      accountName: resolvedName,
+      effectiveAt,
+      cancelToken,
+    };
+  }
+
+  public async applyPendingBankUpdate(): Promise<boolean> {
+    const pending = this.vendor.pendingBankUpdate;
+    if (!pending) return false;
+    if (new Date(pending.effectiveAt).getTime() > Date.now()) {
+      return false; // Still in cooling-off period
+    }
+
+    await this.linkVendorBankAccount({
+      bankCode: pending.bankCode,
+      accountNumber: pending.accountNumber,
+    });
+    this.vendor.pendingBankUpdate = null;
+    this.persistInBackground("saveVendor", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+    return true;
+  }
+
+  public emergencyFreezeStore(cancelToken: string): { frozen: boolean; message: string } {
+    const tokenHash = sha256(cancelToken.trim());
+    const isPendingCancel = this.vendor.pendingBankUpdate?.cancelTokenHash === tokenHash;
+
+    this.vendor.isPayoutFrozen = true;
+    this.vendor.pendingBankUpdate = null;
+    this.revokeAllVendorSessions();
+
+    this.persistInBackground("saveVendor", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+
+    void this.whatsapp.sendTextMessage({
+      toPhone: this.vendor.whatsappPhone,
+      text: `🛑 *EMERGENCY KILLSWITCH TRIGGERED*\n\nYour store payouts have been FROZEN and all active login sessions terminated. Any pending bank modification has been discarded.\n\nTo restore your store, please contact Caterlog Security: security@caterlog.store.`,
+      vendorPhoneId: this.vendor.whatsappPhoneId,
+    }).catch(console.error);
+
+    return {
+      frozen: true,
+      message: "Store successfully frozen. All active sessions revoked and pending bank changes discarded.",
+    };
+  }
+
+  public updateSubscription(
+    planId: SubscriptionPlanId,
+    billingCycle: BillingCycle = "MONTHLY"
+  ): RuntimeSubscriptionInfo {
+    const isAnnual = billingCycle === "ANNUALLY";
+    let priceNaira = 0;
+    let priceUsd = 0;
+    let planName = "Free Explorer";
+    let platformFeeBps = 150;
+    let maxProducts = 25;
+    let maxTeamSeats = 1;
+    let copilotTier: "KEYWORD" | "FULL_AUTO" | "MULTI_AGENT" = "KEYWORD";
+    let hasCustomDomain = false;
+    let hasResellerMirroring = false;
+    let hasPhashStatusMatching = false;
+    let hasMarketBoost = false;
+    let hasConciergeShipping = false;
+    let pickupStationEnabled = false;
+    let scheduledPickupWindows: string[] | undefined = undefined;
+    let shieldedBuyerSupport = false;
+
+    if (planId === "RESELLER") {
+      planName = "Reseller / Dropshipper";
+      priceUsd = 5;
+      priceNaira = isAnnual ? 50000 : 7500;
+      platformFeeBps = 150;
+      maxProducts = -1;
+      maxTeamSeats = 1;
+      copilotTier = "KEYWORD";
+      hasResellerMirroring = true;
+    } else if (planId === "STARTER") {
+      planName = "Starter Vendor";
+      priceUsd = 10;
+      priceNaira = isAnnual ? 100000 : 15000;
+      platformFeeBps = 125;
+      maxProducts = 100;
+      maxTeamSeats = 2;
+      copilotTier = "FULL_AUTO";
+      hasPhashStatusMatching = true;
+    } else if (planId === "GROWTH") {
+      planName = "Growth Vendor (Market Boost)";
+      priceUsd = 15;
+      priceNaira = isAnnual ? 150000 : 22500;
+      platformFeeBps = 100;
+      maxProducts = -1;
+      maxTeamSeats = 5;
+      copilotTier = "FULL_AUTO";
+      hasPhashStatusMatching = true;
+      hasMarketBoost = true;
+      pickupStationEnabled = true;
+    } else if (planId === "PRO" || planId === "SCALE") {
+      planName = "Pro Concierge Vendor";
+      priceUsd = 20;
+      priceNaira = isAnnual ? 200000 : 30000;
+      platformFeeBps = 75;
+      maxProducts = -1;
+      maxTeamSeats = 15;
+      copilotTier = "MULTI_AGENT";
+      hasCustomDomain = true;
+      hasResellerMirroring = true;
+      hasPhashStatusMatching = true;
+      hasMarketBoost = true;
+      hasConciergeShipping = true;
+      pickupStationEnabled = true;
+      scheduledPickupWindows = ["10:00 AM", "1:00 PM", "4:00 PM"];
+      shieldedBuyerSupport = true;
+    }
+
+    const now = new Date();
+    const nextPeriod = new Date(now);
+    if (isAnnual) {
+      nextPeriod.setFullYear(nextPeriod.getFullYear() + 1);
+    } else {
+      nextPeriod.setMonth(nextPeriod.getMonth() + 1);
+    }
+
+    const sub: RuntimeSubscriptionInfo = {
+      planId,
+      planName,
+      billingCycle,
+      status: "ACTIVE",
+      currentPeriodStart: now.toISOString(),
+      currentPeriodEnd: nextPeriod.toISOString(),
+      cancelAtPeriodEnd: false,
+      priceNaira,
+      priceUsd,
+      platformFeeBps,
+      maxProducts,
+      maxTeamSeats,
+      copilotTier,
+      hasCustomDomain,
+      hasResellerMirroring,
+      hasPhashStatusMatching,
+      hasMarketBoost,
+      hasConciergeShipping,
+      pickupStationEnabled,
+      scheduledPickupWindows,
+      shieldedBuyerSupport,
+      paymentMethod: this.vendor.subscription?.paymentMethod ?? {
+        type: "CARD",
+        brand: "Mastercard",
+        last4: "4242",
+        bankName: "Guaranty Trust Bank",
+        expiry: "08/28",
+      },
+    };
+
+    this.vendor.subscription = sub;
+    if (planId === "RESELLER") {
+      this.vendor.role = "reseller";
+    } else if (planId === "STARTER" || planId === "FREE") {
+      this.vendor.role = "starter";
+    } else if (planId === "GROWTH") {
+      this.vendor.role = "growth";
+    } else {
+      this.vendor.role = "pro";
+    }
+
+    // Create an invoice entry for paid plans
+    if (priceNaira > 0) {
+      const invNum = `INV-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const inv: RuntimePlatformInvoice = {
+        id: `inv-${Date.now()}`,
+        invoiceNumber: invNum,
+        description: `${planName} Subscription (${billingCycle.toLowerCase()})`,
+        amountNaira: priceNaira,
+        status: "PAID",
+        paidAt: now.toISOString(),
+        pdfUrl: `/invoices/${invNum}.pdf`,
+        planId,
+      };
+      this.vendor.invoices = [inv, ...(this.vendor.invoices ?? [])];
+    }
+
+    this.persistInBackground("saveVendor", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+    return sub;
+  }
+
+  public fastTrackTrustTier(cacNumber?: string): RuntimeTrustTierInfo {
+    if (cacNumber) {
+      this.vendor.cacNumber = cacNumber.trim();
+    }
+    const tier: RuntimeTrustTierInfo = {
+      currentTier: 2,
+      tierName: "Level 2: Instant Settlement",
+      settlementSpeed: "0-Second Instant Monnify Auto-Split",
+      dailyPayoutLimitNaira: 50000000,
+      completedCleanOrders: Math.max(20, this.vendor.trustTier?.completedCleanOrders ?? 20),
+      requiredOrdersForNextTier: 20,
+      isKycVerified: true,
+      isCacVerified: true,
+      disputeRatePercent: 0.0,
+      canFastTrackLevel2: false,
+    };
+    this.vendor.trustTier = tier;
+    this.persistInBackground("saveVendor", () => this.persistence.saveVendor(this.vendor));
+    void this.broadcastStateChange();
+    return tier;
   }
 
   public updateProductStock(skuCode: string, stockTotal: number): RuntimeProduct | undefined {
@@ -5161,6 +5992,13 @@ export class CaterlogStage1Engine {
         input.coveredStates && input.coveredStates.length > 0
           ? input.coveredStates
           : existing?.coveredStates ?? [input.baseState || this.vendor.baseState || "Lagos"],
+      coveredLgas: Array.from(
+        new Set(
+          (input.coveredLgas ?? existing?.coveredLgas ?? [])
+            .map((l) => l.trim())
+            .filter(Boolean)
+        )
+      ),
       description: input.description ?? existing?.description ?? "",
       moq: input.moq?.trim() || existing?.moq || "1 unit",
       startingPriceKobo,
@@ -5300,6 +6138,7 @@ export class CaterlogStage1Engine {
     productSkus?: string[];
     defaultMarkupBps?: number;
     status?: "ACTIVE" | "PAUSED";
+    ignoreGeofence?: boolean;
   }): { mirror: RuntimeResellerMirror; mirroredProducts: RuntimeProduct[] } {
     const cleanTarget = input.supplierIdOrSlug.trim().toLowerCase();
     const supplier = this.suppliers.find(
@@ -5307,6 +6146,20 @@ export class CaterlogStage1Engine {
     );
     if (!supplier) {
       throw new Error(`Supplier "${input.supplierIdOrSlug}" was not found.`);
+    }
+
+    if (!input.ignoreGeofence) {
+      const resellerState = this.vendor.baseState || "Lagos";
+      const resellerLga = this.vendor.baseCity || "Ikeja";
+      const check = isTerritoryDeliverable(supplier, {
+        state: resellerState,
+        lga: resellerLga,
+      });
+      if (!check.deliverable) {
+        throw new Error(
+          `Cannot mirror supplier "${supplier.name}": ${check.reason} (Reseller location: ${resellerState} · ${resellerLga}).`
+        );
+      }
     }
 
     const existingIdx = this.resellerMirrors.findIndex(
@@ -5453,11 +6306,30 @@ export class CaterlogStage1Engine {
 
   public recordWithdrawal(input: {
     amountNaira: number;
-    bankName: string;
-    accountNumber: string;
+    bankName?: string;
+    accountNumber?: string;
     bankCode?: string;
     accountName?: string;
   }): RuntimePayoutWithdrawal {
+    if (this.vendor.isPayoutFrozen) {
+      throw new Error("Payouts are currently frozen on this store due to a security lock. Please contact support.");
+    }
+    if (this.vendor.payoutFrozenUntil && this.vendor.payoutFrozenUntil.getTime() > Date.now()) {
+      throw new Error(`Payouts are temporarily frozen until ${this.vendor.payoutFrozenUntil.toISOString()}.`);
+    }
+    if (!this.vendor.bankAccountNumber || !this.vendor.bankName) {
+      throw new Error("No verified settlement bank account linked. Please link your bank account first.");
+    }
+
+    // CRITICAL SECURITY ENFORCEMENT:
+    // Payouts MUST ONLY be routed to the KYC/Identity-locked settlement bank account.
+    // Client-supplied destination accounts are strictly overridden for defense-in-depth.
+    const destinationAccount = this.vendor.bankAccountNumber;
+    const destinationBankName = this.vendor.bankName;
+    const destinationBankCode = this.vendor.bankCode;
+    const destinationAccountName =
+      this.vendor.bankAccountName || this.vendor.verifiedLegalName || this.vendor.businessName;
+
     const amountKobo = nairaToKobo(input.amountNaira);
     const feeKobo = 0n;
     const reference = `WTH-${Date.now().toString().slice(-6)}`;
@@ -5467,10 +6339,10 @@ export class CaterlogStage1Engine {
       amountKobo,
       feeKobo,
       netAmountKobo: amountKobo - feeKobo,
-      bankCode: input.bankCode ?? this.vendor.bankCode,
-      bankName: input.bankName,
-      accountNumber: input.accountNumber,
-      accountName: input.accountName ?? this.vendor.bankAccountName ?? this.vendor.businessName,
+      bankCode: destinationBankCode,
+      bankName: destinationBankName,
+      accountNumber: destinationAccount,
+      accountName: destinationAccountName,
       status: "SETTLED",
       verifiedByOtp: true,
       createdAt: new Date(),
@@ -5485,8 +6357,8 @@ export class CaterlogStage1Engine {
     }
     this.recordAuditEvent("PAYOUT_WITHDRAWAL_SETTLED", "VENDOR_WEB_DASHBOARD", "VENDOR", reference, {
       amountNaira: input.amountNaira,
-      bankName: input.bankName,
-      accountNumber: input.accountNumber,
+      bankName: destinationBankName,
+      accountNumber: destinationAccount,
     });
     void this.broadcastStateChange();
     return withdrawal;
@@ -5495,17 +6367,26 @@ export class CaterlogStage1Engine {
   private computeOrderSplitConfig(
     cartItems: Array<{ productId: string; quantity: number }>,
     totalAmountKobo: bigint
-  ): Array<{
-    subAccountCode: string;
-    feePercentage: number;
-    splitPercentage: number;
-    feeBearer: boolean;
-  }> | undefined {
+  ): {
+    incomeSplitConfig: Array<{
+      subAccountCode: string;
+      feePercentage: number;
+      splitPercentage: number;
+      feeBearer: boolean;
+    }>;
+    isDropship: boolean;
+    supplierSubAccountCode?: string;
+    resellerSubAccountCode?: string;
+    supplierShareKobo: bigint;
+    resellerShareKobo: bigint;
+    platformFeeKobo: bigint;
+  } | undefined {
     const resellerSub = this.vendor.monnifySubAccountCode?.trim();
     if (!resellerSub || totalAmountKobo <= 0n) return undefined;
 
     const activeRule = this.settlementSplitRules.find((r) => r.isActive) ?? this.settlementSplitRules[0];
     const platformFeePct = Number(((activeRule?.platformFeeBps ?? 150) / 100).toFixed(2));
+    const platformFeeKobo = (totalAmountKobo * BigInt(Math.round(platformFeePct * 100))) / 10000n;
 
     // Check whether any cart item is a mirrored supplier product
     let totalWholesaleKobo = 0n;
@@ -5536,14 +6417,22 @@ export class CaterlogStage1Engine {
 
     // Pure vendor-owned order -> 100% minus platform fee to vendor subaccount
     if (!supplierSubAccountCode || supplierSubAccountCode === resellerSub) {
-      return [
-        {
-          subAccountCode: resellerSub,
-          feePercentage: 100,
-          splitPercentage: Number(Math.max(1, 100 - platformFeePct).toFixed(2)),
-          feeBearer: true,
-        },
-      ];
+      const vendorNetKobo = totalAmountKobo > platformFeeKobo ? totalAmountKobo - platformFeeKobo : 0n;
+      return {
+        incomeSplitConfig: [
+          {
+            subAccountCode: resellerSub,
+            feePercentage: 100,
+            splitPercentage: Number(Math.max(1, 100 - platformFeePct).toFixed(2)),
+            feeBearer: true,
+          },
+        ],
+        isDropship: false,
+        resellerSubAccountCode: resellerSub,
+        supplierShareKobo: 0n,
+        resellerShareKobo: vendorNetKobo,
+        platformFeeKobo,
+      };
     }
 
     // Mirrored dropship order -> split supplier cost + reseller margin
@@ -5554,20 +6443,34 @@ export class CaterlogStage1Engine {
     const supplierPct = Number(Math.min(95, Math.max(1, supplierPctRaw)).toFixed(2));
     const resellerPct = Number(Math.max(1, 100 - supplierPct - platformFeePct).toFixed(2));
 
-    return [
-      {
-        subAccountCode: supplierSubAccountCode,
-        feePercentage: 0,
-        splitPercentage: supplierPct,
-        feeBearer: false,
-      },
-      {
-        subAccountCode: resellerSub,
-        feePercentage: 100,
-        splitPercentage: resellerPct,
-        feeBearer: true,
-      },
-    ];
+    const supplierShareKobo = (totalAmountKobo * BigInt(Math.round(supplierPct * 100))) / 10000n;
+    const resellerShareKobo =
+      totalAmountKobo > (supplierShareKobo + platformFeeKobo)
+        ? totalAmountKobo - supplierShareKobo - platformFeeKobo
+        : 0n;
+
+    return {
+      incomeSplitConfig: [
+        {
+          subAccountCode: supplierSubAccountCode,
+          feePercentage: 0,
+          splitPercentage: supplierPct,
+          feeBearer: false,
+        },
+        {
+          subAccountCode: resellerSub,
+          feePercentage: 100,
+          splitPercentage: resellerPct,
+          feeBearer: true,
+        },
+      ],
+      isDropship: true,
+      supplierSubAccountCode,
+      resellerSubAccountCode: resellerSub,
+      supplierShareKobo,
+      resellerShareKobo,
+      platformFeeKobo,
+    };
   }
 
   private syncSupplierInventoryOnSale(soldProduct: RuntimeProduct, quantitySold: number): void {
@@ -5651,6 +6554,11 @@ export class CaterlogStage1Engine {
     cacDocumentUploaded?: boolean;
     idDocumentUploaded?: boolean;
   }): RuntimeKycSubmission {
+    const anchorName = input.businessName.trim() || this.vendor.businessName;
+    const resolvedName = input.resolvedAccountName.trim() || this.vendor.businessName;
+    const nameMatch = matchAccountName(anchorName, resolvedName);
+    const isApproved = nameMatch.matched;
+
     const submission: RuntimeKycSubmission = {
       id: `kyc-${Date.now()}`,
       businessName: input.businessName.trim() || this.vendor.businessName,
@@ -5661,15 +6569,17 @@ export class CaterlogStage1Engine {
       bankCode: input.bankCode.trim(),
       bankName: input.bankName?.trim() || this.monnify.lookupBankName(input.bankCode.trim()),
       accountNumber: input.accountNumber.trim(),
-      resolvedAccountName: input.resolvedAccountName.trim() || this.vendor.businessName,
+      resolvedAccountName: resolvedName,
       whatsappPhone: input.whatsappPhone?.trim() || this.vendor.whatsappPhone,
       instagramHandle: input.instagramHandle?.trim() || undefined,
       cacDocumentUploaded: input.cacDocumentUploaded ?? true,
       idDocumentUploaded: input.idDocumentUploaded ?? true,
-      status: "VERIFIED",
-      reviewerNotes: "Verified via CAC & Monnify NUBAN Account Name Match",
+      status: isApproved ? "VERIFIED" : "PENDING_REVIEW",
+      reviewerNotes: isApproved
+        ? "Auto-verified via CAC & Monnify NUBAN Account Name Match"
+        : `Pending review: Account name "${resolvedName}" requires manual verification against business "${anchorName}"`,
       submittedAt: new Date(),
-      reviewedAt: new Date(),
+      reviewedAt: isApproved ? new Date() : undefined,
     };
 
     this.kycSubmissions.unshift(submission);
@@ -5677,11 +6587,17 @@ export class CaterlogStage1Engine {
     this.vendor.cacNumber = submission.cacNumber;
     this.vendor.tinNumber = submission.tinNumber;
     this.vendor.instagramHandle = submission.instagramHandle;
-    this.vendor.bankCode = submission.bankCode;
-    this.vendor.bankName = submission.bankName;
-    this.vendor.bankAccountNumber = submission.accountNumber;
-    this.vendor.bankAccountName = submission.resolvedAccountName;
-    this.vendor.verificationStatus = "VERIFIED";
+
+    if (isApproved) {
+      this.vendor.verificationStatus = "VERIFIED";
+      this.vendor.verifiedLegalName = resolvedName;
+      if (!this.vendor.bankAccountNumber) {
+        this.vendor.bankCode = submission.bankCode;
+        this.vendor.bankName = submission.bankName;
+        this.vendor.bankAccountNumber = submission.accountNumber;
+        this.vendor.bankAccountName = submission.resolvedAccountName;
+      }
+    }
 
     if (this.persistence.saveKycSubmission) {
       this.persistInBackground("saveKycSubmission", () =>
@@ -5703,6 +6619,11 @@ export class CaterlogStage1Engine {
     phone?: string;
     role: string;
     status?: "Active" | "Invited" | "Suspended";
+    canManageOrders?: boolean;
+    canManageInventory?: boolean;
+    canViewPayouts?: boolean;
+    canProcessRefunds?: boolean;
+    canOverrideCopilot?: boolean;
   }): RuntimeTeamMember {
     const cleanEmail = input.email.trim().toLowerCase();
     if (!cleanEmail) {
@@ -5716,6 +6637,18 @@ export class CaterlogStage1Engine {
     const role = input.role.trim() || "Store Attendant";
     const isManagerOrOwner = role === "Owner" || role === "Store Manager";
     const isAccountant = role === "Accountant";
+    const isDispatchOnly =
+      role === "Dispatch Coordinator" ||
+      role.toLowerCase().includes("rider") ||
+      role.toLowerCase().includes("fulfillment");
+    const isCatalogOnly =
+      role === "Catalog Editor" || role.toLowerCase().includes("catalog");
+
+    const defaultOrders = isCatalogOnly || isAccountant ? false : true;
+    const defaultInventory = isDispatchOnly || isAccountant ? false : true;
+    const defaultPayouts = isManagerOrOwner || isAccountant;
+    const defaultRefunds = isManagerOrOwner || isAccountant;
+    const defaultCopilot = isManagerOrOwner || role === "Store Attendant";
 
     const member: RuntimeTeamMember = {
       id: existing?.id ?? `tm-${Date.now()}`,
@@ -5724,11 +6657,11 @@ export class CaterlogStage1Engine {
       phone: input.phone?.trim() || existing?.phone,
       role,
       status: input.status ?? existing?.status ?? "Active",
-      canManageOrders: true,
-      canManageInventory: !isAccountant,
-      canViewPayouts: isManagerOrOwner || isAccountant,
-      canProcessRefunds: isManagerOrOwner || isAccountant,
-      canOverrideCopilot: true,
+      canManageOrders: input.canManageOrders ?? defaultOrders,
+      canManageInventory: input.canManageInventory ?? defaultInventory,
+      canViewPayouts: input.canViewPayouts ?? defaultPayouts,
+      canProcessRefunds: input.canProcessRefunds ?? defaultRefunds,
+      canOverrideCopilot: input.canOverrideCopilot ?? defaultCopilot,
       lastActiveAt: existing?.lastActiveAt ?? new Date(),
       invitedAt: existing?.invitedAt ?? new Date(),
     };
@@ -5905,6 +6838,23 @@ export class CaterlogStage1Engine {
         ),
         refundedAmountFormatted:
           o.refundedAmountKobo !== undefined ? formatNaira(o.refundedAmountKobo) : undefined,
+        isDropship: o.isDropship,
+        supplierSubAccountCode: o.supplierSubAccountCode,
+        resellerSubAccountCode: o.resellerSubAccountCode,
+        supplierShareKobo: o.supplierShareKobo !== undefined ? String(o.supplierShareKobo) : undefined,
+        resellerShareKobo: o.resellerShareKobo !== undefined ? String(o.resellerShareKobo) : undefined,
+        platformFeeKobo: o.platformFeeKobo !== undefined ? String(o.platformFeeKobo) : undefined,
+        supplierShareNaira: o.supplierShareKobo !== undefined ? koboToNaira(o.supplierShareKobo) : undefined,
+        resellerShareNaira: o.resellerShareKobo !== undefined ? koboToNaira(o.resellerShareKobo) : undefined,
+        platformFeeNaira: o.platformFeeKobo !== undefined ? koboToNaira(o.platformFeeKobo) : undefined,
+        splitSettlementStatus: o.splitSettlementStatus,
+        salesChannel:
+          o.salesChannel ??
+          (o.shortCode.startsWith("PL-") || o.shortCode.startsWith("LINK-")
+            ? "PAYMENT_LINK"
+            : o.isDropship || o.shortCode.startsWith("RS-") || o.shortCode.startsWith("NET-")
+              ? "RESELLER_NETWORK"
+              : "WHATSAPP"),
       })),
       chatMessages: this.chatMessages.slice(-50),
       marketBoostListing: this.marketBoostListing
@@ -5939,12 +6889,127 @@ export class CaterlogStage1Engine {
         lastSyncedAt: this.catalog.getIntegrationStatus().lastSyncedAt,
         publishedItems: this.catalog.getIntegrationStatus().publishedItems,
       },
+      subscription: this.vendor.subscription,
+      trustTier: this.vendor.trustTier,
+      platformInvoices: this.vendor.invoices?.map((inv) => ({
+        ...inv,
+        amountFormatted: `₦${inv.amountNaira.toLocaleString()}`,
+      })),
+    };
+  }
+
+  public updateSocialChannelConfig(input: {
+    instagramHandle?: string;
+    instagramConnected?: boolean;
+    instagramBusinessId?: string;
+    facebookPageName?: string;
+    facebookPageId?: string;
+    facebookConnected?: boolean;
+  }): RuntimeVendor {
+    if (input.instagramHandle !== undefined) {
+      const h = input.instagramHandle.trim();
+      this.vendor.instagramHandle = h ? (h.startsWith("@") ? h : `@${h}`) : undefined;
+    }
+    if (input.instagramConnected !== undefined) {
+      this.vendor.instagramConnected = Boolean(input.instagramConnected);
+    }
+    if (input.instagramBusinessId !== undefined) {
+      this.vendor.instagramBusinessId = input.instagramBusinessId.trim() || undefined;
+    }
+    if (input.facebookPageName !== undefined) {
+      this.vendor.facebookPageName = input.facebookPageName.trim() || undefined;
+    }
+    if (input.facebookPageId !== undefined) {
+      this.vendor.facebookPageId = input.facebookPageId.trim() || undefined;
+    }
+    if (input.facebookConnected !== undefined) {
+      this.vendor.facebookConnected = Boolean(input.facebookConnected);
+    }
+
+    this.persistInBackground("updateSocialChannelConfig", () =>
+      this.persistence.saveVendor(this.vendor)
+    );
+    this.recordAuditEvent("SOCIAL_CHANNELS_UPDATED", "VENDOR_WEB_DASHBOARD", "VENDOR", this.vendor.id, {
+      instagramHandle: this.vendor.instagramHandle,
+      instagramConnected: this.vendor.instagramConnected,
+      facebookPageName: this.vendor.facebookPageName,
+      facebookConnected: this.vendor.facebookConnected,
+    });
+    void this.broadcastStateChange();
+    return this.vendor;
+  }
+
+  public async handleMetaSocialWebhook(payload: {
+    channel?: "INSTAGRAM" | "FACEBOOK" | "WHATSAPP";
+    object?: string;
+    senderId?: string;
+    senderName?: string;
+    text?: string;
+    imageUrl?: string;
+    entry?: Array<{
+      id?: string;
+      messaging?: Array<{
+        sender?: { id?: string; name?: string };
+        message?: { text?: string; attachments?: Array<{ payload?: { url?: string } }> };
+      }>;
+    }>;
+  }) {
+    const channel: "INSTAGRAM" | "FACEBOOK" | "WHATSAPP" =
+      payload.channel ??
+      (payload.object === "instagram"
+        ? "INSTAGRAM"
+        : payload.object === "page"
+          ? "FACEBOOK"
+          : "INSTAGRAM");
+
+    const entryMsg = payload.entry?.[0]?.messaging?.[0];
+    const senderId =
+      payload.senderId?.trim() ||
+      entryMsg?.sender?.id?.trim() ||
+      (channel === "INSTAGRAM" ? "ig_buyer_201" : "fb_buyer_301");
+    const senderName =
+      payload.senderName?.trim() ||
+      entryMsg?.sender?.name?.trim() ||
+      (channel === "INSTAGRAM" ? "Instagram Buyer" : "Facebook Buyer");
+    const text =
+      payload.text?.trim() ||
+      entryMsg?.message?.text?.trim() ||
+      "catalog";
+    const attachedImageUrl =
+      payload.imageUrl?.trim() ||
+      entryMsg?.message?.attachments?.[0]?.payload?.url?.trim();
+
+    const result = await this.handleBuyerWhatsAppInquiry({
+      buyerPhone: senderId,
+      buyerName: senderName,
+      text,
+      attachedImageUrl,
+      sourceChannel: channel,
+      simulateFastForwardIdleTimer: true,
+    });
+
+    this.recordAuditEvent("OMNICHANNEL_INQUIRY_RECEIVED", "COPILOT_AUTO", "VENDOR", senderId, {
+      channel,
+      senderName,
+      text,
+      step: result.step,
+      orderShortCode: result.createdOrder?.shortCode,
+    });
+
+    return {
+      channel,
+      senderId,
+      senderName,
+      ...result,
     };
   }
 
   private appendChat(msg: Omit<ChatThreadMessage, "id" | "timestamp">) {
     const fullMsg: ChatThreadMessage = {
       ...msg,
+      sourceChannel:
+        msg.sourceChannel ??
+        (msg.channel === "BUYER_SHOP_WA" ? this.activeSourceChannel : "WHATSAPP"),
       id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date(),
     };

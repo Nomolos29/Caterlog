@@ -4,10 +4,11 @@ import React, { useState } from "react";
 import { CheckIcon } from "../icons";
 import { api } from "@/lib/api";
 import { authClient } from "@/lib/auth/client";
+import type { PlatformRole } from "@/lib/types";
 
 interface AuthViewProps {
   initialMode?: "login" | "onboarding";
-  onLoginSuccess: (user: { email: string; businessName: string; role?: "reseller" | "supplier" }) => void;
+  onLoginSuccess: (user: { email: string; businessName: string; role?: PlatformRole }) => void;
 }
 
 export function AuthView({
@@ -27,7 +28,7 @@ export function AuthView({
   // Signup states
   const [signupMethod, setSignupMethod] = useState<"whatsapp" | "email">("whatsapp");
   const [sellerProfile, setSellerProfile] = useState<"existing" | "new">("new");
-  const [signupRole, setSignupRole] = useState<"reseller" | "supplier">("reseller");
+  const [signupRole, setSignupRole] = useState<PlatformRole>("reseller");
   const [signupPhone, setSignupPhone] = useState("+234 ");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
@@ -41,7 +42,7 @@ export function AuthView({
     maskedPhone: string;
     purpose: "LOGIN" | "SIGNUP";
     businessName?: string;
-    role?: "reseller" | "supplier";
+    role?: PlatformRole;
     isExistingBusiness?: boolean;
     catalogSelection?: "mirror" | "custom";
   } | null>(null);
@@ -144,7 +145,7 @@ export function AuthView({
 
     const effectiveName =
       businessName.trim() ||
-      (signupRole === "supplier" ? "WhatsApp Business Store" : "My Reseller Store");
+      (signupRole !== "reseller" ? "WhatsApp Business Store" : "My Reseller Store");
 
     setSubmitting(true);
     try {
@@ -526,11 +527,21 @@ export function AuthView({
           <div className="pt-2">
             <button
               type="button"
-              onClick={() => {
-                onLoginSuccess({
-                  email: "owner@niastores.example",
-                  businessName: "Nia Stores",
-                });
+              onClick={async () => {
+                try {
+                  const res = await api.requestDemoSession();
+                  onLoginSuccess({
+                    email: res.vendor.whatsappPhone
+                      ? `${res.vendor.whatsappPhone.replace(/\D/g, "")}@caterlog.store`
+                      : "owner@niastores.example",
+                    businessName: res.vendor.businessName || "Nia Stores",
+                  });
+                } catch {
+                  onLoginSuccess({
+                    email: "owner@niastores.example",
+                    businessName: "Nia Stores",
+                  });
+                }
               }}
               className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-semibold rounded-lg border border-emerald-200 transition-colors cursor-pointer"
             >
@@ -604,11 +615,11 @@ export function AuthView({
               <button
                 type="button"
                 onClick={() => {
-                  setSignupRole("supplier");
+                  setSignupRole("growth");
                   setSellerProfile("existing");
                 }}
                 className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                  signupRole === "supplier"
+                  signupRole !== "reseller"
                     ? "border-emerald-600 bg-emerald-50/50 shadow-2xs"
                     : "border-gray-200 hover:border-gray-300"
                 }`}

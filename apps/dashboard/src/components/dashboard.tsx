@@ -1,9 +1,15 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError, setStoredSessionToken } from "@/lib/api";
 import { subscribeToNeonRealtime } from "@/lib/neon-realtime";
-import type { VendorState, OrderItem } from "@/lib/types";
+import type { VendorState, OrderItem, PlatformRole } from "@/lib/types";
+import {
+  isResellerRole,
+  isVendorRole,
+  roleToPlanId,
+  planIdToRole,
+} from "@/lib/types";
 
 import { Sidebar, type NavView } from "./sidebar";
 import { TopNav } from "./top-nav";
@@ -19,12 +25,16 @@ import { SettingsView, type SettingsTabId } from "./views/settings-view";
 import { ProfileView, type ProfileTabId } from "./views/profile-view";
 import { AnalyticsView } from "./views/analytics-view";
 import { VerificationView } from "./views/verification-view";
-import { TeamView } from "./views/team-view";
+import { TeamView, type StaffRole } from "./views/team-view";
 import { NotificationsView } from "./views/notifications-view";
+import { SubscriptionsView } from "./views/subscriptions-view";
 import { AuthView } from "./views/auth-view";
 import { ChatDrawer } from "./chat-drawer";
+import type { SubscriptionPlanId, BillingCycle } from "@/lib/types";
 
 export function Dashboard() {
+  const [impersonatedStaffRole, setImpersonatedStaffRole] =
+    useState<StaffRole | null>(null);
   const [authSession, setAuthSession] = useState<{
     email: string;
     businessName: string;
@@ -46,33 +56,130 @@ export function Dashboard() {
   const [currentView, setCurrentView] = useState<NavView>("overview");
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>("setup");
   const [profileTab, setProfileTab] = useState<ProfileTabId>("profile");
-  const [productsTab, setProductsTab] = useState<"my-inventory" | "reselling" | "all" | "exceptions">("my-inventory");
+  const [productsTab, setProductsTab] = useState<
+    "my-inventory" | "reselling" | "all" | "exceptions"
+  >("my-inventory");
   const [editResellSku, setEditResellSku] = useState<string | null>(null);
-  const [activeWorkspace, setActiveWorkspace] = useState<"reseller" | "supplier">("reseller");
+  const [activeWorkspace, setActiveWorkspace] =
+    useState<PlatformRole>("growth");
 
   useEffect(() => {
     const dbRole = state?.vendor?.role;
-    if (dbRole === "reseller" || dbRole === "supplier") {
+    if (
+      dbRole === "reseller" ||
+      dbRole === "starter" ||
+      dbRole === "growth" ||
+      dbRole === "pro"
+    ) {
       setActiveWorkspace(dbRole);
+    } else if (state?.subscription?.planId) {
+      setActiveWorkspace(planIdToRole(state.subscription.planId));
     }
-  }, [state?.vendor?.role]);
+  }, [state?.vendor?.role, state?.subscription?.planId]);
+
+  const currentPlanId =
+    state?.subscription?.planId ||
+    state?.vendor?.subscription?.planId ||
+    roleToPlanId(activeWorkspace);
 
   useEffect(() => {
-    if (activeWorkspace === "reseller") {
-      if (currentView === "market-boost" || currentView === "analytics" || currentView === "team") {
-        setCurrentView("overview");
-      }
+    let allowedViews: NavView[] = [];
+
+    if (impersonatedStaffRole === "Dispatch Coordinator") {
+      allowedViews = ["overview", "orders", "notifications", "profile"];
+    } else if (impersonatedStaffRole === "Catalog Editor") {
+      allowedViews = ["overview", "products", "notifications", "profile"];
+    } else if (impersonatedStaffRole === "Accountant") {
+      allowedViews = ["overview", "payments", "notifications", "profile"];
+    } else if (impersonatedStaffRole === "Store Attendant") {
+      allowedViews = [
+        "overview",
+        "orders",
+        "products",
+        "customers",
+        "notifications",
+        "profile",
+      ];
+    } else if (activeWorkspace === "reseller") {
+      // 1. Reseller ($5)
+      allowedViews = [
+        "overview",
+        "orders",
+        "products",
+        "network",
+        "customers",
+        "payments",
+        "subscriptions",
+        "notifications",
+        "settings",
+        "profile",
+      ];
       if (settingsTab === "shipping") {
         setSettingsTab("setup");
       }
+    } else if (activeWorkspace === "starter") {
+      // 2. Starter Vendor ($10)
+      allowedViews = [
+        "overview",
+        "orders",
+        "products",
+        "network",
+        "customers",
+        "payments",
+        "subscriptions",
+        "notifications",
+        "settings",
+        "profile",
+      ];
+    } else if (activeWorkspace === "growth") {
+      // 3. Growth Vendor ($15) - includes Team & Audit capped at 4
+      allowedViews = [
+        "overview",
+        "orders",
+        "products",
+        "market-boost",
+        "network",
+        "customers",
+        "payments",
+        "subscriptions",
+        "analytics",
+        "team",
+        "notifications",
+        "settings",
+        "profile",
+      ];
+    } else {
+      // 4. Pro Concierge Vendor ($20)
+      allowedViews = [
+        "overview",
+        "orders",
+        "products",
+        "market-boost",
+        "network",
+        "customers",
+        "payments",
+        "subscriptions",
+        "analytics",
+        "team",
+        "notifications",
+        "settings",
+        "profile",
+      ];
     }
-  }, [activeWorkspace, currentView, settingsTab]);
+
+    if (!allowedViews.includes(currentView)) {
+      setCurrentView("overview");
+    }
+  }, [activeWorkspace, currentView, settingsTab, impersonatedStaffRole]);
   const [ordersFilter, setOrdersFilter] = useState<string>("ALL");
   const [paymentLinkCustomer, setPaymentLinkCustomer] = useState<string>("");
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-  const selectedOrder = selectedOrderId && state?.orders
-    ? state.orders.find((o) => o.id === selectedOrderId || o.shortCode === selectedOrderId) ?? null
-    : null;
+  const selectedOrder =
+    selectedOrderId && state?.orders
+      ? (state.orders.find(
+          (o) => o.id === selectedOrderId || o.shortCode === selectedOrderId,
+        ) ?? null)
+      : null;
   const [connected, setConnected] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -83,12 +190,47 @@ export function Dashboard() {
     setSelectedOrderId(order ? order.id : null);
   };
 
+  const handleSelectRole = async (newRole: PlatformRole) => {
+    setActiveWorkspace(newRole);
+    if (newRole === "reseller") {
+      setProductsTab("reselling");
+    } else {
+      setProductsTab("my-inventory");
+    }
+    const targetPlan = roleToPlanId(newRole);
+    try {
+      await api.upgradeSubscription({
+        planId: targetPlan,
+        billingCycle: "MONTHLY",
+      });
+      const updated = await api.updateProfile({ role: newRole });
+      setState(updated);
+    } catch {
+      void api
+        .updateProfile({ role: newRole })
+        .then(setState)
+        .catch(() => {});
+    }
+  };
+
+  const handleToggleWorkspace = () => {
+    const roles: PlatformRole[] = ["reseller", "starter", "growth", "pro"];
+    const currentIndex = roles.indexOf(activeWorkspace);
+    const nextRole = roles[(currentIndex + 1) % roles.length];
+    void handleSelectRole(nextRole);
+  };
+
   const loadState = useCallback(async () => {
     try {
       const data = await api.getState();
       setState(data);
       setError(null);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setAuthSession(null);
+        setStoredSessionToken(null);
+        localStorage.removeItem("caterlog_auth");
+      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
@@ -115,7 +257,11 @@ export function Dashboard() {
             };
             setAuthSession(user);
             localStorage.setItem("caterlog_auth", JSON.stringify(user));
-            window.history.replaceState({}, document.title, window.location.pathname);
+            window.history.replaceState(
+              {},
+              document.title,
+              window.location.pathname,
+            );
             void loadState();
           }
         } catch (err) {
@@ -181,8 +327,17 @@ export function Dashboard() {
         initialMode="login"
         onLoginSuccess={(user) => {
           setAuthSession(user);
-          if (user.role === "reseller" || user.role === "supplier") {
-            setActiveWorkspace(user.role);
+          if (user.role) {
+            const roleMap: Record<string, PlatformRole> = {
+              reseller: "reseller",
+              starter: "starter",
+              growth: "growth",
+              pro: "pro",
+              vendor: "growth",
+              supplier: "growth",
+            };
+            const target = roleMap[user.role] || "growth";
+            setActiveWorkspace(target);
           }
           void loadState();
         }}
@@ -196,8 +351,12 @@ export function Dashboard() {
         <div className="w-12 h-12 rounded-2xl bg-emerald-500 text-white flex items-center justify-center font-black text-xl animate-bounce shadow-lg">
           C
         </div>
-        <div className="text-sm font-bold text-gray-900 mt-4">Loading Caterlog Business Manager...</div>
-        <div className="text-xs text-gray-400 mt-1">Connecting to live WhatsApp Coexistence engine</div>
+        <div className="text-sm font-bold text-gray-900 mt-4">
+          Loading Caterlog Business Manager...
+        </div>
+        <div className="text-xs text-gray-400 mt-1">
+          Connecting to live WhatsApp Coexistence engine
+        </div>
       </div>
     );
   }
@@ -245,7 +404,7 @@ export function Dashboard() {
       primaryImageUrl?: string;
       variants?: any[];
       customFields?: Record<string, string>;
-    }
+    },
   ) => {
     try {
       const next = await api.updateProduct(sku, input);
@@ -296,7 +455,10 @@ export function Dashboard() {
     }
   };
 
-  const handleSimulateTransfer = async (orderCode: string, amountNaira: number) => {
+  const handleSimulateTransfer = async (
+    orderCode: string,
+    amountNaira: number,
+  ) => {
     try {
       const res = await api.simulateTransfer(orderCode, amountNaira);
       if (res.state) setState(res.state);
@@ -305,7 +467,10 @@ export function Dashboard() {
     }
   };
 
-  const handleMarkDispatched = async (orderCode: string, riderPhone?: string) => {
+  const handleMarkDispatched = async (
+    orderCode: string,
+    riderPhone?: string,
+  ) => {
     try {
       const next = await api.dispatchOrder(orderCode, riderPhone);
       setState(next);
@@ -361,7 +526,11 @@ export function Dashboard() {
     }
   };
 
-  const handleAddDiscount = async (code: string, type: "PERCENTAGE" | "FLAT_KOBO", value: number) => {
+  const handleAddDiscount = async (
+    code: string,
+    type: "PERCENTAGE" | "FLAT_KOBO",
+    value: number,
+  ) => {
     try {
       const next = await api.addDiscount({ code, type, value });
       setState(next);
@@ -395,9 +564,12 @@ export function Dashboard() {
   };
 
   const handleSaveMarketBoost = async (
-    input: Omit<Partial<NonNullable<VendorState["marketBoostListing"]>>, "startingPriceNaira"> & {
+    input: Omit<
+      Partial<NonNullable<VendorState["marketBoostListing"]>>,
+      "startingPriceNaira"
+    > & {
       startingPriceNaira?: number | string;
-    }
+    },
   ) => {
     try {
       const res = await api.saveMarketBoost(input);
@@ -407,7 +579,10 @@ export function Dashboard() {
     }
   };
 
-  const handleMirrorSupplier = async (supplierIdOrSlug: string, productSkus?: string[]) => {
+  const handleMirrorSupplier = async (
+    supplierIdOrSlug: string,
+    productSkus?: string[],
+  ) => {
     const res = await api.mirrorSupplierCatalog({
       supplierIdOrSlug,
       productSkus,
@@ -497,6 +672,11 @@ export function Dashboard() {
     phone?: string;
     role: string;
     status?: "Active" | "Invited" | "Suspended";
+    canManageOrders?: boolean;
+    canManageInventory?: boolean;
+    canViewPayouts?: boolean;
+    canProcessRefunds?: boolean;
+    canOverrideCopilot?: boolean;
   }) => {
     try {
       const res = await api.saveTeamMember(input);
@@ -529,8 +709,39 @@ export function Dashboard() {
     }
   };
 
+  const handleUpgradePlan = async (
+    planId: SubscriptionPlanId,
+    cycle: BillingCycle,
+  ) => {
+    try {
+      const res = await api.upgradeSubscription({
+        planId,
+        billingCycle: cycle,
+      });
+      if (res.state) setState(res.state);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
+  const handleFastTrackTrustTier = async (cacNumber?: string) => {
+    try {
+      const res = await api.fastTrackTrustTier({ cacNumber });
+      if (res.state) setState(res.state);
+      return true;
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+
   // WhatsApp Simulator Handlers
-  const handleSendVendorKeyword = async (text: string, attachedImage?: string) => {
+  const handleSendVendorKeyword = async (
+    text: string,
+    attachedImage?: string,
+  ) => {
     const res = await api.simulateWhatsApp({
       role: "VENDOR_KEYWORD",
       text,
@@ -544,7 +755,8 @@ export function Dashboard() {
     phash?: string,
     buyerPhone?: string,
     buyerName?: string,
-    attachedImageUrl?: string
+    attachedImageUrl?: string,
+    sourceChannel?: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK",
   ) => {
     const res = await api.simulateWhatsApp({
       role: "BUYER_INQUIRY",
@@ -554,11 +766,15 @@ export function Dashboard() {
       quotedStatusImagePhash: phash,
       attachedImageUrl,
       simulateFastForwardIdleTimer: true,
+      sourceChannel,
     });
     if (res.state) setState(res.state);
   };
 
-  const handleSendVendorManualEcho = async (text: string, buyerPhone?: string) => {
+  const handleSendVendorManualEcho = async (
+    text: string,
+    buyerPhone?: string,
+  ) => {
     const res = await api.simulateWhatsApp({
       role: "VENDOR_MANUAL_BUYER_REPLY",
       text,
@@ -597,6 +813,18 @@ export function Dashboard() {
           : "Settings / Sales co-pilot / Setup";
       case "payment-links":
         return "Payment Links";
+      case "subscriptions":
+        return "Plans & Billing / Platform Subscriptions";
+      case "profile":
+        return profileTab === "billing"
+          ? "Profile / Billing & Subscription"
+          : profileTab === "trust-tier"
+            ? "Profile / Account Trust Tier"
+            : profileTab === "verification"
+              ? "Profile / Business KYC"
+              : profileTab === "plans"
+                ? "Profile / Subscription Plans"
+                : "Profile / Merchant Identity";
       default:
         return "Caterlog Business Manager";
     }
@@ -620,14 +848,13 @@ export function Dashboard() {
         pendingCount={state.analytics.pendingOrdersCount}
         onOpenNewOrder={() => setCurrentView("payment-links")}
         activeWorkspace={activeWorkspace}
-        onToggleWorkspace={() => {
-          const nextRole = activeWorkspace === "reseller" ? "supplier" : "reseller";
-          setActiveWorkspace(nextRole);
-          void api.updateProfile({ role: nextRole }).then(setState).catch(() => {});
-        }}
+        onToggleWorkspace={handleToggleWorkspace}
+        onSelectRole={handleSelectRole}
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
         vendorName={state.vendor.businessName}
+        subscription={state.subscription}
+        impersonatedStaffRole={impersonatedStaffRole}
       />
 
       {/* Main Content Area */}
@@ -640,11 +867,8 @@ export function Dashboard() {
           simulatorOpen={simulatorOpen}
           breadcrumb={getBreadcrumb()}
           activeWorkspace={activeWorkspace}
-          onToggleWorkspace={() => {
-            const nextRole = activeWorkspace === "reseller" ? "supplier" : "reseller";
-            setActiveWorkspace(nextRole);
-            void api.updateProfile({ role: nextRole }).then(setState).catch(() => {});
-          }}
+          onToggleWorkspace={handleToggleWorkspace}
+          onSelectRole={handleSelectRole}
           onOpenMobileNav={() => setMobileNavOpen(true)}
           orders={state.orders}
           products={state.products}
@@ -659,7 +883,7 @@ export function Dashboard() {
             if (v === "shipping") {
               setCurrentView("settings");
               setSettingsTab("shipping");
-            } else if (v === "profile-settings") {
+            } else if (v === "profile-settings" || v === "profile") {
               setProfileTab("profile");
               setCurrentView("profile");
             } else if (v === "verification") {
@@ -668,6 +892,14 @@ export function Dashboard() {
             } else if (v === "notification-settings") {
               setCurrentView("settings");
               setSettingsTab("notifications");
+            } else if (v === "billing") {
+              setCurrentView("settings");
+              setSettingsTab("billing");
+            } else if (v === "trust-tier") {
+              setProfileTab("trust-tier");
+              setCurrentView("profile");
+            } else if (v === "subscriptions" || v === "plans") {
+              setCurrentView("subscriptions");
             } else if (v === "settings") {
               setCurrentView("settings");
               setSettingsTab("setup");
@@ -675,15 +907,67 @@ export function Dashboard() {
               setCurrentView(v as NavView);
             }
           }}
-          onSignOut={() => setAuthSession(null)}
+          onSignOut={() => {
+            setAuthSession(null);
+            setStoredSessionToken(null);
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("caterlog_auth");
+            }
+          }}
         />
+
+        {/* Staff Role Impersonation Banner */}
+        {impersonatedStaffRole && (
+          <div className="bg-amber-600 text-white px-4 py-2.5 text-xs font-semibold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-md z-30 sticky top-14">
+            <div className="flex items-center gap-2">
+              <span className="bg-black/20 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
+                Impersonation Testing Mode
+              </span>
+              <span>
+                Viewing dashboard as <strong>{impersonatedStaffRole}</strong>.
+                Menus and capabilities are restricted to this role&apos;s RBAC
+                scope.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={impersonatedStaffRole}
+                onChange={(e) => {
+                  const role = e.target.value as StaffRole;
+                  setImpersonatedStaffRole(role === "Owner" ? null : role);
+                }}
+                className="bg-white text-gray-900 text-xs rounded-lg px-2.5 py-1 font-semibold cursor-pointer border-0 shadow-xs"
+              >
+                <option value="Owner">👑 Return to Owner</option>
+                <option value="Store Manager">👔 Store Manager</option>
+                <option value="Store Attendant">🛎️ Store Attendant</option>
+                <option value="Dispatch Coordinator">
+                  🚚 Dispatch Coordinator
+                </option>
+                <option value="Catalog Editor">📦 Catalog Editor</option>
+                <option value="Accountant">💰 Accountant</option>
+              </select>
+              <button
+                onClick={() => setImpersonatedStaffRole(null)}
+                className="bg-black/30 hover:bg-black/40 px-3 py-1 rounded-lg text-xs cursor-pointer font-bold transition-colors"
+              >
+                Exit Preview
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* View Surface */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
           {error && (
             <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex justify-between items-center">
               <span>{error}</span>
-              <button onClick={() => setError(null)} className="text-rose-500 hover:text-rose-700">✕</button>
+              <button
+                onClick={() => setError(null)}
+                className="text-rose-500 hover:text-rose-700"
+              >
+                ✕
+              </button>
             </div>
           )}
 
@@ -691,6 +975,7 @@ export function Dashboard() {
             <OverviewView
               analytics={state.analytics}
               vendor={state.vendor}
+              workspaceRole={activeWorkspace}
               orders={state.orders}
               products={state.products}
               onSelectOrder={(ord) => {
@@ -703,13 +988,14 @@ export function Dashboard() {
                 setCurrentView("orders");
               }}
               onNavigateToPayments={() => setCurrentView("payments")}
+              onNavigateToNetwork={() => setCurrentView("network")}
               onFilterOrdersByStatus={(status) => {
                 const target =
                   status === "PENDING"
                     ? "PENDING_PAYMENT"
                     : status === "PROCESSING"
-                    ? "OUT_FOR_DELIVERY"
-                    : status;
+                      ? "OUT_FOR_DELIVERY"
+                      : status;
                 setOrdersFilter(target);
                 handleSelectOrder(null);
                 setCurrentView("orders");
@@ -794,7 +1080,9 @@ export function Dashboard() {
               initialOrderCode={selectedOrder?.shortCode}
               onSimulateTransfer={handleSimulateTransfer}
               onNavigateToOrder={(code) => {
-                const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
+                const target =
+                  state.orders.find((o) => o.shortCode === code) ||
+                  state.orders[0];
                 if (target) {
                   handleSelectOrder(target);
                   setCurrentView("orders");
@@ -839,8 +1127,11 @@ export function Dashboard() {
           {currentView === "team" && (
             <TeamView
               vendorName={state.vendor.businessName}
+              workspaceRole={activeWorkspace}
               teamMembers={state.teamMembers}
               commerceEvents={state.commerceEvents}
+              activeImpersonatedRole={impersonatedStaffRole}
+              onImpersonateRole={setImpersonatedStaffRole}
               onSaveTeamMember={handleSaveTeamMember}
               onDeleteTeamMember={handleDeleteTeamMember}
             />
@@ -866,7 +1157,9 @@ export function Dashboard() {
               dbNotifications={state.notifications}
               onSyncNotifications={handleSyncNotifications}
               onNavigateToOrder={(code) => {
-                const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
+                const target =
+                  state.orders.find((o) => o.shortCode === code) ||
+                  state.orders[0];
                 if (target) {
                   handleSelectOrder(target);
                   setCurrentView("orders");
@@ -877,14 +1170,36 @@ export function Dashboard() {
             />
           )}
 
+          {currentView === "subscriptions" && (
+            <SubscriptionsView
+              vendor={state.vendor}
+              subscription={state.subscription}
+              trustTier={state.trustTier}
+              onUpgradePlan={handleUpgradePlan}
+              onNavigateToKyc={() => {
+                setProfileTab("verification");
+                setCurrentView("profile");
+              }}
+              onNavigateToBilling={() => {
+                setProfileTab("billing");
+                setCurrentView("profile");
+              }}
+            />
+          )}
+
           {currentView === "profile" && (
             <ProfileView
               key={profileTab}
               initialTab={profileTab}
               vendor={state.vendor}
               kycSubmissions={state.kycSubmissions}
+              subscription={state.subscription}
+              trustTier={state.trustTier}
+              invoices={state.platformInvoices}
               onUpdateProfile={handleUpdateProfile}
               onSubmitKyc={handleSubmitKyc}
+              onUpgradePlan={handleUpgradePlan}
+              onFastTrackTrustTier={handleFastTrackTrustTier}
             />
           )}
 
@@ -899,6 +1214,12 @@ export function Dashboard() {
               chatMessages={state.chatMessages}
               orders={state.orders}
               activeBuyerSession={state.activeBuyerSession}
+              subscription={state.subscription}
+              trustTier={state.trustTier}
+              invoices={state.platformInvoices}
+              onNavigateToPlans={() => setCurrentView("subscriptions")}
+              onUpgradePlan={handleUpgradePlan}
+              onFastTrackTrustTier={handleFastTrackTrustTier}
               onSendVendorManualEcho={handleSendVendorManualEcho}
               onUpdateSettings={handleUpdateSettings}
               onAddShippingZone={handleAddShippingZone}
@@ -906,7 +1227,9 @@ export function Dashboard() {
               onAddDiscount={handleAddDiscount}
               onDeleteDiscount={handleDeleteDiscount}
               onNavigateToOrder={(code) => {
-                const target = state.orders.find((o) => o.shortCode === code) || state.orders[0];
+                const target =
+                  state.orders.find((o) => o.shortCode === code) ||
+                  state.orders[0];
                 if (target) {
                   handleSelectOrder(target);
                   setCurrentView("orders");
@@ -917,7 +1240,7 @@ export function Dashboard() {
         </main>
       </div>
 
-      {/* Slide-over WhatsApp Live Simulator Drawer */}
+      {/* Omnichannel Live Interactive Simulator Drawer & Phone Mockup */}
       <ChatDrawer
         isOpen={simulatorOpen}
         onClose={() => setSimulatorOpen(false)}
@@ -930,6 +1253,8 @@ export function Dashboard() {
         onSendBuyerInquiry={handleSendBuyerInquiry}
         onSendVendorManualEcho={handleSendVendorManualEcho}
         onSimulateTransfer={handleSimulateTransfer}
+        onNavigateToAnalytics={() => setCurrentView("analytics")}
+        onNavigateToOrders={() => setCurrentView("orders")}
       />
     </div>
   );

@@ -9,6 +9,7 @@ import type {
   WholesaleDiscountRule,
 } from "@/lib/types";
 import { resolveImageUrl } from "@/lib/api";
+import { getLgasForState } from "@caterlog/shared";
 
 export const NIGERIAN_STATES = [
   "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno",
@@ -70,6 +71,12 @@ export function MarketBoostView({
   const [allowInterstate, setAllowInterstate] = useState(listing?.allowInterstate ?? false);
   const [coveredStates, setCoveredStates] = useState<string[]>(
     listing?.coveredStates && listing.coveredStates.length > 0 ? listing.coveredStates : ["Lagos"]
+  );
+  const [coveredLgas, setCoveredLgas] = useState<string[]>(
+    listing?.coveredLgas ?? []
+  );
+  const [targetSpecificLgas, setTargetSpecificLgas] = useState<boolean>(
+    Boolean(listing?.coveredLgas && listing.coveredLgas.length > 0)
   );
 
   const [description, setDescription] = useState(
@@ -334,6 +341,13 @@ export function MarketBoostView({
       if (listing.coveredStates && listing.coveredStates.length > 0) {
         setCoveredStates(listing.coveredStates);
       }
+      if (listing.coveredLgas && listing.coveredLgas.length > 0) {
+        setCoveredLgas(listing.coveredLgas);
+        setTargetSpecificLgas(true);
+      } else {
+        setCoveredLgas([]);
+        setTargetSpecificLgas(false);
+      }
       if (listing.description) setDescription(listing.description);
       if (listing.moq) setMoq(listing.moq);
       if (listing.startingPriceFormatted) setStartingPrice(listing.startingPriceFormatted);
@@ -358,6 +372,7 @@ export function MarketBoostView({
       shippingScope,
       allowInterstate,
       coveredStates,
+      coveredLgas: targetSpecificLgas ? coveredLgas : [],
       description,
       moq,
       startingPriceNaira: startingPrice,
@@ -418,17 +433,21 @@ export function MarketBoostView({
   // Helper text for visibility badge
   const getVisibilityBadge = () => {
     if (shippingScope === "LOCAL_STATE") {
+      const lgaDetail = targetSpecificLgas && coveredLgas.length > 0 ? ` (${coveredLgas.length} LGAs)` : " (All LGAs)";
       return {
-        label: `📍 ${vendorState} Only (No Interstate)`,
+        label: `📍 ${vendorState}${lgaDetail} Only`,
         color: "bg-amber-50 text-amber-800 border-amber-200",
-        tooltip: "Only resellers in your base state can mirror your catalog."
+        tooltip: targetSpecificLgas && coveredLgas.length > 0
+          ? `Only resellers in ${coveredLgas.slice(0, 3).join(", ")}${coveredLgas.length > 3 ? "..." : ""} can mirror your catalog.`
+          : `Only resellers in your base state (${vendorState}) can mirror your catalog.`
       };
     }
     if (shippingScope === "SELECTED_STATES") {
+      const lgaDetail = targetSpecificLgas && coveredLgas.length > 0 ? ` + ${coveredLgas.length} targeted LGAs` : "";
       return {
         label: `🗺️ ${coveredStates.length} States Covered`,
         color: "bg-blue-50 text-blue-800 border-blue-200",
-        tooltip: `Visible to resellers in: ${coveredStates.slice(0, 4).join(", ")}${coveredStates.length > 4 ? ` +${coveredStates.length - 4} more` : ""}`
+        tooltip: `Visible to resellers in: ${coveredStates.slice(0, 4).join(", ")}${coveredStates.length > 4 ? ` +${coveredStates.length - 4} more` : ""}${lgaDetail}`
       };
     }
     return {
@@ -744,18 +763,18 @@ export function MarketBoostView({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column (2 Cols) */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Business information */}
+            {/* Wholesale Listing Details */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-gray-900">Business information</h3>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Supplier business name</label>
-                <input
-                  type="text"
-                  value={businessName}
-                  onChange={(e) => setBusinessName(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
-                />
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Wholesale Directory Profile</h3>
+                  <p className="text-[11px] text-gray-500">
+                    Supplier identity: <span className="font-semibold text-gray-800">{businessName || vendorName}</span> · Synced from Profile Settings
+                  </p>
+                </div>
+                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                  Wholesale Supplier
+                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -998,6 +1017,87 @@ export function MarketBoostView({
                       );
                     })}
                   </div>
+                </div>
+              )}
+
+              {/* LGA Geofencing Section */}
+              {shippingScope !== "NATIONWIDE" && (
+                <div className="space-y-3 pt-3 border-t border-gray-100">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-800">
+                        LGA & Territory Geofencing
+                      </label>
+                      <p className="text-[10px] text-gray-500">
+                        Restrict catalog discovery and reseller mirroring to specific Local Government Areas in {vendorState}.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-gray-700 font-medium cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={targetSpecificLgas}
+                          onChange={(e) => {
+                            setTargetSpecificLgas(e.target.checked);
+                            if (!e.target.checked) setCoveredLgas([]);
+                          }}
+                          className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        Target Specific LGAs Only
+                      </label>
+                    </div>
+                  </div>
+
+                  {targetSpecificLgas && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-[10px] text-gray-500">
+                        <span>Available LGAs in {vendorState} ({coveredLgas.length} selected):</span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setCoveredLgas(getLgasForState(vendorState))}
+                            className="text-emerald-700 font-medium hover:underline cursor-pointer"
+                          >
+                            Select All
+                          </button>
+                          <span>·</span>
+                          <button
+                            type="button"
+                            onClick={() => setCoveredLgas([])}
+                            className="text-gray-500 hover:underline cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2.5 border border-gray-200 rounded-xl bg-gray-50/50">
+                        {getLgasForState(vendorState).map((lga) => {
+                          const isSelected = coveredLgas.includes(lga);
+                          return (
+                            <button
+                              key={lga}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setCoveredLgas(coveredLgas.filter((l) => l !== lga));
+                                } else {
+                                  setCoveredLgas([...coveredLgas, lga]);
+                                }
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${
+                                isSelected
+                                  ? "bg-emerald-600 text-white shadow-2xs font-semibold"
+                                  : "bg-white border border-gray-200 text-gray-700 hover:border-gray-400"
+                              }`}
+                            >
+                              {lga} {isSelected && "✓"}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

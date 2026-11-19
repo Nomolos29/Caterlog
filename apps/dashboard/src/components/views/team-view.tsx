@@ -1,15 +1,24 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
-import type { TeamMemberItem, CommerceEventItem } from "@/lib/types";
+import type { TeamMemberItem, CommerceEventItem, PlatformRole } from "@/lib/types";
+import { api } from "@/lib/api";
 import { FilterIcon, ExportIcon, PlusIcon } from "../icons";
 
-interface TeamMember {
+export type StaffRole =
+  | "Owner"
+  | "Store Manager"
+  | "Store Attendant"
+  | "Accountant"
+  | "Dispatch Coordinator"
+  | "Catalog Editor";
+
+export interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: "Owner" | "Store Manager" | "Store Attendant" | "Accountant" | "Dispatch Coordinator";
-  status: "Active" | "Invited";
+  role: StaffRole;
+  status: "Active" | "Invited" | "Suspended";
   lastActive: string;
   permissions: {
     canManageOrders: boolean;
@@ -18,6 +27,53 @@ interface TeamMember {
     canProcessRefunds: boolean;
     canOverrideCopilot: boolean;
   };
+}
+
+function getDefaultPermissionsForRole(role: TeamMember["role"]) {
+  switch (role) {
+    case "Owner":
+    case "Store Manager":
+      return {
+        canManageOrders: true,
+        canManageInventory: true,
+        canViewPayouts: true,
+        canProcessRefunds: true,
+        canOverrideCopilot: true,
+      };
+    case "Dispatch Coordinator":
+      return {
+        canManageOrders: true,
+        canManageInventory: false,
+        canViewPayouts: false,
+        canProcessRefunds: false,
+        canOverrideCopilot: false,
+      };
+    case "Catalog Editor":
+      return {
+        canManageOrders: false,
+        canManageInventory: true,
+        canViewPayouts: false,
+        canProcessRefunds: false,
+        canOverrideCopilot: false,
+      };
+    case "Accountant":
+      return {
+        canManageOrders: false,
+        canManageInventory: false,
+        canViewPayouts: true,
+        canProcessRefunds: true,
+        canOverrideCopilot: false,
+      };
+    case "Store Attendant":
+    default:
+      return {
+        canManageOrders: true,
+        canManageInventory: true,
+        canViewPayouts: false,
+        canProcessRefunds: false,
+        canOverrideCopilot: true,
+      };
+  }
 }
 
 interface AuditEvent {
@@ -33,26 +89,41 @@ interface AuditEvent {
 
 interface TeamViewProps {
   vendorName?: string;
+  workspaceRole?: PlatformRole;
   teamMembers?: TeamMemberItem[];
   commerceEvents?: CommerceEventItem[];
+  activeImpersonatedRole?: StaffRole | null;
+  onImpersonateRole?: (role: StaffRole | null) => void;
   onSaveTeamMember?: (input: {
     name: string;
     email: string;
     role: string;
     status?: "Active" | "Invited" | "Suspended";
+    canManageOrders?: boolean;
+    canManageInventory?: boolean;
+    canViewPayouts?: boolean;
+    canProcessRefunds?: boolean;
+    canOverrideCopilot?: boolean;
   }) => Promise<void>;
   onDeleteTeamMember?: (idOrEmail: string) => Promise<void>;
 }
 
 export function TeamView({
   vendorName,
+  workspaceRole = "growth",
   teamMembers = [],
   commerceEvents = [],
+  activeImpersonatedRole,
+  onImpersonateRole,
   onSaveTeamMember,
+  onDeleteTeamMember,
 }: TeamViewProps) {
   const [activeTab, setActiveTab] = useState<"roles" | "audit">("roles");
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [upgradeCapModalOpen, setUpgradeCapModalOpen] = useState(false);
   const [editMember, setEditMember] = useState<TeamMember | null>(null);
+
+  const isGrowth = workspaceRole === "growth";
 
   // Invite Form State
   const [inviteEmail, setInviteEmail] = useState("");
@@ -154,6 +225,33 @@ export function TeamView({
   }, [commerceEvents, vendorName]);
 
   // Handle Team Member Invitation
+  const [activeStaffEmail, setActiveStaffEmail] = useState<string>("owner@caterlog.store");
+  const [activeStaffRole, setActiveStaffRole] = useState<string>("Owner");
+
+  useEffect(() => {
+    void api
+      .getCurrentSession()
+      .then((res) => {
+        if (res.authenticated && res.session) {
+          setActiveStaffEmail(res.session.email || "owner@caterlog.store");
+          setActiveStaffRole(res.session.staffRole || "Owner");
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSwitchStaffSession = async (member: TeamMember) => {
+    try {
+      const res = await api.staffLogin(member.email);
+      setActiveStaffEmail(res.session.email || member.email);
+      setActiveStaffRole(res.session.staffRole || member.role);
+      setInviteSuccessToast(`Switched active session to ${member.name} (${member.role})`);
+      setTimeout(() => setInviteSuccessToast(null), 3500);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const handleSendInvite = () => {
     if (!inviteEmail || !inviteName) return;
     if (onSaveTeamMember) {
@@ -162,6 +260,7 @@ export function TeamView({
         email: inviteEmail,
         role: inviteRole,
         status: "Invited",
+        ...invitePerms,
       });
     }
     const newMember: TeamMember = {
@@ -263,13 +362,30 @@ export function TeamView({
               <span>Export Audit CSV</span>
             </button>
           ) : (
-            <button
-              onClick={() => setInviteModalOpen(true)}
-              className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white transition-all shadow-2xs hover:shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-            >
-              <PlusIcon className="w-3.5 h-3.5" />
-              <span>Invite Team Member</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {isGrowth && members.length >= 4 && (
+                <span className="hidden sm:inline-block text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
+                  Growth limit: 4/4 seats
+                </span>
+              )}
+              <button
+                onClick={() => {
+                  if (isGrowth && members.length >= 4) {
+                    setUpgradeCapModalOpen(true);
+                  } else {
+                    setInviteModalOpen(true);
+                  }
+                }}
+                className={`text-xs font-semibold px-3.5 py-2 rounded-xl transition-all shadow-2xs hover:shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                  isGrowth && members.length >= 4
+                    ? "bg-amber-600 hover:bg-amber-700 text-white"
+                    : "bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white"
+                }`}
+              >
+                <PlusIcon className="w-3.5 h-3.5" />
+                <span>{isGrowth && members.length >= 4 ? "Upgrade for More Seats" : "Invite Team Member"}</span>
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -301,6 +417,73 @@ export function TeamView({
       {/* TAB 1: Team & Permissions (Matching Team Permissions & Roles.png) */}
       {activeTab === "roles" && (
         <div className="space-y-6">
+          {/* Growth Tier Allocation Banner */}
+          {isGrowth && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+              <div>
+                <span className="font-bold text-emerald-950">Growth Plan Team Capacity:</span>{" "}
+                <span className="text-emerald-800">
+                  Currently using <strong>{members.length} / 4</strong> team seats. Full activity &amp; audit logging is enabled.
+                </span>
+              </div>
+              {members.length >= 4 ? (
+                <span className="font-bold text-amber-800 bg-amber-100 border border-amber-200 px-3 py-1 rounded-full text-[11px] shrink-0">
+                  Seat Limit Reached (4/4)
+                </span>
+              ) : (
+                <span className="font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-3 py-1 rounded-full text-[11px] shrink-0">
+                  {4 - members.length} Seats Available
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Store Owner Role Impersonation & Testing Bar */}
+          <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-4 text-xs space-y-3 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="font-bold text-indigo-950 flex items-center gap-2">
+                  <span>🎭</span> Store Owner Role Impersonation &amp; Preview
+                </div>
+                <p className="text-indigo-800 text-[11px] mt-0.5">
+                  Click any role below to preview the exact dashboard view, visible menus, and RBAC endpoint restrictions experienced by that staff member.
+                </p>
+              </div>
+              {activeImpersonatedRole && (
+                <button
+                  onClick={() => onImpersonateRole?.(null)}
+                  className="px-3 py-1 bg-indigo-700 text-white font-bold rounded-lg text-xs hover:bg-indigo-800 cursor-pointer transition-colors"
+                >
+                  Exit Preview (Return to Owner)
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {(
+                [
+                  { role: "Owner" as const, label: "👑 Owner (Full)" },
+                  { role: "Store Manager" as const, label: "👔 Store Manager" },
+                  { role: "Store Attendant" as const, label: "🛎️ Store Attendant" },
+                  { role: "Dispatch Coordinator" as const, label: "🚚 Dispatch Coordinator" },
+                  { role: "Catalog Editor" as const, label: "📦 Catalog Editor" },
+                  { role: "Accountant" as const, label: "💰 Accountant" },
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item.role}
+                  onClick={() => onImpersonateRole?.(item.role === "Owner" ? null : item.role)}
+                  className={`px-3 py-1.5 rounded-xl font-semibold text-xs border transition-all cursor-pointer ${
+                    (activeImpersonatedRole === item.role || (!activeImpersonatedRole && item.role === "Owner"))
+                      ? "bg-indigo-700 text-white border-indigo-700 shadow-xs"
+                      : "bg-white text-gray-700 border-indigo-200 hover:bg-indigo-100/60"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Quick Metrics */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs">
@@ -385,6 +568,8 @@ export function TeamView({
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                             m.status === "Active"
                               ? "bg-emerald-100 text-emerald-800"
+                              : m.status === "Suspended"
+                              ? "bg-rose-100 text-rose-800"
                               : "bg-amber-100 text-amber-800"
                           }`}
                         >
@@ -392,14 +577,30 @@ export function TeamView({
                         </span>
                       </td>
                       <td className="py-4 px-6 text-right">
-                        {m.role !== "Owner" && (
+                        <div className="inline-flex items-center gap-2">
                           <button
-                            onClick={() => setEditMember(m)}
-                            className="text-xs font-semibold px-3 py-1 rounded-lg border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 transition-all cursor-pointer active:scale-95"
+                            onClick={() => void handleSwitchStaffSession(m)}
+                            disabled={m.status === "Suspended"}
+                            className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer active:scale-95 ${
+                              activeStaffEmail.toLowerCase() === m.email.toLowerCase()
+                                ? "bg-emerald-700 border-emerald-700 text-white"
+                                : "border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
+                            }`}
+                            title={`Authenticate sub-account session as ${m.name} (${m.role})`}
                           >
-                            Edit
+                            {activeStaffEmail.toLowerCase() === m.email.toLowerCase()
+                              ? `Active (${m.role})`
+                              : "Sign In As"}
                           </button>
-                        )}
+                          {m.role !== "Owner" && (
+                            <button
+                              onClick={() => setEditMember(m)}
+                              className="text-xs font-semibold px-3 py-1 rounded-lg border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 transition-all cursor-pointer active:scale-95"
+                            >
+                              Edit
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -572,12 +773,17 @@ export function TeamView({
                 <label className="block text-xs font-bold text-gray-700 mb-1">Role Preset</label>
                 <select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as any)}
+                  onChange={(e) => {
+                    const nextRole = e.target.value as TeamMember["role"];
+                    setInviteRole(nextRole);
+                    setInvitePerms(getDefaultPermissionsForRole(nextRole));
+                  }}
                   className="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-900 focus:outline-none focus:border-emerald-500 cursor-pointer"
                 >
                   <option value="Store Attendant">Store Attendant (Orders & Chat)</option>
                   <option value="Store Manager">Store Manager (Orders, Stock, Price)</option>
-                  <option value="Dispatch Coordinator">Dispatch Coordinator (Pickup & Delivery)</option>
+                  <option value="Dispatch Coordinator">Dispatch Coordinator (Rider / Fulfillment Only)</option>
+                  <option value="Catalog Editor">Catalog Editor (Catalog & Stock Editor Only)</option>
                   <option value="Accountant">Accountant (Financials & Settlement)</option>
                 </select>
               </div>
@@ -623,6 +829,15 @@ export function TeamView({
                   />
                   <span className="text-gray-700">Can view Monnify settlement accounts & payout splits</span>
                 </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={invitePerms.canProcessRefunds}
+                    onChange={(e) => setInvitePerms({ ...invitePerms, canProcessRefunds: e.target.checked })}
+                    className="rounded text-emerald-600 cursor-pointer"
+                  />
+                  <span className="text-gray-700">Can issue instant Monnify customer refunds</span>
+                </label>
               </div>
             </div>
 
@@ -660,12 +875,20 @@ export function TeamView({
                 <label className="block text-gray-500 font-semibold mb-1">Role</label>
                 <select
                   value={editMember.role}
-                  onChange={(e) => setEditMember({ ...editMember, role: e.target.value as any })}
+                  onChange={(e) => {
+                    const nextRole = e.target.value as TeamMember["role"];
+                    setEditMember({
+                      ...editMember,
+                      role: nextRole,
+                      permissions: getDefaultPermissionsForRole(nextRole),
+                    });
+                  }}
                   className="w-full p-2 border rounded-xl bg-white cursor-pointer"
                 >
                   <option value="Store Manager">Store Manager</option>
                   <option value="Store Attendant">Store Attendant</option>
-                  <option value="Dispatch Coordinator">Dispatch Coordinator</option>
+                  <option value="Dispatch Coordinator">Dispatch Coordinator (Rider / Fulfillment Only)</option>
+                  <option value="Catalog Editor">Catalog Editor (Catalog & Stock Only)</option>
                   <option value="Accountant">Accountant</option>
                 </select>
               </div>
@@ -687,6 +910,48 @@ export function TeamView({
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
+                    checked={editMember.permissions.canManageInventory}
+                    onChange={(e) =>
+                      setEditMember({
+                        ...editMember,
+                        permissions: { ...editMember.permissions, canManageInventory: e.target.checked },
+                      })
+                    }
+                    className="rounded text-emerald-600"
+                  />
+                  <span>Can manage catalog & stock counts</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editMember.permissions.canViewPayouts}
+                    onChange={(e) =>
+                      setEditMember({
+                        ...editMember,
+                        permissions: { ...editMember.permissions, canViewPayouts: e.target.checked },
+                      })
+                    }
+                    className="rounded text-emerald-600"
+                  />
+                  <span>Can view payouts & settlement splits</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editMember.permissions.canProcessRefunds}
+                    onChange={(e) =>
+                      setEditMember({
+                        ...editMember,
+                        permissions: { ...editMember.permissions, canProcessRefunds: e.target.checked },
+                      })
+                    }
+                    className="rounded text-emerald-600"
+                  />
+                  <span>Can process customer refunds</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
                     checked={editMember.permissions.canOverrideCopilot}
                     onChange={(e) =>
                       setEditMember({
@@ -703,6 +968,9 @@ export function TeamView({
             <div className="flex justify-between pt-2">
               <button
                 onClick={() => {
+                  if (onDeleteTeamMember) {
+                    void onDeleteTeamMember(editMember.email);
+                  }
                   setMembers(members.filter((m) => m.id !== editMember.id));
                   setEditMember(null);
                 }}
@@ -712,12 +980,58 @@ export function TeamView({
               </button>
               <button
                 onClick={() => {
+                  if (onSaveTeamMember) {
+                    void onSaveTeamMember({
+                      name: editMember.name,
+                      email: editMember.email,
+                      role: editMember.role,
+                      status: editMember.status,
+                      ...editMember.permissions,
+                    });
+                  }
                   setMembers(members.map((m) => (m.id === editMember.id ? editMember : m)));
                   setEditMember(null);
                 }}
                 className="bg-[#0d5c3a] text-white text-xs font-semibold px-4 py-2 rounded-xl hover:bg-[#0b4b2f] cursor-pointer"
               >
                 Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Growth Tier Cap Limit Modal */}
+      {upgradeCapModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4 animate-in fade-in">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-2xl mx-auto">
+              👥
+            </div>
+            <div className="text-center space-y-1.5">
+              <h3 className="font-bold text-gray-900 text-base">Growth Plan Team Cap Reached</h3>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Your store is currently on the <strong>Growth Vendor ($15/mo)</strong> tier, which includes access to Team delegation and Activity Logs capped at <strong>4 team members</strong>.
+              </p>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-left text-xs text-amber-900 space-y-1 my-3">
+                <div className="font-bold">Upgrade to Pro Concierge ($20/mo) for:</div>
+                <div className="flex items-center gap-1.5 text-[11px]">
+                  <span>✓</span> Unlimited staff seats &amp; dispatch rider accounts
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px]">
+                  <span>✓</span> 3 daily logistics pickup sweeps by Caterlog Fleet
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px]">
+                  <span>✓</span> Dedicated VIP phone &amp; WhatsApp concierge support
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setUpgradeCapModalOpen(false)}
+                className="px-4 py-2 border border-gray-300 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -15,7 +15,7 @@
     "start": "node --experimental-strip-types apps/api/src/server.ts",
     "start:dashboard": "npm --workspace=@caterlog/dashboard run start",
     "build": "npm run build --workspaces --if-present",
-    "test": "node --experimental-strip-types --test packages/commerce-core/src/commerce-core.test.ts packages/integrations/src/integrations.test.ts apps/api/src/api.test.ts apps/api/src/persistence.test.ts",
+    "test": "node --experimental-strip-types --test packages/commerce-core/src/commerce-core.test.ts packages/integrations/src/integrations.test.ts apps/api/src/api.test.ts apps/api/src/security.test.ts apps/api/src/persistence.test.ts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:generate": "npm --workspace=@caterlog/database run db:generate",
     "db:push": "node scripts/with-env.mjs npm --workspace=@caterlog/database run db:push",

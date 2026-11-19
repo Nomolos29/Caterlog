@@ -40,9 +40,18 @@ const buildTransactions = (orders: OrderItem[] = []): TransactionItem[] => {
     .filter((o) => o.amountPaidNaira > 0 || o.status === "PAID" || o.status === "PARTIALLY_PAID")
     .map((o, idx) => {
       const gross = o.amountPaidNaira || o.totalAmountNaira;
-      const fee = Math.round(gross * 0.015); // Monnify ~1.5% fee
-      const net = Math.max(0, gross - fee);
+      const fee = o.platformFeeNaira !== undefined ? o.platformFeeNaira : Math.round(gross * 0.015);
+      const isDropship = Boolean(o.isDropship);
+      const supplierGross = isDropship && o.supplierShareNaira !== undefined
+        ? o.supplierShareNaira
+        : Math.max(0, gross - fee);
+      const repNet = isDropship && o.resellerShareNaira !== undefined
+        ? o.resellerShareNaira
+        : 0;
+      const repGross = isDropship ? repNet + fee : 0;
+
       const orderDate = new Date(o.paidAt || o.createdAt);
+      const isSettled = o.splitSettlementStatus === "SETTLED" || o.status === "PAID";
       return {
         id: `tx-${o.id || idx}`,
         orderCode: o.shortCode,
@@ -58,13 +67,13 @@ const buildTransactions = (orders: OrderItem[] = []): TransactionItem[] => {
             hour: "2-digit",
             minute: "2-digit",
           }) + " WAT",
-        supplierGross: net,
-        repGross: 0,
-        repNet: net,
+        supplierGross,
+        repGross,
+        repNet,
         fee,
         customerStatus: "Paid" as const,
-        supplierSettlement: "Both settled" as const,
-        repSettlement: "Both settled" as const,
+        supplierSettlement: isSettled ? ("Both settled" as const) : ("Supplier pending" as const),
+        repSettlement: isSettled ? ("Both settled" as const) : ("Not created" as const),
       };
     });
 };

@@ -1,7 +1,23 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import type { VendorProfile, ShippingZoneItem, DiscountItem, ChatMessageItem, OrderItem, BuyerSession } from "@/lib/types";
+import type {
+  VendorProfile,
+  ShippingZoneItem,
+  DiscountItem,
+  ChatMessageItem,
+  OrderItem,
+  BuyerSession,
+  PlatformRole,
+  SubscriptionInfo,
+  TrustTierInfo,
+  PlatformInvoiceItem,
+  SubscriptionPlanId,
+  BillingCycle,
+} from "@/lib/types";
+import { isResellerRole, isVendorRole } from "@/lib/types";
+import { api } from "@/lib/api";
+import { BillingSubscriptionView } from "./billing-subscription-view";
 
 export type SettingsTabId =
   | "notifications"
@@ -9,17 +25,24 @@ export type SettingsTabId =
   | "conversations"
   | "detail"
   | "shipping"
+  | "billing"
   | "general";
 
 interface SettingsViewProps {
   vendor: VendorProfile;
-  workspaceRole?: "reseller" | "supplier";
+  workspaceRole?: PlatformRole;
   shippingZones: ShippingZoneItem[];
   discounts: DiscountItem[];
   chatMessages?: ChatMessageItem[];
   orders?: OrderItem[];
   initialTab?: SettingsTabId;
   activeBuyerSession?: BuyerSession | null;
+  subscription?: SubscriptionInfo;
+  trustTier?: TrustTierInfo;
+  invoices?: PlatformInvoiceItem[];
+  onNavigateToPlans?: () => void;
+  onUpgradePlan?: (planId: SubscriptionPlanId, cycle: BillingCycle) => Promise<boolean>;
+  onFastTrackTrustTier?: (cacNumber?: string) => Promise<boolean>;
   onSendVendorManualEcho?: (text: string, buyerPhone?: string) => Promise<void>;
   onUpdateSettings: (settings: {
     copilotMode?: "COPILOT" | "FULL_AUTO" | "MANUAL";
@@ -45,13 +68,19 @@ const INITIAL_MESSAGES: MessageItem[] = [];
 
 export function SettingsView({
   vendor,
-  workspaceRole = "reseller",
+  workspaceRole = "growth",
   shippingZones,
   discounts,
   chatMessages = [],
   orders = [],
   initialTab = "setup",
   activeBuyerSession,
+  subscription,
+  trustTier,
+  invoices = [],
+  onNavigateToPlans,
+  onUpgradePlan,
+  onFastTrackTrustTier,
   onSendVendorManualEcho,
   onUpdateSettings,
   onAddShippingZone,
@@ -60,6 +89,8 @@ export function SettingsView({
   onDeleteDiscount,
   onNavigateToOrder,
 }: SettingsViewProps) {
+  const isVendor = isVendorRole(workspaceRole);
+  const isReseller = isResellerRole(workspaceRole);
   const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab);
 
   useEffect(() => {
@@ -69,10 +100,10 @@ export function SettingsView({
   }, [initialTab]);
 
   useEffect(() => {
-    if (workspaceRole === "reseller" && activeTab === "shipping") {
+    if (isReseller && activeTab === "shipping") {
       setActiveTab("setup");
     }
-  }, [workspaceRole, activeTab]);
+  }, [isReseller, activeTab]);
 
   // Derived live messages
   const liveMessages: MessageItem[] = React.useMemo(() => {
@@ -114,22 +145,40 @@ export function SettingsView({
   }
 
   const sessions: SessionItem[] = React.useMemo(() => {
-    if (!chatMessages || chatMessages.length === 0) return [];
     const byPhone = new Map<string, ChatMessageItem[]>();
-    for (const msg of chatMessages) {
-      const phone = msg.fromPhone || "buyer";
-      const list = byPhone.get(phone) || [];
-      list.push(msg);
-      byPhone.set(phone, list);
+    if (chatMessages && chatMessages.length > 0) {
+      for (const msg of chatMessages) {
+        if (msg.fromPhone === "CATERLOG") continue;
+        const phone = msg.fromPhone || "buyer";
+        const list = byPhone.get(phone) || [];
+        list.push(msg);
+        byPhone.set(phone, list);
+      }
     }
-    return Array.from(byPhone.entries()).map(([phone, msgs], idx) => {
+
+    const resolveChannelInfo = (phone: string, src?: string) => {
+      const upper = (src || "").toUpperCase();
+      if (upper === "INSTAGRAM" || phone.toLowerCase().startsWith("ig_") || phone.startsWith("@")) {
+        return { channel: "Instagram", prefix: "IG" };
+      }
+      if (upper === "FACEBOOK" || phone.toLowerCase().startsWith("fb_")) {
+        return { channel: "Facebook", prefix: "FB" };
+      }
+      return { channel: "WhatsApp", prefix: "WA" };
+    };
+
+    const result: SessionItem[] = Array.from(byPhone.entries()).map(([phone, msgs], idx) => {
       const lastMsg = msgs[msgs.length - 1];
       const matchedOrder = orders.find((o) => o.customerPhone === phone);
+      const { channel, prefix } = resolveChannelInfo(
+        phone,
+        lastMsg.sourceChannel || matchedOrder?.salesChannel
+      );
       return {
         id: `sess-${idx}`,
-        customerName: matchedOrder ? matchedOrder.customerName : `WhatsApp Customer (${phone})`,
-        threadCode: `WA-${phone.slice(-4)}`,
-        channel: "WhatsApp",
+        customerName: matchedOrder ? matchedOrder.customerName : `${channel} Customer (${phone})`,
+        threadCode: `${prefix}-${phone.slice(-4).toUpperCase()}`,
+        channel,
         state: "Automated" as const,
         outcome: matchedOrder ? `${matchedOrder.status} · ${matchedOrder.shortCode}` : "Inquiry Active",
         amount: matchedOrder?.totalAmountFormatted,
@@ -137,6 +186,26 @@ export function SettingsView({
         log: lastMsg.text,
       };
     });
+
+    // Also surface any orders whose customer threads are not in current message slice
+    for (const ord of orders) {
+      if (!byPhone.has(ord.customerPhone)) {
+        const { channel, prefix } = resolveChannelInfo(ord.customerPhone, ord.salesChannel);
+        result.push({
+          id: `sess-ord-${ord.id}`,
+          customerName: ord.customerName,
+          threadCode: `${prefix}-${ord.shortCode.replace("ORD-", "")}`,
+          channel,
+          state: "Automated" as const,
+          outcome: `${ord.status} · ${ord.shortCode}`,
+          amount: ord.totalAmountFormatted,
+          time: new Date(ord.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          log: `Order ${ord.shortCode} for ${ord.quantity}x ${ord.productName} via ${channel} Co-Pilot.`,
+        });
+      }
+    }
+
+    return result;
   }, [chatMessages, orders]);
 
   const escalatedSessions = sessions.filter((s) => s.state === "Needs you");
@@ -177,8 +246,39 @@ export function SettingsView({
 
   // Setup form states
   const [copilotEnabled, setCopilotEnabled] = useState(true);
-  const [instagramConnected, setInstagramConnected] = useState(false);
+  const [instagramConnected, setInstagramConnected] = useState(vendor.instagramConnected ?? true);
+  const [instagramHandleInput, setInstagramHandleInput] = useState(
+    vendor.instagramHandle || `@${vendor.slug.replace(/[^a-z0-9]/gi, "")}`
+  );
+  const [facebookConnected, setFacebookConnected] = useState(vendor.facebookConnected ?? true);
+  const [facebookPageInput, setFacebookPageInput] = useState(
+    vendor.facebookPageName || `${vendor.businessName} Official`
+  );
   const [showIgModal, setShowIgModal] = useState(false);
+  const [showFbModal, setShowFbModal] = useState(false);
+  const [channelToast, setChannelToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (vendor.instagramConnected !== undefined) setInstagramConnected(vendor.instagramConnected);
+    if (vendor.instagramHandle) setInstagramHandleInput(vendor.instagramHandle);
+    if (vendor.facebookConnected !== undefined) setFacebookConnected(vendor.facebookConnected);
+    if (vendor.facebookPageName) setFacebookPageInput(vendor.facebookPageName);
+  }, [vendor.instagramConnected, vendor.instagramHandle, vendor.facebookConnected, vendor.facebookPageName]);
+
+  const handleSaveSocialChannel = async (updates: {
+    instagramHandle?: string;
+    instagramConnected?: boolean;
+    facebookPageName?: string;
+    facebookConnected?: boolean;
+  }) => {
+    try {
+      await api.updateSocialChannels(updates);
+      setChannelToast("✓ Meta omnichannel integration updated");
+      setTimeout(() => setChannelToast(null), 3000);
+    } catch {
+      // Fallback local state already updated
+    }
+  };
   const [startReplyingAfter, setStartReplyingAfter] = useState("15 minutes without merchant reply");
   const [timezone, setTimezone] = useState("Africa/Lagos · WAT");
   const [awayNow, setAwayNow] = useState(true);
@@ -305,8 +405,9 @@ export function SettingsView({
     const tabs: Array<{ id: SettingsTabId; label: string }> = [
       { id: "setup", label: "Sales co-pilot" },
       { id: "conversations", label: "Conversations" },
-      ...(workspaceRole === "supplier" ? [{ id: "shipping" as const, label: "Delivery & Shipping" }] : []),
+      ...(isVendor ? [{ id: "shipping" as const, label: "Delivery & Shipping" }] : []),
       { id: "notifications", label: "Notifications" },
+      { id: "billing", label: "Billing & Subscription" },
       { id: "general", label: "Shop & Webhooks" },
     ];
     return (
@@ -327,6 +428,44 @@ export function SettingsView({
       </div>
     );
   };
+
+  /* -------------------------------------------------------------------------- */
+  /* Settings · Billing & Subscription                                          */
+  /* -------------------------------------------------------------------------- */
+  if (activeTab === "billing") {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto w-full pb-24">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Billing &amp; Subscription</h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Manage your active subscription, payment card/direct debit, and platform billing invoices.
+            </p>
+          </div>
+          {onNavigateToPlans && (
+            <button
+              onClick={onNavigateToPlans}
+              className="text-xs font-semibold px-4 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+            >
+              Compare All Plans &amp; Pricing →
+            </button>
+          )}
+        </div>
+
+        {renderTabStrip()}
+
+        <BillingSubscriptionView
+          vendor={vendor}
+          subscription={subscription}
+          trustTier={trustTier}
+          invoices={invoices}
+          onUpgradePlan={onUpgradePlan}
+          onFastTrackTrustTier={onFastTrackTrustTier}
+          onNavigateToPlans={onNavigateToPlans}
+        />
+      </div>
+    );
+  }
 
   /* -------------------------------------------------------------------------- */
   /* Settings · Notifications                                                   */
@@ -438,9 +577,30 @@ export function SettingsView({
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Delivery &amp; Shipping</h1>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">Delivery &amp; Shipping</h1>
+              <span
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                  workspaceRole === "starter"
+                    ? "bg-amber-50 text-amber-900 border-amber-200"
+                    : workspaceRole === "growth"
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                    : "bg-purple-50 text-purple-900 border-purple-200"
+                }`}
+              >
+                {workspaceRole === "starter"
+                  ? "Starter: Self-Managed Flat Rates"
+                  : workspaceRole === "growth"
+                  ? "Growth: Pickup Hub Delivery"
+                  : "Pro: 3-Window Concierge Pickup"}
+              </span>
+            </div>
             <p className="text-xs text-gray-500 mt-0.5">
-              Configure delivery rates, pickup hubs, courier partners, and free delivery thresholds for live WhatsApp &amp; web checkout.
+              {workspaceRole === "starter"
+                ? "Configure flat delivery rates for live WhatsApp & web checkout. You book and coordinate your own dispatch riders."
+                : workspaceRole === "growth"
+                ? "Configure local delivery rates and partner hub drop-off logistics (GIGL, Shipbubble, Kwik) for interstate orders."
+                : "Full operations suite: 3 Daily Scheduled Pickup Sweeps (10AM, 1PM, 4PM), Express Doorstep Delivery, and Shielded Privacy Support."}
             </p>
           </div>
           <button
@@ -1166,6 +1326,7 @@ export function SettingsView({
                 <option>All channels</option>
                 <option>WhatsApp</option>
                 <option>Instagram</option>
+                <option>Facebook</option>
               </select>
               <select
                 value={stateFilter}
@@ -1225,7 +1386,22 @@ export function SettingsView({
                         <div className="font-semibold text-gray-900">{sess.customerName}</div>
                         <div className="text-[11px] text-gray-400">{sess.threadCode}</div>
                       </td>
-                      <td className="px-4 py-3.5">{sess.channel}</td>
+                      <td className="px-4 py-3.5">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            sess.channel === "Instagram"
+                              ? "bg-pink-50 text-pink-700 border border-pink-200"
+                              : sess.channel === "Facebook"
+                                ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          }`}
+                        >
+                          <span>
+                            {sess.channel === "Instagram" ? "📸" : sess.channel === "Facebook" ? "🔵" : "🟢"}
+                          </span>
+                          <span>{sess.channel}</span>
+                        </span>
+                      </td>
                       <td className="px-4 py-3.5">
                         <span
                           className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -1289,12 +1465,18 @@ export function SettingsView({
             <div className="space-y-2 text-xs">
               <div className="flex justify-between">
                 <span className="text-gray-500">WhatsApp</span>
-                <span className="text-emerald-700 font-semibold">Connected</span>
+                <span className="text-emerald-700 font-semibold">Connected · Enabled</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Instagram</span>
+                <span className="text-gray-500">Instagram Direct</span>
                 <span className={`font-semibold ${instagramConnected ? "text-emerald-700" : "text-amber-700"}`}>
-                  {instagramConnected ? "Connected · Enabled" : "Reconnect required"}
+                  {instagramConnected ? `Connected (${instagramHandleInput})` : "Reconnect required"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Facebook Messenger</span>
+                <span className={`font-semibold ${facebookConnected ? "text-emerald-700" : "text-amber-700"}`}>
+                  {facebookConnected ? "Connected · Enabled" : "Connect Page"}
                 </span>
               </div>
             </div>
@@ -1344,7 +1526,7 @@ export function SettingsView({
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Sales co-pilot</h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              Sell from live inventory when you&apos;re away, with clear limits and a human handoff.
+              Unified Meta omnichannel co-pilot for WhatsApp, Instagram Direct, and Facebook Messenger.
             </p>
           </div>
           <button
@@ -1358,23 +1540,36 @@ export function SettingsView({
         {/* Tab Strip */}
         {renderTabStrip()}
 
-        {/* Section 1: Automation & connected channels */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-gray-900">Automation &amp; connected channels</h3>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-              Enabled
+        {channelToast && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl">
+            {channelToast}
+          </div>
+        )}
+
+        {/* Section 1: Automation & connected channels (Unified Omnichannel Hub) */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">Omnichannel Sales Channels (Meta Business Suite)</h3>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                All three channels share one inventory engine, Monnify escrow checkout, and unified conversation inbox.
+              </p>
+            </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 self-start sm:self-center">
+              {[true, instagramConnected, facebookConnected].filter(Boolean).length} / 3 Channels Active
             </span>
           </div>
 
           <div className="flex items-center justify-between py-2 border-b border-gray-100">
             <div>
-              <div className="text-xs font-semibold text-gray-900">Enable Sales co-pilot</div>
-              <p className="text-[11px] text-gray-500">Only replies on selected channels when the away rule is met.</p>
+              <div className="text-xs font-semibold text-gray-900">Enable Omnichannel Sales Co-Pilot</div>
+              <p className="text-[11px] text-gray-500">
+                Automatically answers product inquiries, checks live stock, and sends Monnify NUBAN invoices across active channels.
+              </p>
             </div>
             <button
               onClick={() => setCopilotEnabled(!copilotEnabled)}
-              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
                 copilotEnabled ? "bg-[#0d5c3a]" : "bg-gray-200"
               }`}
             >
@@ -1386,38 +1581,160 @@ export function SettingsView({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-            {/* WhatsApp */}
-            <div className="bg-[#f0fdf4] border border-emerald-100 rounded-xl p-4">
-              <div className="text-xs font-bold text-gray-900">WhatsApp · +234 800 000 0142</div>
-              <div className="mt-2">
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-200/60 text-emerald-800">
-                  Connected · Enabled
-                </span>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+            {/* 1. WhatsApp Business Cloud API */}
+            <div className="bg-[#f0fdf4] border border-emerald-200 rounded-xl p-4 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>🟢</span> WhatsApp Business
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900">
+                    Connected
+                  </span>
+                </div>
+                <div className="text-[11px] text-gray-600 font-mono mt-1.5">
+                  {vendor.whatsappPhone || "+234 803 123 4567"}
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Cloud API + Status pHash photo matching &amp; dual-access vendor keywords.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between text-[11px]">
+                <span className="text-emerald-800 font-mono truncate">?src=wa_chat</span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard?.writeText(`https://caterlog.store/${vendor.slug}?src=wa_chat`);
+                    setChannelToast("✓ Copied WhatsApp attribution link (?src=wa_chat)");
+                    setTimeout(() => setChannelToast(null), 3000);
+                  }}
+                  className="font-semibold text-emerald-800 hover:underline cursor-pointer"
+                >
+                  Copy UTM Link
+                </button>
               </div>
             </div>
 
-            {/* Instagram */}
-            <div className="bg-[#fef2f2] border border-rose-100 rounded-xl p-4 flex items-center justify-between">
+            {/* 2. Instagram Direct (Meta Graph API) */}
+            <div
+              className={`border rounded-xl p-4 flex flex-col justify-between space-y-3 ${
+                instagramConnected
+                  ? "bg-pink-50/40 border-pink-200"
+                  : "bg-gray-50 border-gray-200"
+              }`}
+            >
               <div>
-                <div className="text-xs font-bold text-gray-900">Instagram · Nia Stores</div>
-                <div className="mt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>📸</span> Instagram Direct
+                  </span>
                   <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                      instagramConnected ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      instagramConnected
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-800"
                     }`}
                   >
-                    {instagramConnected ? "Connected · Enabled" : "Connection expired"}
+                    {instagramConnected ? "Connected" : "Disconnected"}
                   </span>
                 </div>
+                <div className="text-[11px] text-gray-700 font-semibold mt-1.5">
+                  {instagramHandleInput}
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Auto-replies to Instagram DMs, Story replies &amp; reel product inquiries.
+                </p>
               </div>
-              <button
-                onClick={() => setShowIgModal(true)}
-                className="px-3 py-1 bg-white border border-gray-200 hover:bg-gray-50 text-xs font-medium rounded-lg text-gray-700 shadow-xs"
-              >
-                {instagramConnected ? "Reconnected" : "Reconnect"}
-              </button>
+              <div className="pt-2 border-t border-pink-200/60 flex items-center justify-between gap-2 text-[11px]">
+                <button
+                  onClick={() => {
+                    navigator.clipboard?.writeText(`https://caterlog.store/${vendor.slug}?src=ig_dm`);
+                    setChannelToast("✓ Copied Instagram Bio/DM attribution link (?src=ig_dm)");
+                    setTimeout(() => setChannelToast(null), 3000);
+                  }}
+                  className="font-semibold text-pink-700 hover:underline cursor-pointer"
+                >
+                  Copy IG Link
+                </button>
+                <button
+                  onClick={() => setShowIgModal(true)}
+                  className="px-2.5 py-1 bg-white border border-gray-200 hover:bg-gray-50 text-xs font-semibold rounded-lg text-gray-700 shadow-2xs cursor-pointer"
+                >
+                  {instagramConnected ? "Configure" : "Connect IG"}
+                </button>
+              </div>
             </div>
+
+            {/* 3. Facebook Messenger (Page Inbox) */}
+            <div
+              className={`border rounded-xl p-4 flex flex-col justify-between space-y-3 ${
+                facebookConnected
+                  ? "bg-blue-50/40 border-blue-200"
+                  : "bg-gray-50 border-gray-200"
+              }`}
+            >
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>🔵</span> Facebook Messenger
+                  </span>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      facebookConnected
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {facebookConnected ? "Connected" : "Disconnected"}
+                  </span>
+                </div>
+                <div className="text-[11px] text-gray-700 font-semibold mt-1.5 truncate">
+                  {facebookPageInput}
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Handles Facebook Page inbox DMs &amp; Click-to-Messenger ad leads.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-blue-200/60 flex items-center justify-between gap-2 text-[11px]">
+                <button
+                  onClick={() => {
+                    navigator.clipboard?.writeText(`https://caterlog.store/${vendor.slug}?src=fb_msg`);
+                    setChannelToast("✓ Copied Facebook Page attribution link (?src=fb_msg)");
+                    setTimeout(() => setChannelToast(null), 3000);
+                  }}
+                  className="font-semibold text-blue-700 hover:underline cursor-pointer"
+                >
+                  Copy FB Link
+                </button>
+                <button
+                  onClick={() => setShowFbModal(true)}
+                  className="px-2.5 py-1 bg-white border border-gray-200 hover:bg-gray-50 text-xs font-semibold rounded-lg text-gray-700 shadow-2xs cursor-pointer"
+                >
+                  {facebookConnected ? "Configure" : "Connect Page"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Unified Meta Webhook & Attribution Strip */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="space-y-0.5">
+              <div className="font-bold text-gray-900 flex items-center gap-2">
+                <span>🔗 Unified Meta Graph Webhook:</span>
+                <code className="bg-white px-2 py-0.5 rounded border border-gray-200 font-mono text-[11px] text-emerald-800">
+                  POST /webhooks/meta
+                </code>
+              </div>
+              <p className="text-[11px] text-gray-500">
+                Single webhook receives WhatsApp, Instagram Direct (`object: instagram`), and Facebook Page (`object: page`) events and tags every order with its source channel for analytics.
+              </p>
+            </div>
+            <button
+              onClick={() => setActiveTab("conversations")}
+              className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 font-semibold rounded-lg text-xs shrink-0 cursor-pointer"
+            >
+              Open Unified Inbox →
+            </button>
           </div>
         </div>
 
@@ -1678,28 +1995,136 @@ export function SettingsView({
           </div>
         </div>
 
-        {/* Instagram Reconnect Modal */}
+        {/* Instagram Direct Configuration Modal */}
         {showIgModal && (
           <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-xl">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl text-xs">
               <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="font-bold text-gray-900 text-sm">Instagram Graph Reconnect</h3>
-                <button onClick={() => setShowIgModal(false)} className="text-gray-400 hover:text-gray-600">
+                <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                  <span>📸</span> Instagram Direct · Meta Graph API
+                </h3>
+                <button onClick={() => setShowIgModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
                   ✕
                 </button>
               </div>
-              <p className="text-xs text-gray-600">
-                Authorize Caterlog to read messages and send live inventory responses on behalf of @niastores.
+              <p className="text-gray-600 leading-relaxed">
+                Authorize Caterlog via Meta Business Suite (`instagram_manage_messages`) to read Instagram DMs, Story replies, and send live inventory cards with Monnify Dynamic NUBAN checkout.
               </p>
-              <button
-                onClick={() => {
-                  setInstagramConnected(true);
-                  setShowIgModal(false);
-                }}
-                className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold text-xs rounded-xl shadow-xs"
-              >
-                Authenticate with Instagram
-              </button>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 mb-1">
+                  Instagram Professional Handle
+                </label>
+                <input
+                  type="text"
+                  value={instagramHandleInput}
+                  onChange={(e) => setInstagramHandleInput(e.target.value)}
+                  placeholder="@yourstore"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-pink-600"
+                />
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1.5">
+                <div className="font-semibold text-gray-800 text-[11px]">Smart Bio &amp; Story Attribution Link</div>
+                <div className="font-mono text-[11px] text-pink-700 break-all">
+                  https://caterlog.store/{vendor.slug}?src=ig_dm
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-2 gap-2">
+                {instagramConnected && (
+                  <button
+                    onClick={() => {
+                      setInstagramConnected(false);
+                      void handleSaveSocialChannel({
+                        instagramHandle: instagramHandleInput,
+                        instagramConnected: false,
+                      });
+                      setShowIgModal(false);
+                    }}
+                    className="px-3 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 font-semibold rounded-xl cursor-pointer"
+                  >
+                    Disconnect
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setInstagramConnected(true);
+                    void handleSaveSocialChannel({
+                      instagramHandle: instagramHandleInput,
+                      instagramConnected: true,
+                    });
+                    setShowIgModal(false);
+                  }}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-xl shadow-xs cursor-pointer"
+                >
+                  {instagramConnected ? "Save & Sync Instagram" : "Authenticate with Meta (Instagram)"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Facebook Messenger Configuration Modal */}
+        {showFbModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl text-xs">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                  <span>🔵</span> Facebook Messenger · Page Inbox
+                </h3>
+                <button onClick={() => setShowFbModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                  ✕
+                </button>
+              </div>
+              <p className="text-gray-600 leading-relaxed">
+                Connect your Facebook Business Page (`pages_messaging`) so Click-to-Messenger Ads and Facebook Page DMs flow into Caterlog&apos;s unified co-pilot and analytics.
+              </p>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 mb-1">
+                  Facebook Business Page Name
+                </label>
+                <input
+                  type="text"
+                  value={facebookPageInput}
+                  onChange={(e) => setFacebookPageInput(e.target.value)}
+                  placeholder="Your Official Store Page"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-blue-600"
+                />
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1.5">
+                <div className="font-semibold text-gray-800 text-[11px]">Click-to-Messenger &amp; Ad Attribution Link</div>
+                <div className="font-mono text-[11px] text-blue-700 break-all">
+                  https://caterlog.store/{vendor.slug}?src=fb_msg
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-2 gap-2">
+                {facebookConnected && (
+                  <button
+                    onClick={() => {
+                      setFacebookConnected(false);
+                      void handleSaveSocialChannel({
+                        facebookPageName: facebookPageInput,
+                        facebookConnected: false,
+                      });
+                      setShowFbModal(false);
+                    }}
+                    className="px-3 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 font-semibold rounded-xl cursor-pointer"
+                  >
+                    Disconnect
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setFacebookConnected(true);
+                    void handleSaveSocialChannel({
+                      facebookPageName: facebookPageInput,
+                      facebookConnected: true,
+                    });
+                    setShowFbModal(false);
+                  }}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-xs cursor-pointer"
+                >
+                  {facebookConnected ? "Save & Sync Facebook Page" : "Authorize Facebook Business Page"}
+                </button>
+              </div>
             </div>
           </div>
         )}

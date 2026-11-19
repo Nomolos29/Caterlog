@@ -4,16 +4,26 @@ import React, { useState, useEffect } from "react";
 import type {
   SupplierProfile as DbSupplierProfile,
   ResellerMirror,
+  PlatformRole,
 } from "@/lib/types";
+import { isResellerRole, isVendorRole } from "@/lib/types";
 import { FilterIcon, CheckIcon } from "../icons";
 import { NIGERIAN_STATES } from "./market-boost-view";
+import { getLgasForState, isTerritoryDeliverable } from "@caterlog/shared";
 
 interface NetworkViewProps {
-  initialTab?: "my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers";
-  workspaceRole?: "reseller" | "supplier";
+  initialTab?:
+    | "my-suppliers"
+    | "find-suppliers"
+    | "supplier-catalog"
+    | "my-resellers";
+  workspaceRole?: PlatformRole;
   suppliers?: DbSupplierProfile[];
   resellerMirrors?: ResellerMirror[];
-  onMirrorSupplier?: (supplierIdOrSlug: string, productSkus?: string[]) => Promise<void>;
+  onMirrorSupplier?: (
+    supplierIdOrSlug: string,
+    productSkus?: string[],
+  ) => Promise<void>;
   onMirrorProducts?: (selectedSkus?: string[]) => void;
 }
 
@@ -41,6 +51,7 @@ interface SupplierProfile {
   shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
   allowInterstate: boolean;
   coveredStates: string[];
+  coveredLgas?: string[];
   warehouseAddress: string;
   phone: string;
   whatsapp: string;
@@ -73,21 +84,26 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
     shippingScope: "LOCAL_STATE",
     allowInterstate: false,
     coveredStates: ["Lagos"],
-    warehouseAddress: "Warehouse 3B, International Trade Fair Complex, Badagry Expressway, Lagos",
+    warehouseAddress:
+      "Warehouse 3B, International Trade Fair Complex, Badagry Expressway, Lagos",
     phone: "+234 802 888 1920",
     whatsapp: "2348028881920",
     rating: 4.9,
     totalFulfilled: 1420,
     subAccountCode: "SUB-AW-001",
-    leadTime: "Same day dispatch if ordered before 1:00 PM; 24h pickup at Ikeja hub",
+    leadTime:
+      "Same day dispatch if ordered before 1:00 PM; 24h pickup at Ikeja hub",
     cutoffTime: "1:00 PM WAT daily",
     wholesaleTerms: {
       moqDropship: 1,
       moqWholesale: 5,
-      settlementTerms: "Instant escrow split via Monnify upon customer payment confirmation (0 net days)",
-      returnWindow: "48-hour return window for transit damage with unboxing video/photo proof",
+      settlementTerms:
+        "Instant escrow split via Monnify upon customer payment confirmation (0 net days)",
+      returnWindow:
+        "48-hour return window for transit damage with unboxing video/photo proof",
       suggestedMargin: "25% – 35% gross retail margin",
-      inventorySync: "Real-time webhook inventory reservations with automatic 15-minute hold TTL",
+      inventorySync:
+        "Real-time webhook inventory reservations with automatic 15-minute hold TTL",
     },
     products: [
       {
@@ -98,7 +114,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 8000,
         suggestedRetail: 10000,
         stock: 42,
-        imageUrl: "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
       {
@@ -109,7 +126,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 6000,
         suggestedRetail: 7500,
         stock: 28,
-        imageUrl: "https://images.unsplash.com/photo-1544816155-12df9643f363?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1544816155-12df9643f363?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
       {
@@ -120,7 +138,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 3000,
         suggestedRetail: 4000,
         stock: 62,
-        imageUrl: "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
       {
@@ -131,7 +150,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 48000,
         suggestedRetail: 65000,
         stock: 15,
-        imageUrl: "https://images.unsplash.com/photo-1585659722983-3a675dabf23d?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1585659722983-3a675dabf23d?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
       {
@@ -142,7 +162,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 14000,
         suggestedRetail: 19500,
         stock: 34,
-        imageUrl: "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
       {
@@ -153,7 +174,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 9500,
         suggestedRetail: 13500,
         stock: 50,
-        imageUrl: "https://images.unsplash.com/photo-1590794056226-79ef3a8147e1?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1590794056226-79ef3a8147e1?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
     ],
@@ -176,7 +198,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
     rating: 4.8,
     totalFulfilled: 890,
     subAccountCode: "SUB-MK-002",
-    leadTime: "Next-day dispatch for all Mainland & Island deliveries; 48-72h interstate haulage",
+    leadTime:
+      "Next-day dispatch for all Mainland & Island deliveries; 48-72h interstate haulage",
     cutoffTime: "3:00 PM WAT daily",
     wholesaleTerms: {
       moqDropship: 1,
@@ -195,7 +218,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 18000,
         suggestedRetail: 25000,
         stock: 20,
-        imageUrl: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1595428774223-ef52624120d2?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
       {
@@ -206,7 +230,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 7500,
         suggestedRetail: 11000,
         stock: 45,
-        imageUrl: "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
     ],
@@ -248,7 +273,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 12000,
         suggestedRetail: 17500,
         stock: 35,
-        imageUrl: "https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
       {
@@ -259,7 +285,8 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
         wholesaleCost: 8500,
         suggestedRetail: 12000,
         stock: 50,
-        imageUrl: "https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=500&auto=format&fit=crop&q=60",
+        imageUrl:
+          "https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=500&auto=format&fit=crop&q=60",
         moq: 1,
       },
     ],
@@ -267,17 +294,23 @@ const SUPPLIERS_DATA: SupplierProfile[] = [
 ];
 
 export function NetworkView({
-  initialTab = "my-suppliers",
-  workspaceRole = "reseller",
+  initialTab,
+  workspaceRole = "growth",
   suppliers: dbSuppliers = [],
   resellerMirrors = [],
   onMirrorSupplier,
   onMirrorProducts,
 }: NetworkViewProps) {
+  const isVendor = isVendorRole(workspaceRole);
+  const isReseller = isResellerRole(workspaceRole);
   // Connected suppliers list & wholesale directory
-  const [connectedSuppliers, setConnectedSuppliers] = useState<SupplierProfile[]>([SUPPLIERS_DATA[0]]);
-  const [directorySuppliers, setDirectorySuppliers] = useState<SupplierProfile[]>(SUPPLIERS_DATA);
-  const [selectedSupplier, setSelectedSupplier] = useState<SupplierProfile | null>(null);
+  const [connectedSuppliers, setConnectedSuppliers] = useState<
+    SupplierProfile[]
+  >([SUPPLIERS_DATA[0]]);
+  const [directorySuppliers, setDirectorySuppliers] =
+    useState<SupplierProfile[]>(SUPPLIERS_DATA);
+  const [selectedSupplier, setSelectedSupplier] =
+    useState<SupplierProfile | null>(null);
 
   useEffect(() => {
     if (!dbSuppliers || dbSuppliers.length === 0) return;
@@ -292,7 +325,10 @@ export function NetworkView({
       state: sup.state || "Lagos",
       shippingScope: sup.shippingScope || "LOCAL_STATE",
       allowInterstate: sup.allowInterstate ?? false,
-      coveredStates: sup.coveredStates && sup.coveredStates.length > 0 ? sup.coveredStates : [sup.state || "Lagos"],
+      coveredStates:
+        sup.coveredStates && sup.coveredStates.length > 0
+          ? sup.coveredStates
+          : [sup.state || "Lagos"],
       warehouseAddress: sup.warehouseAddress || sup.location,
       phone: sup.phone,
       whatsapp: sup.whatsapp,
@@ -304,16 +340,25 @@ export function NetworkView({
       wholesaleTerms: {
         moqDropship: 1,
         moqWholesale: 4,
-        settlementTerms: sup.wholesaleTerms?.[0] || "Instant escrow split via Monnify upon customer payment",
-        returnWindow: sup.wholesaleTerms?.[1] || "48-hour return window for transit damage",
-        suggestedMargin: sup.wholesaleTerms?.[2] || "25% – 35% gross retail margin",
-        inventorySync: "Real-time webhook inventory reservations with automatic 15-minute hold TTL",
+        settlementTerms:
+          sup.wholesaleTerms?.[0] ||
+          "Instant escrow split via Monnify upon customer payment",
+        returnWindow:
+          sup.wholesaleTerms?.[1] || "48-hour return window for transit damage",
+        suggestedMargin:
+          sup.wholesaleTerms?.[2] || "25% – 35% gross retail margin",
+        inventorySync:
+          "Real-time webhook inventory reservations with automatic 15-minute hold TTL",
       },
       products: (sup.catalogProducts || []).map((cp, idx) => {
         const raw = cp as unknown as Record<string, unknown>;
-        const wholesaleCost = Number(cp.wholesalePriceNaira ?? raw.wholesaleCost ?? 0);
+        const wholesaleCost = Number(
+          cp.wholesalePriceNaira ?? raw.wholesaleCost ?? 0,
+        );
         const suggestedRetail = Number(
-          cp.suggestedRetailNaira ?? raw.suggestedRetail ?? (wholesaleCost > 0 ? Math.round(wholesaleCost * 1.25) : 0)
+          cp.suggestedRetailNaira ??
+            raw.suggestedRetail ??
+            (wholesaleCost > 0 ? Math.round(wholesaleCost * 1.25) : 0),
         );
         return {
           id: `${sup.id}-p-${idx}`,
@@ -332,10 +377,10 @@ export function NetworkView({
     }));
     setDirectorySuppliers(mapped);
     const mirroredIds = new Set(
-      resellerMirrors.flatMap((m) => [m.supplierId, m.supplierSlug || ""])
+      resellerMirrors.flatMap((m) => [m.supplierId, m.supplierSlug || ""]),
     );
     const connected = mapped.filter(
-      (s) => mirroredIds.has(s.id) || mirroredIds.has(s.slug)
+      (s) => mirroredIds.has(s.id) || mirroredIds.has(s.slug),
     );
     if (connected.length > 0) {
       setConnectedSuppliers(connected);
@@ -344,16 +389,18 @@ export function NetworkView({
     }
   }, [dbSuppliers, resellerMirrors]);
 
-  // Default to my-suppliers
-  const [activeTab, setActiveTab] = useState<"my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers">(
-    initialTab
-  );
+  // Default tab based on role
+  const [activeTab, setActiveTab] = useState<
+    "my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers"
+  >(initialTab || (isVendor ? "my-resellers" : "my-suppliers"));
 
   useEffect(() => {
-    if (workspaceRole === "reseller" && activeTab === "my-resellers") {
+    if (isReseller && activeTab === "my-resellers") {
       setActiveTab("my-suppliers");
+    } else if (isVendor && (activeTab === "my-suppliers" || activeTab === "find-suppliers")) {
+      setActiveTab("my-resellers");
     }
-  }, [workspaceRole, activeTab]);
+  }, [isReseller, isVendor, activeTab]);
 
   // Supplier Catalog selection
   const [selectedProductSkus, setSelectedProductSkus] = useState<string[]>([]);
@@ -370,37 +417,56 @@ export function NetworkView({
 
   // Reseller operating location & Geographic visibility filters
   const [resellerState, setResellerState] = useState("Lagos");
+  const [resellerLga, setResellerLga] = useState("All LGAs");
   const [filterDeliverableOnly, setFilterDeliverableOnly] = useState(false);
-  const [incompatibleModalSup, setIncompatibleModalSup] = useState<SupplierProfile | null>(null);
+  const [incompatibleModalSup, setIncompatibleModalSup] =
+    useState<SupplierProfile | null>(null);
 
-  const isSupplierDeliverable = (sup: SupplierProfile, targetState: string = resellerState) => {
-    if (sup.shippingScope === "NATIONWIDE") return true;
-    if (sup.shippingScope === "LOCAL_STATE") {
-      return sup.state.toLowerCase() === targetState.toLowerCase();
-    }
-    if (sup.shippingScope === "SELECTED_STATES") {
-      return sup.coveredStates.some(
-        (st) =>
-          st.toLowerCase() === targetState.toLowerCase() ||
-          st.toLowerCase().includes(targetState.toLowerCase())
-      );
-    }
-    return false;
+  const checkSupplierDeliverable = (
+    sup: SupplierProfile,
+    targetState: string = resellerState,
+    targetLga: string = resellerLga
+  ) => {
+    return isTerritoryDeliverable(
+      {
+        shippingScope: sup.shippingScope,
+        baseState: sup.state,
+        state: sup.state,
+        coveredStates: sup.coveredStates,
+        coveredLgas: sup.coveredLgas,
+      },
+      {
+        state: targetState,
+        lga: targetLga === "All LGAs" ? undefined : targetLga,
+      }
+    );
+  };
+
+  const isSupplierDeliverable = (
+    sup: SupplierProfile,
+    targetState: string = resellerState,
+    targetLga: string = resellerLga,
+  ) => {
+    return checkSupplierDeliverable(sup, targetState, targetLga).deliverable;
   };
 
   const getShippingBadge = (sup: SupplierProfile) => {
+    const lgaNote =
+      sup.coveredLgas && sup.coveredLgas.length > 0
+        ? ` (${sup.coveredLgas.length} LGAs)`
+        : "";
     if (sup.shippingScope === "LOCAL_STATE") {
       return {
-        label: `📍 ${sup.state} Only (Local)`,
+        label: `📍 ${sup.state}${lgaNote} (Local)`,
         color: "bg-amber-50 text-amber-900 border-amber-200",
-        interstate: "🔒 Interstate Disabled",
+        interstate: "🔒 Local Territory Only",
       };
     }
     if (sup.shippingScope === "SELECTED_STATES") {
       return {
-        label: `🗺️ ${sup.coveredStates.length} States: ${sup.coveredStates.slice(0, 3).join(", ")}${
-          sup.coveredStates.length > 3 ? "..." : ""
-        }`,
+        label: `🗺️ ${sup.coveredStates.length} States: ${sup.coveredStates.slice(0, 2).join(", ")}${
+          sup.coveredStates.length > 2 ? "..." : ""
+        }${lgaNote}`,
         color: "bg-blue-50 text-blue-900 border-blue-200",
         interstate: "Regional Delivery",
       };
@@ -419,7 +485,9 @@ export function NetworkView({
   // Resellers permission states
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteSent, setInviteSent] = useState(false);
-  const [pendingInvites, setPendingInvites] = useState<Array<{ email: string; sentAt: string }>>([]);
+  const [pendingInvites, setPendingInvites] = useState<
+    Array<{ email: string; sentAt: string }>
+  >([]);
 
   const toggleSelectSku = (sku: string) => {
     if (selectedProductSkus.includes(sku)) {
@@ -433,9 +501,13 @@ export function NetworkView({
     const allSkus = filteredProducts.map((p) => p.sku);
     const allSelected = allSkus.every((s) => selectedProductSkus.includes(s));
     if (allSelected) {
-      setSelectedProductSkus(selectedProductSkus.filter((s) => !allSkus.includes(s)));
+      setSelectedProductSkus(
+        selectedProductSkus.filter((s) => !allSkus.includes(s)),
+      );
     } else {
-      setSelectedProductSkus(Array.from(new Set([...selectedProductSkus, ...allSkus])));
+      setSelectedProductSkus(
+        Array.from(new Set([...selectedProductSkus, ...allSkus])),
+      );
     }
   };
 
@@ -444,7 +516,8 @@ export function NetworkView({
       setMirrorModal({
         type: "warning",
         title: "No Products Selected",
-        message: "Select at least one supplier product before publishing to your store inventory.",
+        message:
+          "Select at least one supplier product before publishing to your store inventory.",
       });
       return;
     }
@@ -470,7 +543,10 @@ export function NetworkView({
       setMirrorModal({
         type: "error",
         title: "Mirroring Failed",
-        message: err instanceof Error ? err.message : "Could not mirror selected supplier products.",
+        message:
+          err instanceof Error
+            ? err.message
+            : "Could not mirror selected supplier products.",
       });
     } finally {
       setMirroring(false);
@@ -480,7 +556,7 @@ export function NetworkView({
   const handleViewSupplierCatalog = (sup: SupplierProfile) => {
     setSelectedSupplier(sup);
     setSupplierMsgText(
-      `Hello ${sup.name}, we have mirrored your catalog products and would like to confirm fulfillment dispatch turnaround for Lagos deliveries.`
+      `Hello ${sup.name}, we have mirrored your catalog products and would like to confirm fulfillment dispatch turnaround for Lagos deliveries.`,
     );
     setActiveTab("supplier-catalog");
   };
@@ -491,7 +567,8 @@ export function NetworkView({
         const matchesSearch =
           p.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
           p.sku.toLowerCase().includes(catalogSearch.toLowerCase());
-        const matchesCat = catalogCategory === "ALL" || p.category === catalogCategory;
+        const matchesCat =
+          catalogCategory === "ALL" || p.category === catalogCategory;
         return matchesSearch && matchesCat;
       })
     : [];
@@ -520,27 +597,61 @@ export function NetworkView({
                   mirrorModal.type === "success"
                     ? "bg-emerald-100 text-emerald-700"
                     : mirrorModal.type === "error"
-                    ? "bg-rose-100 text-rose-700"
-                    : "bg-amber-100 text-amber-700"
+                      ? "bg-rose-100 text-rose-700"
+                      : "bg-amber-100 text-amber-700"
                 }`}
               >
                 {mirrorModal.type === "success" ? (
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M5 13l4 4L19 7"
+                    />
                   </svg>
                 ) : mirrorModal.type === "error" ? (
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                    />
                   </svg>
                 ) : (
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+                    />
                   </svg>
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-bold text-gray-900">{mirrorModal.title}</h3>
-                <p className="text-xs text-gray-600 mt-1 leading-relaxed">{mirrorModal.message}</p>
+                <h3 className="text-sm font-bold text-gray-900">
+                  {mirrorModal.title}
+                </h3>
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                  {mirrorModal.message}
+                </p>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-1">
@@ -557,7 +668,12 @@ export function NetworkView({
                   const skus = mirrorModal.pendingMirroredSkus;
                   const isSuccess = mirrorModal.type === "success";
                   setMirrorModal(null);
-                  if (isSuccess && skus && skus.length > 0 && onMirrorProducts) {
+                  if (
+                    isSuccess &&
+                    skus &&
+                    skus.length > 0 &&
+                    onMirrorProducts
+                  ) {
                     onMirrorProducts(skus);
                   }
                 }}
@@ -565,11 +681,13 @@ export function NetworkView({
                   mirrorModal.type === "success"
                     ? "bg-[#0d5c3a] hover:bg-[#0b4b2f]"
                     : mirrorModal.type === "error"
-                    ? "bg-rose-600 hover:bg-rose-700"
-                    : "bg-amber-600 hover:bg-amber-700"
+                      ? "bg-rose-600 hover:bg-rose-700"
+                      : "bg-amber-600 hover:bg-amber-700"
                 }`}
               >
-                {mirrorModal.type === "success" ? "Set Retail Price →" : "Got it"}
+                {mirrorModal.type === "success"
+                  ? "Set Retail Price →"
+                  : "Got it"}
               </button>
             </div>
           </div>
@@ -579,9 +697,12 @@ export function NetworkView({
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">Supplier Network</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+            Supplier Network
+          </h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-            Partner with verified Nigerian wholesale importers, mirror live product stock, and split payments via Monnify.
+            Partner with verified Nigerian wholesale importers, mirror live
+            product stock, and split payments via Monnify.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -591,14 +712,31 @@ export function NetworkView({
               disabled={mirroring}
               className="bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-2"
             >
-              <span>{mirroring ? "Mirroring..." : `Publish (${selectedProductSkus.length}) to My Store`}</span>
+              <span>
+                {mirroring
+                  ? "Mirroring..."
+                  : `Publish (${selectedProductSkus.length}) to My Store`}
+              </span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Main Tab Strip: My Suppliers FIRST! Then Find Suppliers, then Catalog, then Resellers */}
+      {/* Main Tab Strip: Adapts to Vendor vs Reseller */}
       <div className="flex border-b border-gray-200 text-xs font-semibold gap-6 overflow-x-auto pb-0.5">
+        {isVendor && (
+          <button
+            onClick={() => setActiveTab("my-resellers")}
+            className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+              activeTab === "my-resellers"
+                ? "border-emerald-600 text-emerald-700 font-bold"
+                : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
+            }`}
+          >
+            My Resellers (Distribution)
+          </button>
+        )}
+
         <button
           onClick={() => setActiveTab("my-suppliers")}
           className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
@@ -629,19 +767,6 @@ export function NetworkView({
             {selectedSupplier.name} · All Products
           </button>
         )}
-
-        {workspaceRole === "supplier" && (
-          <button
-            onClick={() => setActiveTab("my-resellers")}
-            className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
-              activeTab === "my-resellers"
-                ? "border-emerald-600 text-emerald-700 font-bold"
-                : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
-            }`}
-          >
-            My Resellers (Distribution)
-          </button>
-        )}
       </div>
 
       {/* ---------------------------------------------------------------------- */}
@@ -652,9 +777,13 @@ export function NetworkView({
           {connectedSuppliers.length === 0 ? (
             <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
               <div className="text-4xl">🤝</div>
-              <h3 className="text-base font-bold text-gray-900">No Connected Suppliers Yet</h3>
+              <h3 className="text-base font-bold text-gray-900">
+                No Connected Suppliers Yet
+              </h3>
               <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                Explore the verified supplier directory to mirror products and start selling kitchenware, electronics, and home goods with zero inventory capital.
+                Explore the verified supplier directory to mirror products and
+                start selling kitchenware, electronics, and home goods with zero
+                inventory capital.
               </p>
               <button
                 onClick={() => setActiveTab("find-suppliers")}
@@ -678,21 +807,29 @@ export function NetworkView({
                       </div>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h2 className="text-lg font-bold text-gray-900">{sup.name}</h2>
+                          <h2 className="text-lg font-bold text-gray-900">
+                            {sup.name}
+                          </h2>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
                             <CheckIcon className="w-3 h-3" />
                             <span>Verified Importer</span>
                           </span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getShippingBadge(sup).color}`}>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getShippingBadge(sup).color}`}
+                          >
                             {getShippingBadge(sup).label}
                           </span>
                         </div>
                         <div className="text-xs text-gray-500 mt-1 flex flex-wrap items-center gap-3">
-                          <span className="font-mono text-gray-700 font-semibold">{sup.cacNumber}</span>
+                          <span className="font-mono text-gray-700 font-semibold">
+                            {sup.cacNumber}
+                          </span>
                           <span>•</span>
                           <span>{sup.category}</span>
                           <span>•</span>
-                          <span className="text-emerald-700 font-semibold">★ {sup.rating} ({sup.totalFulfilled} fulfilled)</span>
+                          <span className="text-emerald-700 font-semibold">
+                            ★ {sup.rating} ({sup.totalFulfilled} fulfilled)
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -700,7 +837,7 @@ export function NetworkView({
                     <div className="flex items-center gap-2 self-start sm:self-center">
                       <a
                         href={`https://wa.me/${sup.whatsapp}?text=${encodeURIComponent(
-                          `Hello ${sup.name}, reaching out from Nia Stores regarding our wholesale partnership on Caterlog.`
+                          `Hello ${sup.name}, reaching out from Nia Stores regarding our wholesale partnership on Caterlog.`,
                         )}`}
                         target="_blank"
                         rel="noreferrer"
@@ -728,34 +865,60 @@ export function NetworkView({
                       </div>
                       <div className="space-y-2 text-gray-600">
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Warehouse Location:</span>
-                          <span className="font-medium text-gray-900 text-right max-w-[220px]">{sup.warehouseAddress}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Shipping Reach:</span>
-                          <span className="font-semibold text-gray-900 text-right max-w-[220px]">{getShippingBadge(sup).label}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Interstate Mirroring:</span>
-                          <span className={`font-semibold ${sup.allowInterstate ? "text-emerald-700" : "text-amber-800"}`}>
-                            {sup.allowInterstate ? "Supported ✅" : "Blocked 🔒 (Local only)"}
+                          <span className="text-gray-500">
+                            Warehouse Location:
+                          </span>
+                          <span className="font-medium text-gray-900 text-right max-w-[220px]">
+                            {sup.warehouseAddress}
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Dispatch Cutoff:</span>
-                          <span className="font-semibold text-gray-900">{sup.cutoffTime}</span>
+                          <span className="text-gray-500">Shipping Reach:</span>
+                          <span className="font-semibold text-gray-900 text-right max-w-[220px]">
+                            {getShippingBadge(sup).label}
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Fulfillment Lead Time:</span>
-                          <span className="font-medium text-gray-900 text-right max-w-[220px]">{sup.leadTime}</span>
+                          <span className="text-gray-500">
+                            Interstate Mirroring:
+                          </span>
+                          <span
+                            className={`font-semibold ${sup.allowInterstate ? "text-emerald-700" : "text-amber-800"}`}
+                          >
+                            {sup.allowInterstate
+                              ? "Supported ✅"
+                              : "Blocked 🔒 (Local only)"}
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Monnify Sub-Account:</span>
-                          <span className="font-mono font-bold text-emerald-800">{sup.subAccountCode} (Escrow Route)</span>
+                          <span className="text-gray-500">
+                            Dispatch Cutoff:
+                          </span>
+                          <span className="font-semibold text-gray-900">
+                            {sup.cutoffTime}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">
+                            Fulfillment Lead Time:
+                          </span>
+                          <span className="font-medium text-gray-900 text-right max-w-[220px]">
+                            {sup.leadTime}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">
+                            Monnify Sub-Account:
+                          </span>
+                          <span className="font-mono font-bold text-emerald-800">
+                            {sup.subAccountCode} (Escrow Route)
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-500">Contact Line:</span>
-                          <span className="font-mono text-gray-800">{sup.phone}</span>
+                          <span className="font-mono text-gray-800">
+                            {sup.phone}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -769,20 +932,31 @@ export function NetworkView({
                       <div className="space-y-2 text-gray-700">
                         <div className="flex justify-between">
                           <span className="text-gray-500">Dropship MOQ:</span>
-                          <span className="font-bold text-emerald-950">{sup.wholesaleTerms.moqDropship} unit (No pre-funding)</span>
+                          <span className="font-bold text-emerald-950">
+                            {sup.wholesaleTerms.moqDropship} unit (No
+                            pre-funding)
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Settlement Terms:</span>
+                          <span className="text-gray-500">
+                            Settlement Terms:
+                          </span>
                           <span className="font-medium text-emerald-950 text-right max-w-[220px]">
                             {sup.wholesaleTerms.settlementTerms}
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Suggested Retail Margin:</span>
-                          <span className="font-bold text-emerald-800">{sup.wholesaleTerms.suggestedMargin}</span>
+                          <span className="text-gray-500">
+                            Suggested Retail Margin:
+                          </span>
+                          <span className="font-bold text-emerald-800">
+                            {sup.wholesaleTerms.suggestedMargin}
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Damages & Returns:</span>
+                          <span className="text-gray-500">
+                            Damages & Returns:
+                          </span>
                           <span className="font-medium text-gray-800 text-right max-w-[220px]">
                             {sup.wholesaleTerms.returnWindow}
                           </span>
@@ -800,7 +974,9 @@ export function NetworkView({
                   {/* Quick Catalog Preview Bar */}
                   <div className="pt-2">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold text-gray-700">Popular Catalog Items</span>
+                      <span className="text-xs font-bold text-gray-700">
+                        Popular Catalog Items
+                      </span>
                       <button
                         onClick={() => handleViewSupplierCatalog(sup)}
                         className="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer"
@@ -814,13 +990,24 @@ export function NetworkView({
                           key={prod.id}
                           className="p-3 rounded-2xl border border-gray-100 bg-gray-50/50 flex items-center gap-3"
                         >
-                          <img src={prod.imageUrl} alt={prod.name} className="w-12 h-12 rounded-xl object-cover shrink-0" />
+                          <img
+                            src={prod.imageUrl}
+                            alt={prod.name}
+                            className="w-12 h-12 rounded-xl object-cover shrink-0"
+                          />
                           <div className="min-w-0 flex-1">
-                            <div className="font-semibold text-xs text-gray-900 truncate">{prod.name}</div>
-                            <div className="text-[11px] text-gray-500 mt-0.5">
-                              Wholesale: <span className="font-bold text-emerald-800">₦{prod.wholesaleCost?.toLocaleString()}</span>
+                            <div className="font-semibold text-xs text-gray-900 truncate">
+                              {prod.name}
                             </div>
-                            <div className="text-[10px] text-gray-400">Stock: {prod.stock} units</div>
+                            <div className="text-[11px] text-gray-500 mt-0.5">
+                              Wholesale:{" "}
+                              <span className="font-bold text-emerald-800">
+                                ₦{prod.wholesaleCost?.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-gray-400">
+                              Stock: {prod.stock} units
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -836,15 +1023,18 @@ export function NetworkView({
       {/* ---------------------------------------------------------------------- */}
       {/* TAB 2: SUPPLIER CATALOG (View All Products from a Supplier)             */}
       {/* ---------------------------------------------------------------------- */}
-      {activeTab === "supplier-catalog" && (
-        !selectedSupplier ? (
+      {activeTab === "supplier-catalog" &&
+        (!selectedSupplier ? (
           <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
             <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl mx-auto">
               📦
             </div>
-            <h3 className="text-base font-bold text-gray-900">No Supplier Selected</h3>
+            <h3 className="text-base font-bold text-gray-900">
+              No Supplier Selected
+            </h3>
             <p className="text-xs text-gray-500 max-w-sm mx-auto">
-              Select a connected wholesale partner or browse the verified supplier directory to inspect and mirror product catalogs.
+              Select a connected wholesale partner or browse the verified
+              supplier directory to inspect and mirror product catalogs.
             </p>
             <button
               onClick={() => setActiveTab("find-suppliers")}
@@ -854,210 +1044,252 @@ export function NetworkView({
             </button>
           </div>
         ) : (
-        <div className="space-y-6">
-          {/* Back button & Supplier Context Banner */}
-          <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <button
-                onClick={() => setActiveTab("my-suppliers")}
-                className="text-xs font-semibold text-gray-500 hover:text-gray-900 mb-2 flex items-center gap-1 cursor-pointer"
-              >
-                ← Back to My Suppliers
-              </button>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-lg font-bold text-gray-900">{selectedSupplier.name} · Wholesale Catalog</h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                  {selectedSupplier.products.length} Products
-                </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getShippingBadge(selectedSupplier).color}`}>
-                  {getShippingBadge(selectedSupplier).label}
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Warehouse: {selectedSupplier.warehouseAddress} · Lead time: {selectedSupplier.leadTime}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setSupplierMsgModal(true)}
-                className="px-3.5 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
-              >
-                Message Supplier
-              </button>
-              {!isSupplierDeliverable(selectedSupplier) ? (
+          <div className="space-y-6">
+            {/* Back button & Supplier Context Banner */}
+            <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
                 <button
-                  onClick={() => setIncompatibleModalSup(selectedSupplier)}
-                  className="bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-950 text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  onClick={() => setActiveTab("my-suppliers")}
+                  className="text-xs font-semibold text-gray-500 hover:text-gray-900 mb-2 flex items-center gap-1 cursor-pointer"
                 >
-                  <span>🔒</span>
-                  <span>Mirroring Restricted ({resellerState})</span>
+                  ← Back to My Suppliers
                 </button>
-              ) : (
-                <button
-                  onClick={handleMirrorSelected}
-                  className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
-                >
-                  Mirror Selected ({selectedProductSkus.length})
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Interstate Restriction Notice if outside delivery zone */}
-          {!isSupplierDeliverable(selectedSupplier) && (
-            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-              <div className="flex items-start gap-3">
-                <span className="text-xl">🔒</span>
-                <div>
-                  <div className="font-bold flex items-center gap-2">
-                    <span>Geographic Mirroring Guardrail Active</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-200 text-amber-900">
-                      Out of Delivery Scope
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-amber-900 mt-1 leading-relaxed">
-                    {selectedSupplier.name} only fulfills deliveries within <strong>{selectedSupplier.shippingScope === "LOCAL_STATE" ? selectedSupplier.state : selectedSupplier.coveredStates.join(", ")}</strong> and has disabled interstate fulfillment. Because your store operates in <strong>{resellerState}</strong>, product mirroring is restricted to protect your brand from failed delivery fulfillment disputes.
-                  </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-lg font-bold text-gray-900">
+                    {selectedSupplier.name} · Wholesale Catalog
+                  </h2>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    {selectedSupplier.products.length} Products
+                  </span>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getShippingBadge(selectedSupplier).color}`}
+                  >
+                    {getShippingBadge(selectedSupplier).label}
+                  </span>
                 </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Warehouse: {selectedSupplier.warehouseAddress} · Lead time:{" "}
+                  {selectedSupplier.leadTime}
+                </p>
               </div>
-              <button
-                onClick={() => setSupplierMsgModal(true)}
-                className="px-3.5 py-2 bg-amber-900 hover:bg-amber-950 text-white rounded-xl font-semibold text-xs whitespace-nowrap cursor-pointer transition-all shrink-0"
-              >
-                Inquire on WhatsApp Desk →
-              </button>
-            </div>
-          )}
 
-          {/* Search & Category Filter Bar */}
-          <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            <div className="relative flex-1 max-w-sm">
-              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-gray-400 text-xs">🔍</span>
-              <input
-                type="text"
-                placeholder="Search products by title or SKU..."
-                value={catalogSearch}
-                onChange={(e) => setCatalogSearch(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 overflow-x-auto">
-              <button
-                onClick={() => setCatalogCategory("ALL")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                  catalogCategory === "ALL"
-                    ? "bg-emerald-600 text-white shadow-2xs"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                All Categories
-              </button>
-              {uniqueCategories.map((cat) => (
+              <div className="flex items-center gap-2">
                 <button
-                  key={cat}
-                  onClick={() => setCatalogCategory(cat)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                    catalogCategory === cat
+                  onClick={() => setSupplierMsgModal(true)}
+                  className="px-3.5 py-2 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+                >
+                  Message Supplier
+                </button>
+                {!isSupplierDeliverable(selectedSupplier) ? (
+                  <button
+                    onClick={() => setIncompatibleModalSup(selectedSupplier)}
+                    className="bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-950 text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  >
+                    <span>🔒</span>
+                    <span>Mirroring Restricted ({resellerState})</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleMirrorSelected}
+                    className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+                  >
+                    Mirror Selected ({selectedProductSkus.length})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Interstate Restriction Notice if outside delivery zone */}
+            {!isSupplierDeliverable(selectedSupplier) && (
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-start gap-3">
+                  <span className="text-xl">🔒</span>
+                  <div>
+                    <div className="font-bold flex items-center gap-2">
+                      <span>Geographic Mirroring Guardrail Active</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-200 text-amber-900">
+                        Out of Delivery Scope
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber-900 mt-1 leading-relaxed">
+                      {selectedSupplier.name} only fulfills deliveries within{" "}
+                      <strong>
+                        {selectedSupplier.shippingScope === "LOCAL_STATE"
+                          ? selectedSupplier.state
+                          : selectedSupplier.coveredStates.join(", ")}
+                      </strong>{" "}
+                      and has disabled interstate fulfillment. Because your
+                      store operates in <strong>{resellerState}</strong>,
+                      product mirroring is restricted to protect your brand from
+                      failed delivery fulfillment disputes.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSupplierMsgModal(true)}
+                  className="px-3.5 py-2 bg-amber-900 hover:bg-amber-950 text-white rounded-xl font-semibold text-xs whitespace-nowrap cursor-pointer transition-all shrink-0"
+                >
+                  Inquire on WhatsApp Desk →
+                </button>
+              </div>
+            )}
+
+            {/* Search & Category Filter Bar */}
+            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="relative flex-1 max-w-sm">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-gray-400 text-xs">
+                  🔍
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search products by title or SKU..."
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 overflow-x-auto">
+                <button
+                  onClick={() => setCatalogCategory("ALL")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    catalogCategory === "ALL"
                       ? "bg-emerald-600 text-white shadow-2xs"
                       : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   }`}
                 >
-                  {cat}
+                  All Categories
                 </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Supplier All Products Table */}
-          <div className="bg-white rounded-3xl border border-gray-100 shadow-2xs overflow-hidden">
-            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={catalogProducts.length > 0 && catalogProducts.every((p) => selectedProductSkus.includes(p.sku))}
-                  onChange={() => handleSelectAllInCatalog(catalogProducts)}
-                  className="rounded text-emerald-600 cursor-pointer"
-                />
-                <span>Select all in view ({catalogProducts.length})</span>
-              </label>
-              <span className="text-xs text-gray-400 font-medium">
-                {selectedProductSkus.length} of {selectedSupplier.products.length} selected to mirror
-              </span>
+                {uniqueCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setCatalogCategory(cat)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                      catalogCategory === cat
+                        ? "bg-emerald-600 text-white shadow-2xs"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm min-w-[700px]">
-                <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
-                  <tr>
-                    <th className="py-3 px-6 w-12">Select</th>
-                    <th className="py-3 px-6">Product</th>
-                    <th className="py-3 px-6">Category</th>
-                    <th className="py-3 px-6">Wholesale Cost</th>
-                    <th className="py-3 px-6">Suggested Retail</th>
-                    <th className="py-3 px-6">Gross Margin</th>
-                    <th className="py-3 px-6">Stock Available</th>
-                    <th className="py-3 px-6 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 text-xs">
-                  {catalogProducts.map((p) => {
-                    const isSelected = selectedProductSkus.includes(p.sku);
-                    const margin = p.suggestedRetail - p.wholesaleCost;
-                    const marginPct = Math.round((margin / p.suggestedRetail) * 100);
-                    return (
-                      <tr key={p.id} className={`hover:bg-gray-50/60 transition-colors ${isSelected ? "bg-emerald-50/20" : ""}`}>
-                        <td className="py-3.5 px-6">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleSelectSku(p.sku)}
-                            className="rounded text-emerald-600 cursor-pointer"
-                          />
-                        </td>
-                        <td className="py-3.5 px-6">
-                          <div className="flex items-center gap-3">
-                            <img src={p.imageUrl} alt={p.name} className="w-10 h-10 rounded-xl object-cover shrink-0" />
-                            <div>
-                              <div className="font-bold text-gray-900">{p.name}</div>
-                              <div className="text-[11px] font-mono text-gray-400 mt-0.5">{p.sku}</div>
+            {/* Supplier All Products Table */}
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-2xs overflow-hidden">
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={
+                      catalogProducts.length > 0 &&
+                      catalogProducts.every((p) =>
+                        selectedProductSkus.includes(p.sku),
+                      )
+                    }
+                    onChange={() => handleSelectAllInCatalog(catalogProducts)}
+                    className="rounded text-emerald-600 cursor-pointer"
+                  />
+                  <span>Select all in view ({catalogProducts.length})</span>
+                </label>
+                <span className="text-xs text-gray-400 font-medium">
+                  {selectedProductSkus.length} of{" "}
+                  {selectedSupplier.products.length} selected to mirror
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm min-w-[700px]">
+                  <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+                    <tr>
+                      <th className="py-3 px-6 w-12">Select</th>
+                      <th className="py-3 px-6">Product</th>
+                      <th className="py-3 px-6">Category</th>
+                      <th className="py-3 px-6">Wholesale Cost</th>
+                      <th className="py-3 px-6">Suggested Retail</th>
+                      <th className="py-3 px-6">Gross Margin</th>
+                      <th className="py-3 px-6">Stock Available</th>
+                      <th className="py-3 px-6 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 text-xs">
+                    {catalogProducts.map((p) => {
+                      const isSelected = selectedProductSkus.includes(p.sku);
+                      const margin = p.suggestedRetail - p.wholesaleCost;
+                      const marginPct = Math.round(
+                        (margin / p.suggestedRetail) * 100,
+                      );
+                      return (
+                        <tr
+                          key={p.id}
+                          className={`hover:bg-gray-50/60 transition-colors ${isSelected ? "bg-emerald-50/20" : ""}`}
+                        >
+                          <td className="py-3.5 px-6">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelectSku(p.sku)}
+                              className="rounded text-emerald-600 cursor-pointer"
+                            />
+                          </td>
+                          <td className="py-3.5 px-6">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={p.imageUrl}
+                                alt={p.name}
+                                className="w-10 h-10 rounded-xl object-cover shrink-0"
+                              />
+                              <div>
+                                <div className="font-bold text-gray-900">
+                                  {p.name}
+                                </div>
+                                <div className="text-[11px] font-mono text-gray-400 mt-0.5">
+                                  {p.sku}
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-6 text-gray-600">{p.category}</td>
-                        <td className="py-3.5 px-6 font-bold text-gray-900">₦{p.wholesaleCost?.toLocaleString()}</td>
-                        <td className="py-3.5 px-6 font-medium text-gray-600">₦{p.suggestedRetail?.toLocaleString()}</td>
-                        <td className="py-3.5 px-6 font-bold text-emerald-700">
-                          +{marginPct}% (₦{margin?.toLocaleString()})
-                        </td>
-                        <td className="py-3.5 px-6">
-                          <span className={`font-semibold ${p.stock < 15 ? "text-amber-600 font-bold" : "text-gray-900"}`}>
-                            {p.stock} units
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-6 text-right">
-                          <button
-                            onClick={() => toggleSelectSku(p.sku)}
-                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                              isSelected
-                                ? "bg-emerald-100 text-emerald-800"
-                                : "border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700"
-                            }`}
-                          >
-                            {isSelected ? "✓ Mirrored" : "+ Mirror SKU"}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td className="py-3.5 px-6 text-gray-600">
+                            {p.category}
+                          </td>
+                          <td className="py-3.5 px-6 font-bold text-gray-900">
+                            ₦{p.wholesaleCost?.toLocaleString()}
+                          </td>
+                          <td className="py-3.5 px-6 font-medium text-gray-600">
+                            ₦{p.suggestedRetail?.toLocaleString()}
+                          </td>
+                          <td className="py-3.5 px-6 font-bold text-emerald-700">
+                            +{marginPct}% (₦{margin?.toLocaleString()})
+                          </td>
+                          <td className="py-3.5 px-6">
+                            <span
+                              className={`font-semibold ${p.stock < 15 ? "text-amber-600 font-bold" : "text-gray-900"}`}
+                            >
+                              {p.stock} units
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-6 text-right">
+                            <button
+                              onClick={() => toggleSelectSku(p.sku)}
+                              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                isSelected
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700"
+                              }`}
+                            >
+                              {isSelected ? "✓ Mirrored" : "+ Mirror SKU"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-        )
-      )}
+        ))}
 
       {/* ---------------------------------------------------------------------- */}
       {/* TAB 3: FIND SUPPLIERS (Verified Directory)                             */}
@@ -1066,9 +1298,14 @@ export function NetworkView({
         <div className="space-y-6">
           {/* Directory Hero */}
           <div className="bg-white rounded-3xl border border-gray-100 p-6 sm:p-8 shadow-2xs space-y-4">
-            <h2 className="text-base font-bold text-gray-900">Verified Nigerian Supplier Directory</h2>
+            <h2 className="text-base font-bold text-gray-900">
+              Verified Nigerian Supplier Directory
+            </h2>
             <p className="text-xs text-gray-500 max-w-2xl leading-relaxed">
-              Connect with verified Lagos and nationwide importers. Suppliers set their geographic visibility to ensure you only mirror catalogs that can reliably be fulfilled to your customers without interstate logistics failure.
+              Connect with verified Lagos and nationwide importers. Suppliers
+              set their geographic visibility to ensure you only mirror catalogs
+              that can reliably be fulfilled to your customers without
+              interstate logistics failure.
             </p>
           </div>
 
@@ -1077,11 +1314,14 @@ export function NetworkView({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-gray-900 flex items-center gap-1.5">
                 <span>📍</span>
-                <span>My Reseller Store Location:</span>
+                <span>My Reseller Territory:</span>
               </span>
               <select
                 value={resellerState}
-                onChange={(e) => setResellerState(e.target.value)}
+                onChange={(e) => {
+                  setResellerState(e.target.value);
+                  setResellerLga("All LGAs");
+                }}
                 className="bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1 text-xs font-bold text-emerald-950 focus:outline-none focus:border-emerald-600"
               >
                 {NIGERIAN_STATES.map((st) => (
@@ -1090,9 +1330,27 @@ export function NetworkView({
                   </option>
                 ))}
               </select>
+
+              <select
+                value={resellerLga}
+                onChange={(e) => setResellerLga(e.target.value)}
+                className="bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1 text-xs font-bold text-emerald-950 focus:outline-none focus:border-emerald-600"
+              >
+                <option value="All LGAs">All LGAs ({resellerState})</option>
+                {getLgasForState(resellerState).map((lga) => (
+                  <option key={lga} value={lga}>
+                    {lga}
+                  </option>
+                ))}
+              </select>
+
               <span className="text-gray-300">|</span>
               <span className="text-gray-500 text-[11px]">
-                Showing suppliers delivering to <strong>{resellerState}</strong>
+                Showing wholesale suppliers delivering to{" "}
+                <strong>
+                  {resellerState}
+                  {resellerLga !== "All LGAs" ? ` (${resellerLga})` : ""}
+                </strong>
               </span>
             </div>
 
@@ -1108,14 +1366,21 @@ export function NetworkView({
           </div>
 
           {/* Directory Supplier Cards or Empty State */}
-          {directorySuppliers.filter((sup) => !filterDeliverableOnly || isSupplierDeliverable(sup)).length === 0 ? (
+          {directorySuppliers.filter(
+            (sup) => !filterDeliverableOnly || isSupplierDeliverable(sup),
+          ).length === 0 ? (
             <div className="bg-white rounded-3xl border border-gray-100 p-12 text-center shadow-2xs space-y-4">
               <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl mx-auto">
                 🏢
               </div>
-              <h3 className="text-base font-bold text-gray-900">No Suppliers Matching {resellerState} Delivery</h3>
+              <h3 className="text-base font-bold text-gray-900">
+                No Suppliers Matching {resellerState} Delivery
+              </h3>
               <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
-                There are currently no verified wholesale suppliers delivering to {resellerState}. Turn off &ldquo;Hide out-of-zone suppliers&rdquo; to browse all nationwide and regional suppliers.
+                There are currently no verified wholesale suppliers delivering
+                to {resellerState}. Turn off &ldquo;Hide out-of-zone
+                suppliers&rdquo; to browse all nationwide and regional
+                suppliers.
               </p>
               <button
                 onClick={() => setFilterDeliverableOnly(false)}
@@ -1127,7 +1392,9 @@ export function NetworkView({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {directorySuppliers
-                .filter((sup) => !filterDeliverableOnly || isSupplierDeliverable(sup))
+                .filter(
+                  (sup) => !filterDeliverableOnly || isSupplierDeliverable(sup),
+                )
                 .map((sup) => {
                   const deliverable = isSupplierDeliverable(sup);
                   const badge = getShippingBadge(sup);
@@ -1145,17 +1412,25 @@ export function NetworkView({
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="font-bold text-base text-gray-900">{sup.name}</h3>
+                              <h3 className="font-bold text-base text-gray-900">
+                                {sup.name}
+                              </h3>
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800">
                                 CAC Verified
                               </span>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badge.color}`}>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badge.color}`}
+                              >
                                 {badge.label}
                               </span>
                             </div>
-                            <div className="text-xs text-gray-400 mt-0.5 font-mono">{sup.cacNumber} · {sup.category}</div>
+                            <div className="text-xs text-gray-400 mt-0.5 font-mono">
+                              {sup.cacNumber} · {sup.category}
+                            </div>
                           </div>
-                          <span className="text-xs font-bold text-emerald-700 shrink-0">★ {sup.rating}</span>
+                          <span className="text-xs font-bold text-emerald-700 shrink-0">
+                            ★ {sup.rating}
+                          </span>
                         </div>
 
                         {/* Geographic delivery warning if outside delivery zone */}
@@ -1164,33 +1439,47 @@ export function NetworkView({
                             <div className="flex items-center gap-1.5">
                               <span>🔒</span>
                               <span>
-                                Supplier does not deliver to <strong>{resellerState}</strong>. Interstate catalog mirroring is restricted.
+                                Supplier does not deliver to{" "}
+                                <strong>{resellerState}</strong>. Interstate
+                                catalog mirroring is restricted.
                               </span>
                             </div>
                           </div>
                         ) : (
                           <div className="p-2 rounded-xl bg-emerald-50/60 border border-emerald-100 text-emerald-900 text-[11px] flex items-center gap-1.5">
                             <span>✓</span>
-                            <span>Eligible for <strong>{resellerState}</strong> fulfillment &amp; instant catalog mirroring.</span>
+                            <span>
+                              Eligible for <strong>{resellerState}</strong>{" "}
+                              fulfillment &amp; instant catalog mirroring.
+                            </span>
                           </div>
                         )}
 
                         <p className="text-xs text-gray-600 leading-relaxed">
-                          Warehouse: {sup.warehouseAddress}. Fulfillment cutoff: {sup.cutoffTime}.
+                          Warehouse: {sup.warehouseAddress}. Fulfillment cutoff:{" "}
+                          {sup.cutoffTime}.
                         </p>
 
                         <div className="bg-gray-50 rounded-2xl p-3.5 space-y-1.5 text-xs text-gray-600">
                           <div className="flex justify-between">
                             <span className="text-gray-400">Dropship MOQ:</span>
-                            <span className="font-semibold text-gray-900">{sup.wholesaleTerms.moqDropship} unit</span>
+                            <span className="font-semibold text-gray-900">
+                              {sup.wholesaleTerms.moqDropship} unit
+                            </span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-gray-400">Escrow Settlement:</span>
-                            <span className="font-semibold text-emerald-700">Instant via Monnify</span>
+                            <span className="text-gray-400">
+                              Escrow Settlement:
+                            </span>
+                            <span className="font-semibold text-emerald-700">
+                              Instant via Monnify
+                            </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-400">Catalog Size:</span>
-                            <span className="font-semibold text-gray-900">{sup.products.length} Products Available</span>
+                            <span className="font-semibold text-gray-900">
+                              {sup.products.length} Products Available
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -1204,7 +1493,9 @@ export function NetworkView({
                               : "bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300"
                           }`}
                         >
-                          {deliverable ? "View Products & Terms" : `Inspect Catalog (Restricted to ${sup.state})`}
+                          {deliverable
+                            ? "View Products & Terms"
+                            : `Inspect Catalog (Restricted to ${sup.state})`}
                         </button>
                         <a
                           href={`https://wa.me/${sup.whatsapp}`}
@@ -1231,9 +1522,12 @@ export function NetworkView({
           <div className="bg-white rounded-3xl border border-gray-100 p-6 sm:p-8 shadow-2xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-base font-bold text-gray-900">My Resellers Network</h2>
+                <h2 className="text-base font-bold text-gray-900">
+                  My Resellers Network
+                </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Manage sub-resellers authorized to mirror your products and sell downstream.
+                  Manage sub-resellers authorized to mirror your products and
+                  sell downstream.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -1250,7 +1544,9 @@ export function NetworkView({
                     if (clean) {
                       setPendingInvites((prev) => [
                         { email: clean, sentAt: "Just now" },
-                        ...prev.filter((p) => p.email.toLowerCase() !== clean.toLowerCase()),
+                        ...prev.filter(
+                          (p) => p.email.toLowerCase() !== clean.toLowerCase(),
+                        ),
                       ]);
                       setInviteSent(true);
                       setTimeout(() => setInviteSent(false), 3000);
@@ -1266,7 +1562,9 @@ export function NetworkView({
 
             {/* Reseller Permissions Summary */}
             <div className="border border-gray-100 rounded-2xl p-4 bg-gray-50/50 flex flex-wrap gap-4 text-xs text-gray-600">
-              <span className="font-bold text-gray-900">Default Reseller Permissions:</span>
+              <span className="font-bold text-gray-900">
+                Default Reseller Permissions:
+              </span>
               <span>✓ View shared wholesale stock</span>
               <span>✓ Set custom retail markup</span>
               <span>✕ Cannot edit master catalog inventory</span>
@@ -1275,13 +1573,22 @@ export function NetworkView({
 
           {pendingInvites.length > 0 && (
             <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-2xs space-y-3">
-              <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Pending Invitations ({pendingInvites.length})</h3>
+              <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+                Pending Invitations ({pendingInvites.length})
+              </h3>
               <div className="divide-y divide-gray-100 text-xs">
                 {pendingInvites.map((inv) => (
-                  <div key={inv.email} className="py-2.5 flex items-center justify-between">
+                  <div
+                    key={inv.email}
+                    className="py-2.5 flex items-center justify-between"
+                  >
                     <div>
-                      <span className="font-semibold text-gray-900">{inv.email}</span>
-                      <span className="text-[11px] text-gray-400 ml-2">Sent {inv.sentAt}</span>
+                      <span className="font-semibold text-gray-900">
+                        {inv.email}
+                      </span>
+                      <span className="text-[11px] text-gray-400 ml-2">
+                        Sent {inv.sentAt}
+                      </span>
                     </div>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
                       Pending Acceptance
@@ -1295,8 +1602,12 @@ export function NetworkView({
           {resellerMirrors.length > 0 ? (
             <div className="bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-2xs">
               <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-gray-900">Active Network Mirrors ({resellerMirrors.length})</h3>
-                <span className="text-[11px] text-emerald-700 font-semibold">Live DB Synced</span>
+                <h3 className="text-sm font-bold text-gray-900">
+                  Active Network Mirrors ({resellerMirrors.length})
+                </h3>
+                <span className="text-[11px] text-emerald-700 font-semibold">
+                  Live DB Synced
+                </span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs min-w-[520px]">
@@ -1312,9 +1623,13 @@ export function NetworkView({
                     {resellerMirrors.map((mirror) => (
                       <tr key={mirror.id} className="hover:bg-gray-50">
                         <td className="px-5 py-3.5 font-semibold text-gray-900">
-                          {mirror.supplierName || mirror.supplierSlug || mirror.supplierId}
+                          {mirror.supplierName ||
+                            mirror.supplierSlug ||
+                            mirror.supplierId}
                         </td>
-                        <td className="px-4 py-3.5 text-gray-700">{mirror.mirroredProductSkus.length} products</td>
+                        <td className="px-4 py-3.5 text-gray-700">
+                          {mirror.mirroredProductSkus.length} products
+                        </td>
                         <td className="px-4 py-3.5 font-mono text-gray-700">
                           +{(mirror.defaultMarkupBps / 100).toFixed(0)}%
                         </td>
@@ -1334,9 +1649,12 @@ export function NetworkView({
               <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl mx-auto">
                 👥
               </div>
-              <h3 className="text-sm font-bold text-gray-900">No Resellers Connected Yet</h3>
+              <h3 className="text-sm font-bold text-gray-900">
+                No Resellers Connected Yet
+              </h3>
               <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                Send an invite to downstream distributors, retail partners, or affiliate vendors to allow them to mirror your inventory.
+                Send an invite to downstream distributors, retail partners, or
+                affiliate vendors to allow them to mirror your inventory.
               </p>
             </div>
           )}
@@ -1349,10 +1667,17 @@ export function NetworkView({
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4 animate-in fade-in">
             <div className="flex justify-between items-center border-b pb-3">
               <div>
-                <h3 className="font-bold text-gray-900 text-sm">Message {selectedSupplier.name}</h3>
-                <p className="text-xs text-gray-400">Direct WhatsApp wholesale desk inquiry</p>
+                <h3 className="font-bold text-gray-900 text-sm">
+                  Message {selectedSupplier.name}
+                </h3>
+                <p className="text-xs text-gray-400">
+                  Direct WhatsApp wholesale desk inquiry
+                </p>
               </div>
-              <button onClick={() => setSupplierMsgModal(false)} className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer">
+              <button
+                onClick={() => setSupplierMsgModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer"
+              >
                 ✕
               </button>
             </div>
@@ -1392,7 +1717,9 @@ export function NetworkView({
             <div className="flex justify-between items-center border-b pb-3">
               <div className="flex items-center gap-2">
                 <span className="text-xl">🔒</span>
-                <h3 className="font-bold text-gray-900 text-sm">Geographic Fulfillment Restriction</h3>
+                <h3 className="font-bold text-gray-900 text-sm">
+                  Geographic Fulfillment Restriction
+                </h3>
               </div>
               <button
                 onClick={() => setIncompatibleModalSup(null)}
@@ -1405,23 +1732,38 @@ export function NetworkView({
             <div className="text-xs text-gray-700 space-y-3">
               <p>
                 <strong>{incompatibleModalSup.name}</strong> operates out of{" "}
-                <strong>{incompatibleModalSup.warehouseAddress}</strong> and only fulfills orders within:
+                <strong>{incompatibleModalSup.warehouseAddress}</strong> and
+                only fulfills orders within:
               </p>
 
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl font-medium text-amber-950">
                 {incompatibleModalSup.shippingScope === "LOCAL_STATE" ? (
-                  <span>📍 <strong>{incompatibleModalSup.state} State Only</strong> (Interstate shipping disabled)</span>
+                  <span>
+                    📍 <strong>{incompatibleModalSup.state} State Only</strong>{" "}
+                    (Interstate shipping disabled)
+                  </span>
                 ) : (
-                  <span>🗺️ <strong>{incompatibleModalSup.coveredStates.join(", ")}</strong></span>
+                  <span>
+                    🗺️{" "}
+                    <strong>
+                      {incompatibleModalSup.coveredStates.join(", ")}
+                    </strong>
+                  </span>
                 )}
               </div>
 
               <p className="text-[11px] text-gray-500 leading-relaxed">
-                Because your reseller business is based in <strong>{resellerState}</strong>, mirroring these products to your catalog would result in failed customer orders and escrow refund deductions when buyers order items that cannot be delivered.
+                Because your reseller business is based in{" "}
+                <strong>{resellerState}</strong>, mirroring these products to
+                your catalog would result in failed customer orders and escrow
+                refund deductions when buyers order items that cannot be
+                delivered.
               </p>
 
               <p className="text-[11px] text-gray-600">
-                If you have independent haulage arrangements (e.g., GIG Logistics, ABC Cargo, interstate bus parcel), you can request custom dispatch directly from their wholesale desk.
+                If you have independent haulage arrangements (e.g., GIG
+                Logistics, ABC Cargo, interstate bus parcel), you can request
+                custom dispatch directly from their wholesale desk.
               </p>
             </div>
 
@@ -1434,7 +1776,7 @@ export function NetworkView({
               </button>
               <a
                 href={`https://wa.me/${incompatibleModalSup.whatsapp}?text=${encodeURIComponent(
-                  `Hello ${incompatibleModalSup.name}, reaching out from a store in ${resellerState}. We are interested in your catalog on Caterlog and would like to ask if you can fulfill interstate orders to our state via custom courier.`
+                  `Hello ${incompatibleModalSup.name}, reaching out from a store in ${resellerState}. We are interested in your catalog on Caterlog and would like to ask if you can fulfill interstate orders to our state via custom courier.`,
                 )}`}
                 target="_blank"
                 rel="noreferrer"
@@ -1448,5 +1790,5 @@ export function NetworkView({
         </div>
       )}
     </div>
-  )
+  );
 }

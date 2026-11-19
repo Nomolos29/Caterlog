@@ -284,6 +284,15 @@ model Order {
   refundReason          String?
   refundedAt            DateTime?
 
+  // Reseller Dropship Split Settlement
+  isDropship            Boolean?           @default(false)
+  supplierSubAccountCode String?
+  resellerSubAccountCode String?
+  supplierShareKobo     BigInt?            @default(0)
+  resellerShareKobo     BigInt?            @default(0)
+  platformFeeKobo       BigInt?            @default(0)
+  splitSettlementStatus String?            @default("NOT_APPLICABLE") // "NOT_APPLICABLE" | "PENDING" | "SETTLED"
+
   // Timestamps
   paymentExpiresAt    DateTime?
   paidAt              DateTime?
@@ -520,6 +529,7 @@ model MarketBoostListing {
   shippingScope     String   @default("LOCAL_STATE") // "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE"
   allowInterstate   Boolean  @default(false)
   coveredStates     Json     @default("[\"Lagos\"]") // Array of Nigerian states where catalog can be mirrored
+  coveredLgas       Json     @default("[]") // Array of Nigerian LGAs where catalog can be mirrored
   description       String?
   moq               String   @default("1 unit")
   startingPriceKobo BigInt   @default(300000)
@@ -555,6 +565,7 @@ model SupplierProfile {
   shippingScope    String                  @default("LOCAL_STATE") // "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE"
   allowInterstate  Boolean                 @default(false)
   coveredStates    Json                    @default("[\"Lagos\"]")
+  coveredLgas      Json                    @default("[]")
   warehouseAddress String?
   phone            String
   whatsapp         String

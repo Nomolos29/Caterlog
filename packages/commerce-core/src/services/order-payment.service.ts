@@ -14,7 +14,11 @@ import {
   evaluatePaymentReconciliation,
   type DomainOrderStatus,
 } from "../domain/order-state-machine.ts";
-import type { MessagingChannelPort, PaymentProviderPort } from "../ports/index.ts";
+import type {
+  MessagingChannelPort,
+  PaymentProviderPort,
+  VirtualAccountSplitConfigItem,
+} from "../ports/index.ts";
 
 export interface CreateOrderInput {
   vendorId: string;
@@ -67,6 +71,7 @@ export class OrderPaymentService {
 
     const vendor = await this.db.vendor.findUniqueOrThrow({
       where: { id: input.vendorId },
+      include: { settlementSplitRules: true },
     });
 
     // Execute stock reservation and order creation inside an interactive ACID transaction
@@ -217,6 +222,36 @@ export class OrderPaymentService {
       };
     });
 
+    let incomeSplitConfig: VirtualAccountSplitConfigItem[] | undefined;
+    const activeSplitRule =
+      vendor.settlementSplitRules?.find((r) => r.isActive) ??
+      vendor.settlementSplitRules?.[0];
+    if (activeSplitRule && vendor.monnifySubAccountCode) {
+      const platformFeePct = Number((activeSplitRule.platformFeeBps / 100).toFixed(2));
+      const supplierPct = Number((activeSplitRule.supplierShareBps / 100).toFixed(2));
+      const resellerPct = Number(Math.max(1, 100 - supplierPct - platformFeePct).toFixed(2));
+
+      if (
+        activeSplitRule.supplierSubAccountCode &&
+        activeSplitRule.supplierSubAccountCode !== vendor.monnifySubAccountCode
+      ) {
+        incomeSplitConfig = [
+          {
+            subAccountCode: activeSplitRule.supplierSubAccountCode,
+            feePercentage: 0,
+            splitPercentage: supplierPct,
+            feeBearer: false,
+          },
+          {
+            subAccountCode: vendor.monnifySubAccountCode,
+            feePercentage: 100,
+            splitPercentage: resellerPct,
+            feeBearer: true,
+          },
+        ];
+      }
+    }
+
     // Generate Dynamic Monnify Virtual Account (10-digit NUBAN)
     const virtualAccount = await this.paymentPort.createDynamicVirtualAccount({
       orderId: txResult.order.id,
@@ -227,6 +262,7 @@ export class OrderPaymentService {
       customerPhone: txResult.customer.whatsappPhone,
       expectedAmountKobo: txResult.order.totalAmountKobo,
       expiresAt: txResult.expiresAt,
+      incomeSplitConfig,
     });
 
     const invoice = await this.db.paymentInvoice.create({

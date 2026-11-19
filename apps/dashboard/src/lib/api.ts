@@ -12,19 +12,42 @@ import type {
   TeamMemberItem,
   VendorState,
   WhatsAppSimulationResult,
+  SubscriptionInfo,
+  SubscriptionPlanId,
+  BillingCycle,
+  TrustTierInfo,
+  PlatformRole,
+  SupplierProfile,
 } from "./types";
 
+export function getApiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    // If an explicit external domain is configured (e.g. production API), use it:
+    const configured = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (configured && !configured.includes("localhost") && !configured.includes("127.0.0.1")) {
+      return configured.replace(/\/+$/, "");
+    }
+    // In local dev/browser, return empty string so requests are same-origin and proxied
+    // by Next.js rewrites to the API server, eliminating CORS and port-binding mismatches.
+    return "";
+  }
+  return (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4000").replace(/\/+$/, "");
+}
+
 export const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000"
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:4000"
 ).replace(/\/+$/, "");
 
 /**
  * Normalizes image URLs so relative backend media endpoints (/api/v1/media/...)
- * resolve to the full API server address.
+ * resolve reliably both through Next.js rewrites and direct API paths.
  */
 export function resolveImageUrl(url?: string): string {
   if (!url) return "";
   if (url.startsWith("/api/v1/media/")) {
+    if (typeof window !== "undefined") {
+      return url;
+    }
     return `${API_BASE_URL}${url}`;
   }
   return url;
@@ -40,33 +63,83 @@ export class ApiError extends Error {
   }
 }
 
+export function getStoredSessionToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("caterlog_session_token");
+}
+
+export function setStoredSessionToken(token: string | null): void {
+  if (typeof window === "undefined") return;
+  if (token) {
+    localStorage.setItem("caterlog_session_token", token);
+  } else {
+    localStorage.removeItem("caterlog_session_token");
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
+  const token = getStoredSessionToken();
+  const baseUrl = getApiBaseUrl();
+  const primaryUrl = path.startsWith("http") ? path : `${baseUrl}${path}`;
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(init?.headers ?? {}),
+  };
 
-  const raw = await response.text();
-  let data: unknown = null;
   try {
-    data = raw ? JSON.parse(raw) : null;
-  } catch {
-    data = raw;
-  }
+    const response = await fetch(primaryUrl, {
+      ...init,
+      headers,
+      credentials: "include",
+      cache: "no-store",
+    });
 
-  if (!response.ok) {
-    const message =
-      data && typeof data === "object" && "error" in data
-        ? String((data as { error: unknown }).error)
-        : `Request failed with HTTP ${response.status}`;
-    throw new ApiError(response.status, message);
-  }
+    const raw = await response.text();
+    let data: unknown = null;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      data = raw;
+    }
 
-  return data as T;
+    if (!response.ok) {
+      if (response.status === 401 && typeof window !== "undefined") {
+        setStoredSessionToken(null);
+      }
+      const message =
+        data && typeof data === "object" && "error" in data
+          ? String((data as { error: unknown }).error)
+          : `Request failed with HTTP ${response.status}`;
+      throw new ApiError(response.status, message);
+    }
+
+    return data as T;
+  } catch (err) {
+    // If same-origin relative fetch failed and we are in the browser, attempt direct backend fallback
+    if (typeof window !== "undefined" && !path.startsWith("http")) {
+      try {
+        const fallbackUrl = `http://${window.location.hostname}:4000${path}`;
+        const fallbackResponse = await fetch(fallbackUrl, {
+          ...init,
+          headers,
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (fallbackResponse.ok) {
+          const rawFallback = await fallbackResponse.text();
+          try {
+            return (rawFallback ? JSON.parse(rawFallback) : null) as T;
+          } catch {
+            return rawFallback as T;
+          }
+        }
+      } catch {
+        // preserve original error
+      }
+    }
+    throw err;
+  }
 }
 
 function jsonBody(value: unknown): RequestInit {
@@ -74,10 +147,18 @@ function jsonBody(value: unknown): RequestInit {
 }
 
 export const api = {
-  eventsUrl: `${API_BASE_URL}/api/v1/events`,
+  get eventsUrl(): string {
+    if (typeof window !== "undefined") {
+      return "/api/v1/events";
+    }
+    return `${API_BASE_URL}/api/v1/events`;
+  },
 
   ogCardUrl(sku: string, cacheBust?: number): string {
     const query = cacheBust ? `?t=${cacheBust}` : "";
+    if (typeof window !== "undefined") {
+      return `/og/product/${encodeURIComponent(sku)}${query}`;
+    }
     return `${API_BASE_URL}/og/product/${encodeURIComponent(sku)}${query}`;
   },
 
@@ -98,13 +179,27 @@ export const api = {
 
   updateProfile(input: {
     businessName?: string;
-    role?: "reseller" | "supplier";
+    role?: PlatformRole | "vendor" | "supplier";
     whatsappPhone?: string;
     instagramHandle?: string;
     baseState?: string;
     baseCity?: string;
   }): Promise<VendorState> {
     return request<VendorState>("/api/v1/vendor/profile", {
+      method: "PATCH",
+      ...jsonBody(input),
+    });
+  },
+
+  updateSocialChannels(input: {
+    instagramHandle?: string;
+    instagramConnected?: boolean;
+    instagramBusinessId?: string;
+    facebookPageName?: string;
+    facebookPageId?: string;
+    facebookConnected?: boolean;
+  }): Promise<VendorState> {
+    return request<VendorState>("/api/v1/vendor/channels", {
       method: "PATCH",
       ...jsonBody(input),
     });
@@ -284,6 +379,7 @@ export const api = {
     buyerName?: string;
     quotedStatusImagePhash?: string;
     simulateFastForwardIdleTimer?: boolean;
+    sourceChannel?: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
   }): Promise<WhatsAppSimulationResult> {
     return request<WhatsAppSimulationResult>("/api/v1/simulate/whatsapp", {
       method: "POST",
@@ -320,7 +416,7 @@ export const api = {
 
   requestOtp(
     phone: string,
-    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" = "LOGIN"
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET" = "LOGIN"
   ): Promise<{
     status: string;
     destinationPhone: string;
@@ -334,31 +430,116 @@ export const api = {
     });
   },
 
-  verifyOtp(input: {
+  async verifyOtp(input: {
     phone: string;
     code: string;
-    purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
+    purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET";
     businessName?: string;
-    role?: "reseller" | "supplier";
+    role?: PlatformRole | "vendor" | "supplier";
     isExistingBusiness?: boolean;
     catalogSelection?: "mirror" | "custom";
   }): Promise<{
     authenticated: boolean;
     token?: string;
+    sessionToken?: string;
     vendor: VendorState["vendor"];
     state: VendorState;
   }> {
-    return request("/api/v1/auth/verify-otp", {
+    const res = await request<{
+      authenticated: boolean;
+      token?: string;
+      sessionToken?: string;
+      vendor: VendorState["vendor"];
+      state: VendorState;
+    }>("/api/v1/auth/verify-otp", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+    if (res.token) {
+      setStoredSessionToken(res.token);
+    }
+    return res;
+  },
+
+  async requestDemoSession(): Promise<{
+    authenticated: boolean;
+    token?: string;
+    sessionToken?: string;
+    vendor: VendorState["vendor"];
+    state: VendorState;
+  }> {
+    const res = await request<{
+      authenticated: boolean;
+      token?: string;
+      sessionToken?: string;
+      vendor: VendorState["vendor"];
+      state: VendorState;
+    }>("/api/v1/auth/demo-session", {
+      method: "POST",
+    });
+    if (res.token) {
+      setStoredSessionToken(res.token);
+    }
+    return res;
+  },
+
+  async setupTransactionPin(input: {
+    pin: string;
+    otpCode?: string;
+    currentPin?: string;
+  }): Promise<{ status: string; message: string; state: VendorState }> {
+    return request("/api/v1/auth/pin/setup", {
       method: "POST",
       ...jsonBody(input),
     });
   },
 
-  withdrawFunds(input: {
-    amountNaira: number;
+  async verifyTransactionPin(pin: string): Promise<{ status: string; valid: boolean }> {
+    return request("/api/v1/auth/pin/verify", {
+      method: "POST",
+      ...jsonBody({ pin }),
+    });
+  },
+
+  async requestBankChange(input: {
+    bankCode: string;
+    accountNumber: string;
+    pin: string;
+    otpCode: string;
+  }): Promise<{
+    status: "linked" | "pending_cooling_off";
     bankName: string;
     accountNumber: string;
-    securityCode: string;
+    accountName: string;
+    effectiveAt?: string;
+    cancelToken?: string;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/bank/request-change", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  async applyPendingBankUpdate(): Promise<{ applied: boolean; state: VendorState }> {
+    return request("/api/v1/vendor/bank/apply-pending", {
+      method: "POST",
+    });
+  },
+
+  async emergencyFreezeStore(token: string): Promise<{ status: string; message: string; state: VendorState }> {
+    return request("/api/v1/security/freeze", {
+      method: "POST",
+      ...jsonBody({ token }),
+    });
+  },
+
+  withdrawFunds(input: {
+    amountNaira: number;
+    bankName?: string;
+    accountNumber?: string;
+    securityCode?: string;
+    pin?: string;
   }): Promise<{
     status: string;
     amountNaira: number;
@@ -407,23 +588,35 @@ export const api = {
     });
   },
 
-  verifyMagicLinkToken(
+  async verifyMagicLinkToken(
     token: string
   ): Promise<{
     authenticated: boolean;
+    token?: string;
+    sessionToken?: string;
     vendor: VendorState["vendor"];
     state: VendorState;
   }> {
-    return request("/api/v1/auth/verify", {
+    const res = await request<{
+      authenticated: boolean;
+      token?: string;
+      sessionToken?: string;
+      vendor: VendorState["vendor"];
+      state: VendorState;
+    }>("/api/v1/auth/verify", {
       method: "POST",
       ...jsonBody({ token }),
     });
+    if (res.token) {
+      setStoredSessionToken(res.token);
+    }
+    return res;
   },
 
   onboardVendor(input: {
     phone?: string;
     businessName: string;
-    role?: "reseller" | "supplier";
+    role?: PlatformRole | "vendor" | "supplier";
     isExistingBusiness?: boolean;
     catalogSelection?: "mirror" | "custom";
     cacNumber?: string;
@@ -477,6 +670,7 @@ export const api = {
     productSkus?: string[];
     defaultMarkupBps?: number;
     status?: "ACTIVE" | "PAUSED";
+    ignoreGeofence?: boolean;
   }): Promise<{
     status: string;
     mirror: ResellerMirror;
@@ -487,6 +681,26 @@ export const api = {
       method: "POST",
       ...jsonBody(input),
     });
+  },
+
+  getWholesaleSuppliers(params?: {
+    state?: string;
+    lga?: string;
+    category?: string;
+    deliverableOnly?: boolean;
+  }): Promise<{
+    status: string;
+    territory: { state: string; lga?: string };
+    total: number;
+    suppliers: Array<SupplierProfile & { geofence: { deliverable: boolean; reason: string; scope: string } }>;
+  }> {
+    const query = new URLSearchParams();
+    if (params?.state) query.set("state", params.state);
+    if (params?.lga) query.set("lga", params.lga);
+    if (params?.category) query.set("category", params.category);
+    if (params?.deliverableOnly) query.set("deliverableOnly", "true");
+    const qs = query.toString();
+    return request(`/api/v1/vendor/network/suppliers${qs ? `?${qs}` : ""}`);
   },
 
   createPaymentLink(input: {
@@ -548,6 +762,11 @@ export const api = {
     phone?: string;
     role: string;
     status?: "Active" | "Invited" | "Suspended";
+    canManageOrders?: boolean;
+    canManageInventory?: boolean;
+    canViewPayouts?: boolean;
+    canProcessRefunds?: boolean;
+    canOverrideCopilot?: boolean;
   }): Promise<{ status: string; member: TeamMemberItem; state: VendorState }> {
     return request("/api/v1/vendor/team", {
       method: "POST",
@@ -561,6 +780,75 @@ export const api = {
     });
   },
 
+  async staffLogin(email: string): Promise<{
+    authenticated: boolean;
+    token: string;
+    session: {
+      email?: string;
+      staffMemberId?: string;
+      staffName?: string;
+      staffRole: string;
+      isOwner: boolean;
+      permissions: {
+        canManageOrders: boolean;
+        canManageInventory: boolean;
+        canViewPayouts: boolean;
+        canProcessRefunds: boolean;
+        canOverrideCopilot: boolean;
+      };
+    };
+    member: TeamMemberItem;
+    state: VendorState;
+  }> {
+    const res = await request<{
+      authenticated: boolean;
+      token: string;
+      session: {
+        email?: string;
+        staffMemberId?: string;
+        staffName?: string;
+        staffRole: string;
+        isOwner: boolean;
+        permissions: {
+          canManageOrders: boolean;
+          canManageInventory: boolean;
+          canViewPayouts: boolean;
+          canProcessRefunds: boolean;
+          canOverrideCopilot: boolean;
+        };
+      };
+      member: TeamMemberItem;
+      state: VendorState;
+    }>("/api/v1/auth/staff-login", {
+      method: "POST",
+      ...jsonBody({ email }),
+    });
+    if (res.token) {
+      setStoredSessionToken(res.token);
+    }
+    return res;
+  },
+
+  getCurrentSession(): Promise<{
+    authenticated: boolean;
+    session: {
+      email?: string;
+      staffMemberId?: string;
+      staffName?: string;
+      staffRole: string;
+      isOwner: boolean;
+      permissions: {
+        canManageOrders: boolean;
+        canManageInventory: boolean;
+        canViewPayouts: boolean;
+        canProcessRefunds: boolean;
+        canOverrideCopilot: boolean;
+      };
+    } | null;
+  }> {
+    return request("/api/v1/auth/session");
+  },
+
   syncNotifications(input: {
     readKeys?: string[];
     dismissedKeys?: string[];
@@ -569,6 +857,25 @@ export const api = {
     return request<VendorState>("/api/v1/vendor/notifications/sync", {
       method: "POST",
       ...jsonBody(input),
+    });
+  },
+
+  upgradeSubscription(input: {
+    planId: SubscriptionPlanId;
+    billingCycle?: BillingCycle;
+  }): Promise<{ status: string; subscription: SubscriptionInfo; state: VendorState }> {
+    return request("/api/v1/vendor/subscription/upgrade", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  fastTrackTrustTier(input?: {
+    cacNumber?: string;
+  }): Promise<{ status: string; trustTier: TrustTierInfo; state: VendorState }> {
+    return request("/api/v1/vendor/trust-tier/fast-track", {
+      method: "POST",
+      ...jsonBody(input ?? {}),
     });
   },
 };

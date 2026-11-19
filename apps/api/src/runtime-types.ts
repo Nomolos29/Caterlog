@@ -7,11 +7,62 @@ import type { DomainCopilotMode, DomainOrderStatus } from "@caterlog/commerce-co
  * money is bigint in kobo, dates are Date objects, and IDs are strings.
  */
 
+export interface PendingBankUpdate {
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  requestedAt: Date;
+  effectiveAt: Date;
+  cancelTokenHash: string;
+  requestorIp?: string;
+}
+
+export type StaffPermissionKey =
+  | "canManageOrders"
+  | "canManageInventory"
+  | "canViewPayouts"
+  | "canProcessRefunds"
+  | "canOverrideCopilot"
+  | "ownerOnly";
+
+export interface StaffPermissions {
+  canManageOrders: boolean;
+  canManageInventory: boolean;
+  canViewPayouts: boolean;
+  canProcessRefunds: boolean;
+  canOverrideCopilot: boolean;
+}
+
+export interface VendorSession {
+  tokenHash: string;
+  vendorSlug: string;
+  phone?: string;
+  email?: string;
+  staffMemberId?: string;
+  staffName?: string;
+  staffRole: string;
+  isOwner: boolean;
+  permissions: StaffPermissions;
+  createdAt: Date;
+  expiresAt: Date;
+  lastActiveAt: Date;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+export type SalesChannel =
+  | "WHATSAPP"
+  | "INSTAGRAM"
+  | "FACEBOOK"
+  | "PAYMENT_LINK"
+  | "RESELLER_NETWORK";
+
 export interface RuntimeVendor {
   id: string;
   slug: string;
   businessName: string;
-  role?: "reseller" | "supplier";
+  role?: "reseller" | "starter" | "growth" | "pro" | "vendor" | "supplier";
   whatsappPhone: string;
   whatsappPhoneId: string;
   verificationStatus: "VERIFIED" | "PENDING" | "REJECTED";
@@ -26,8 +77,94 @@ export interface RuntimeVendor {
   cacNumber?: string;
   tinNumber?: string;
   instagramHandle?: string;
+  instagramConnected?: boolean;
+  instagramBusinessId?: string;
+  facebookPageName?: string;
+  facebookPageId?: string;
+  facebookConnected?: boolean;
   baseState?: string;
   baseCity?: string;
+
+  // Layer 1 Security & Identity Lock Profile
+  transactionPinHash?: string;
+  pinFailedAttempts?: number;
+  pinLockedUntil?: Date;
+  pinSetAt?: Date;
+  verifiedLegalName?: string;
+  verifiedBvnHash?: string;
+  isPayoutFrozen?: boolean;
+  payoutFrozenUntil?: Date;
+  pendingBankUpdate?: PendingBankUpdate | null;
+
+  // Platform Subscription & Escrow Trust Tier
+  subscription?: RuntimeSubscriptionInfo;
+  trustTier?: RuntimeTrustTierInfo;
+  invoices?: RuntimePlatformInvoice[];
+}
+
+export type SubscriptionPlanId =
+  | "FREE"
+  | "RESELLER"
+  | "STARTER"
+  | "GROWTH"
+  | "PRO"
+  | "SCALE";
+export type BillingCycle = "MONTHLY" | "ANNUALLY";
+export type TrustTierLevel = 0 | 1 | 2;
+
+export interface RuntimeSubscriptionInfo {
+  planId: SubscriptionPlanId;
+  planName: string;
+  billingCycle: BillingCycle;
+  status: "ACTIVE" | "PAST_DUE" | "TRIALING" | "CANCELLED";
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  cancelAtPeriodEnd: boolean;
+  priceNaira: number;
+  priceUsd?: number;
+  platformFeeBps: number;
+  maxProducts: number;
+  maxTeamSeats: number;
+  copilotTier: "KEYWORD" | "FULL_AUTO" | "MULTI_AGENT";
+  hasCustomDomain: boolean;
+  hasResellerMirroring: boolean;
+  hasPhashStatusMatching: boolean;
+  hasMarketBoost?: boolean;
+  hasConciergeShipping?: boolean;
+  pickupStationEnabled?: boolean;
+  scheduledPickupWindows?: string[];
+  shieldedBuyerSupport?: boolean;
+  paymentMethod?: {
+    type: "CARD" | "DIRECT_DEBIT";
+    brand?: string;
+    last4?: string;
+    bankName?: string;
+    expiry?: string;
+  };
+}
+
+export interface RuntimeTrustTierInfo {
+  currentTier: TrustTierLevel;
+  tierName: string;
+  settlementSpeed: string;
+  dailyPayoutLimitNaira: number;
+  completedCleanOrders: number;
+  requiredOrdersForNextTier: number;
+  isKycVerified: boolean;
+  isCacVerified: boolean;
+  disputeRatePercent: number;
+  canFastTrackLevel2: boolean;
+}
+
+export interface RuntimePlatformInvoice {
+  id: string;
+  invoiceNumber: string;
+  description: string;
+  amountNaira: number;
+  status: "PAID" | "PENDING" | "FAILED";
+  paidAt: string;
+  pdfUrl?: string;
+  planId?: SubscriptionPlanId;
 }
 
 export interface RuntimeWholesaleDiscountRule {
@@ -55,6 +192,7 @@ export interface RuntimeMarketBoostListing {
   shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
   allowInterstate: boolean;
   coveredStates: string[];
+  coveredLgas?: string[];
   description: string;
   moq: string;
   startingPriceKobo: bigint;
@@ -90,6 +228,7 @@ export interface RuntimeSupplierProfile {
   shippingScope: "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE";
   allowInterstate: boolean;
   coveredStates: string[];
+  coveredLgas?: string[];
   warehouseAddress: string;
   phone: string;
   whatsapp: string;
@@ -326,6 +465,14 @@ export interface RuntimeOrder {
   createdAt: Date;
   paidAt?: Date;
   dispatchedAt?: Date;
+  isDropship?: boolean;
+  supplierSubAccountCode?: string;
+  resellerSubAccountCode?: string;
+  supplierShareKobo?: bigint;
+  resellerShareKobo?: bigint;
+  platformFeeKobo?: bigint;
+  splitSettlementStatus?: "PENDING" | "SETTLED" | "NOT_APPLICABLE";
+  salesChannel?: SalesChannel;
 }
 
 export interface QuickReplyOption {
@@ -336,6 +483,7 @@ export interface QuickReplyOption {
 export interface ChatThreadMessage {
   id: string;
   channel: "VENDOR_ADMIN_WA" | "BUYER_SHOP_WA";
+  sourceChannel?: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
   sender: "VENDOR" | "BUYER" | "CATERLOG_BOT";
   fromPhone: string;
   text: string;
@@ -347,6 +495,7 @@ export interface ChatThreadMessage {
 export interface BuyerConversationSession {
   buyerPhone: string;
   buyerName: string;
+  sourceChannel?: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
   activeProductId?: string;
   activeVariantId?: string;
   activeOrderId?: string;
@@ -389,4 +538,7 @@ export interface RuntimeSnapshot {
   teamMembers?: RuntimeTeamMember[];
   notifications?: RuntimeVendorNotification[];
   commerceEvents?: RuntimeCommerceEvent[];
+  subscription?: RuntimeSubscriptionInfo;
+  trustTier?: RuntimeTrustTierInfo;
+  platformInvoices?: RuntimePlatformInvoice[];
 }

@@ -1641,5 +1641,178 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.ok(buyerRefundMsg);
     assert.ok(buyerRefundMsg.text.includes(refundRes.refund.refundReference));
   });
+
+  it("enforces State & LGA geofencing on Market Boost / Supplier Mirroring and executes Dynamic Monnify Split Settlement on checkout", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Save Market Boost with State & LGA geofencing
+    const listing = engine.saveMarketBoost({
+      isPublished: true,
+      businessName: "Amaka Wholesale Hub",
+      baseState: "Lagos",
+      baseCity: "Ikeja",
+      shippingScope: "LOCAL_STATE",
+      coveredStates: ["Lagos"],
+      coveredLgas: ["Ikeja", "Eti-Osa (VI / Lekki / Ikoyi)", "Surulere"],
+    });
+    assert.equal(listing.baseState, "Lagos");
+    assert.deepEqual(listing.coveredLgas, ["Ikeja", "Eti-Osa (VI / Lekki / Ikoyi)", "Surulere"]);
+
+    // 2. Configure a local-state supplier restricted to specific Lagos LGAs
+    const localSupplier = engine.suppliers[0];
+    assert.ok(localSupplier);
+    localSupplier.shippingScope = "LOCAL_STATE";
+    localSupplier.state = "Lagos";
+    localSupplier.coveredStates = ["Lagos"];
+    localSupplier.coveredLgas = ["Ikeja", "Surulere"];
+    localSupplier.subAccountCode = "MFY_SUB_SUPPLIER_99";
+
+    // Reseller in Rivers / Port Harcourt attempts to mirror -> rejected by State geofence
+    engine.updateVendorProfile({ baseState: "Rivers", baseCity: "Port Harcourt" });
+    assert.throws(
+      () => engine.mirrorSupplierCatalog({ supplierIdOrSlug: localSupplier.slug }),
+      /Out of territory/i
+    );
+
+    // Reseller in Lagos / Badagry attempts to mirror -> rejected by LGA geofence
+    engine.updateVendorProfile({ baseState: "Lagos", baseCity: "Badagry" });
+    assert.throws(
+      () => engine.mirrorSupplierCatalog({ supplierIdOrSlug: localSupplier.slug }),
+      /only delivers to specific LGAs/i
+    );
+
+    // Reseller in Lagos / Ikeja mirrors -> succeeds!
+    engine.updateVendorProfile({ baseState: "Lagos", baseCity: "Ikeja" });
+    engine.vendor.monnifySubAccountCode = "MFY_SUB_RESELLER_01";
+    const mirrorResult = engine.mirrorSupplierCatalog({
+      supplierIdOrSlug: localSupplier.slug,
+    });
+    assert.ok(mirrorResult.mirroredProducts.length > 0);
+    const mirroredProd = mirrorResult.mirroredProducts[0];
+
+    // 3. Buyer orders the mirrored product -> checkout computes dynamic Monnify split
+    const buyerPhone = "+2348077778899";
+    const order = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone,
+      buyerName: "Tunde Bakare",
+      text: `I want ${mirroredProd.skuCode} delivered to Lekki`,
+      simulateFastForwardIdleTimer: true,
+    });
+    assert.ok(order.createdOrder);
+    const createdOrder = order.createdOrder;
+
+    // Verify dynamic split settlement breakdown was calculated and attached to order
+    assert.equal(createdOrder.isDropship, true);
+    assert.equal(createdOrder.supplierSubAccountCode, "MFY_SUB_SUPPLIER_99");
+    assert.equal(createdOrder.resellerSubAccountCode, "MFY_SUB_RESELLER_01");
+    assert.equal(createdOrder.splitSettlementStatus, "PENDING");
+    assert.ok((createdOrder.supplierShareKobo ?? 0n) > 0n);
+    assert.ok((createdOrder.resellerShareKobo ?? 0n) > 0n);
+    assert.ok((createdOrder.platformFeeKobo ?? 0n) > 0n);
+    assert.equal(
+      (createdOrder.supplierShareKobo ?? 0n) +
+        (createdOrder.resellerShareKobo ?? 0n) +
+        (createdOrder.platformFeeKobo ?? 0n),
+      createdOrder.totalAmountKobo
+    );
+
+    // 4. Reconcile Monnify payment -> splitSettlementStatus becomes SETTLED
+    const txRef = "MNFY_SPLIT_TEST_001";
+    engine.monnify.seedMockVerifiedTransfer({
+      providerTransactionRef: txRef,
+      paymentReference: createdOrder.invoiceReference,
+      invoiceReference: createdOrder.invoiceReference,
+      paymentStatus: "PAID",
+      amountPaidKobo: createdOrder.totalAmountKobo,
+      payerName: "Tunde Bakare",
+      paymentMethod: "ACCOUNT_TRANSFER",
+      serverVerifiedAt: new Date(),
+      rawResponse: {},
+    });
+    const payload = JSON.stringify({ eventData: { transactionReference: txRef } });
+    await engine.reconcileMonnifyWebhook({
+      rawBody: payload,
+      signatureHeader: engine.monnify.signPayloadForTesting(payload),
+      providerTransactionRef: txRef,
+    });
+
+    assert.equal(createdOrder.status, "PAID");
+    assert.equal(createdOrder.splitSettlementStatus, "SETTLED");
+
+    const splitAlertMsg = engine.chatMessages.find(
+      (m) => m.channel === "VENDOR_ADMIN_WA" && m.text.includes("Monnify Auto-Split Settled:")
+    );
+    assert.ok(splitAlertMsg, "Vendor alert must report Monnify Auto-Split settlement amounts");
+  });
+
+  it("processes unified Meta Instagram Direct and Facebook Messenger webhooks and tags order salesChannel for omnichannel analytics", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Update Instagram & Facebook social channel connections
+    const updatedVendor = engine.updateSocialChannelConfig({
+      instagramHandle: "amakaluxury",
+      instagramConnected: true,
+      facebookPageName: "Amaka Shoes Lagos",
+      facebookConnected: true,
+    });
+    assert.equal(updatedVendor.instagramHandle, "@amakaluxury");
+    assert.equal(updatedVendor.instagramConnected, true);
+    assert.equal(updatedVendor.facebookPageName, "Amaka Shoes Lagos");
+    assert.equal(updatedVendor.facebookConnected, true);
+
+    // 2. Simulate Instagram Direct DM order via unified Meta webhook
+    const igWebhook = await engine.handleMetaSocialWebhook({
+      object: "instagram",
+      entry: [
+        {
+          id: "IG_BIZ_178414001",
+          messaging: [
+            {
+              sender: { id: "ig_zainab_99", name: "Zainab Balogun" },
+              message: { text: "I want BAG-01 delivered to Lekki" },
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(igWebhook.channel, "INSTAGRAM");
+    assert.equal(igWebhook.step, "INVOICE_CREATED");
+    assert.ok(igWebhook.createdOrder, "Instagram DM checkout must create an order");
+    assert.equal(igWebhook.createdOrder.salesChannel, "INSTAGRAM");
+
+    // 3. Simulate Facebook Messenger DM order via unified Meta webhook
+    const fbWebhook = await engine.handleMetaSocialWebhook({
+      object: "page",
+      entry: [
+        {
+          id: "FB_PAGE_104928371",
+          messaging: [
+            {
+              sender: { id: "fb_kemi_77", name: "Kemi Adetiba" },
+              message: { text: "I want SHOE-02 delivered to Mainland" },
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(fbWebhook.channel, "FACEBOOK");
+    assert.equal(fbWebhook.step, "INVOICE_CREATED");
+    assert.ok(fbWebhook.createdOrder, "Facebook Messenger checkout must create an order");
+    assert.equal(fbWebhook.createdOrder.salesChannel, "FACEBOOK");
+
+    // 4. Verify serialized state includes salesChannel and sourceChannel tags
+    const state = engine.serializeState();
+    const igOrder = state.orders.find((o) => o.id === igWebhook.createdOrder!.id);
+    const fbOrder = state.orders.find((o) => o.id === fbWebhook.createdOrder!.id);
+    assert.equal(igOrder?.salesChannel, "INSTAGRAM");
+    assert.equal(fbOrder?.salesChannel, "FACEBOOK");
+
+    const igChat = state.chatMessages.find((m) => m.fromPhone === "ig_zainab_99");
+    const fbChat = state.chatMessages.find((m) => m.fromPhone === "fb_kemi_77");
+    assert.equal(igChat?.sourceChannel, "INSTAGRAM");
+    assert.equal(fbChat?.sourceChannel, "FACEBOOK");
+  });
 });
 

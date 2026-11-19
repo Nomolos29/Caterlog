@@ -1,4 +1,6 @@
 import React from "react";
+import type { SubscriptionInfo, PlatformRole } from "@/lib/types";
+import { isResellerRole } from "@/lib/types";
 import {
   CaterlogIcon,
   OverviewIcon,
@@ -14,6 +16,7 @@ import {
   ShieldCheckIcon,
   BellIcon,
   PlusIcon,
+  SparklesIcon,
 } from "./icons";
 
 export type NavView =
@@ -30,18 +33,22 @@ export type NavView =
   | "verification"
   | "notifications"
   | "settings"
-  | "payment-links";
+  | "payment-links"
+  | "subscriptions";
 
 interface SidebarProps {
   currentView: NavView;
   onSelectView: (view: NavView) => void;
   pendingCount?: number;
   onOpenNewOrder?: () => void;
-  activeWorkspace?: "reseller" | "supplier";
+  activeWorkspace?: PlatformRole;
   onToggleWorkspace?: () => void;
+  onSelectRole?: (role: PlatformRole) => void;
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
   vendorName?: string;
+  subscription?: SubscriptionInfo;
+  impersonatedStaffRole?: string | null;
 }
 
 export function Sidebar({
@@ -49,12 +56,17 @@ export function Sidebar({
   onSelectView,
   pendingCount = 0,
   onOpenNewOrder,
-  activeWorkspace = "reseller",
+  activeWorkspace = "growth",
   onToggleWorkspace,
+  onSelectRole,
   mobileOpen = false,
   onCloseMobile,
   vendorName,
+  subscription,
+  impersonatedStaffRole,
 }: SidebarProps) {
+  const planId = subscription?.planId || "GROWTH";
+
   const navItems: Array<{ id: NavView; label: string; icon: React.ReactNode; badge?: number }> = [
     { id: "overview", label: "Overview", icon: <OverviewIcon className="w-5 h-5" /> },
     { id: "orders", label: "Orders", icon: <OrdersIcon className="w-5 h-5" />, badge: pendingCount > 0 ? pendingCount : undefined },
@@ -62,6 +74,7 @@ export function Sidebar({
     { id: "network", label: "Network", icon: <NetworkIcon className="w-5 h-5" /> },
     { id: "customers", label: "Customers", icon: <CustomersIcon className="w-5 h-5" /> },
     { id: "payments", label: "Payments", icon: <PaymentsIcon className="w-5 h-5" /> },
+    { id: "subscriptions", label: "Plans & Pricing", icon: <SparklesIcon className="w-5 h-5" /> },
     { id: "market-boost", label: "Market Boost", icon: <MarketBoostIcon className="w-5 h-5" /> },
     { id: "analytics", label: "Analytics", icon: <AnalyticsIcon className="w-5 h-5" /> },
     { id: "team", label: "Team & Audit", icon: <TeamIcon className="w-5 h-5" /> },
@@ -69,10 +82,30 @@ export function Sidebar({
     { id: "settings", label: "Settings", icon: <SettingsIcon className="w-5 h-5" /> },
   ];
 
-  const isReseller = activeWorkspace === "reseller";
-  const visibleNavItems = isReseller
-    ? navItems.filter((item) => !["market-boost", "analytics", "team"].includes(item.id))
-    : navItems;
+  let allowedViews: NavView[] = [];
+  if (impersonatedStaffRole === "Dispatch Coordinator") {
+    allowedViews = ["overview", "orders", "notifications"];
+  } else if (impersonatedStaffRole === "Catalog Editor") {
+    allowedViews = ["overview", "products", "notifications"];
+  } else if (impersonatedStaffRole === "Accountant") {
+    allowedViews = ["overview", "payments", "notifications"];
+  } else if (impersonatedStaffRole === "Store Attendant") {
+    allowedViews = ["overview", "orders", "products", "customers", "notifications"];
+  } else if (activeWorkspace === "reseller") {
+    // 1. Reseller ($5)
+    allowedViews = ["overview", "orders", "products", "network", "customers", "payments", "subscriptions", "notifications", "settings"];
+  } else if (activeWorkspace === "starter") {
+    // 2. Starter Vendor ($10)
+    allowedViews = ["overview", "orders", "products", "network", "customers", "payments", "subscriptions", "notifications", "settings"];
+  } else if (activeWorkspace === "growth") {
+    // 3. Growth Vendor ($15) - includes Team & Audit capped to 4
+    allowedViews = ["overview", "orders", "products", "market-boost", "network", "customers", "payments", "subscriptions", "analytics", "team", "notifications", "settings"];
+  } else {
+    // 4. Pro Concierge Vendor ($20)
+    allowedViews = ["overview", "orders", "products", "market-boost", "network", "customers", "payments", "subscriptions", "analytics", "team", "notifications", "settings"];
+  }
+
+  const visibleNavItems = navItems.filter((item) => allowedViews.includes(item.id));
 
   const handleItemClick = (id: NavView) => {
     onSelectView(id);
@@ -133,16 +166,108 @@ export function Sidebar({
 
       {/* Footer Navigation & Merchant Store Card */}
       <div className="p-4 space-y-3">
-        {/* Merchant Store Card */}
-        <div className="bg-[#f3f4f8] rounded-xl p-3 border border-transparent">
-          <div className="font-semibold text-xs text-gray-900 flex items-center justify-between">
-            <span className="truncate pr-2">{vendorName || "Store Owner"}</span>
-            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-full shrink-0">
-              ✓ Verified
+        {/* Merchant Store Card with 4-Role Switcher */}
+        <div className="bg-[#f3f4f8] rounded-2xl p-3 border border-gray-200/60 shadow-2xs space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-xs text-gray-900 truncate pr-2">
+              {vendorName || (activeWorkspace === "reseller" ? "Nia Stores" : "Aroko Wholesale")}
+            </span>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase tracking-wide ${
+                activeWorkspace === "reseller"
+                  ? "bg-blue-100 text-blue-800"
+                  : activeWorkspace === "starter"
+                  ? "bg-amber-100 text-amber-900"
+                  : activeWorkspace === "growth"
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-purple-100 text-purple-900"
+              }`}
+            >
+              {activeWorkspace === "reseller"
+                ? "Reseller"
+                : activeWorkspace === "starter"
+                ? "Starter"
+                : activeWorkspace === "growth"
+                ? "Growth"
+                : "Pro"}
             </span>
           </div>
-          <div className="text-[11px] text-gray-500 mt-1">
-            Active Store · NGN Escrow
+
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="font-semibold text-gray-700">
+              {activeWorkspace === "reseller"
+                ? "Reseller ($5/mo)"
+                : activeWorkspace === "starter"
+                ? "Starter ($10/mo)"
+                : activeWorkspace === "growth"
+                ? "Growth ($15/mo)"
+                : "Pro Concierge ($20/mo)"}
+            </span>
+            <button
+              type="button"
+              onClick={() => handleItemClick("subscriptions")}
+              className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+            >
+              Plans →
+            </button>
+          </div>
+
+          {/* 4-Role Interactive Switcher Pills */}
+          <div className="pt-2 border-t border-gray-200/80">
+            <div className="text-[10px] uppercase font-bold text-gray-400 mb-1.5 flex items-center justify-between">
+              <span>Platform Role</span>
+              <span className="font-normal text-[9px] text-gray-400">1-tap switch</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 text-[11px]">
+              <button
+                type="button"
+                onClick={() => onSelectRole ? onSelectRole("reseller") : onToggleWorkspace?.()}
+                className={`py-1.5 px-2 rounded-lg font-semibold text-center transition-all cursor-pointer ${
+                  activeWorkspace === "reseller"
+                    ? "bg-blue-600 text-white shadow-2xs"
+                    : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                }`}
+                title="Reseller / Dropshipper ($5/mo)"
+              >
+                Reseller ($5)
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectRole ? onSelectRole("starter") : onToggleWorkspace?.()}
+                className={`py-1.5 px-2 rounded-lg font-semibold text-center transition-all cursor-pointer ${
+                  activeWorkspace === "starter"
+                    ? "bg-amber-600 text-white shadow-2xs"
+                    : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                }`}
+                title="Starter Vendor ($10/mo)"
+              >
+                Starter ($10)
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectRole ? onSelectRole("growth") : onToggleWorkspace?.()}
+                className={`py-1.5 px-2 rounded-lg font-semibold text-center transition-all cursor-pointer ${
+                  activeWorkspace === "growth"
+                    ? "bg-emerald-700 text-white shadow-2xs"
+                    : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                }`}
+                title="Growth Vendor ($15/mo)"
+              >
+                Growth ($15)
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectRole ? onSelectRole("pro") : onToggleWorkspace?.()}
+                className={`py-1.5 px-2 rounded-lg font-semibold text-center transition-all cursor-pointer ${
+                  activeWorkspace === "pro"
+                    ? "bg-purple-700 text-white shadow-2xs"
+                    : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                }`}
+                title="Pro Concierge Vendor ($20/mo)"
+              >
+                Pro ($20)
+              </button>
+            </div>
           </div>
         </div>
 

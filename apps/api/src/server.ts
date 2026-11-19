@@ -2,7 +2,9 @@ import http from "node:http";
 import { existsSync } from "node:fs";
 import { URL } from "node:url";
 import { formatNaira, nairaToKobo, parseVendorWhatsAppCommand } from "@caterlog/commerce-core";
+import { isTerritoryDeliverable } from "@caterlog/shared";
 import { CaterlogStage1Engine } from "./runtime-engine.ts";
+import type { StaffPermissionKey, VendorSession } from "./runtime-types.ts";
 import { createEngineFromEnv } from "./bootstrap.ts";
 import { renderDynamicProductOgSvg } from "./og-card.ts";
 import { mediaStore } from "./media/media-store.ts";
@@ -39,6 +41,185 @@ export class HttpError extends Error {
   }
 }
 
+export function getSessionToken(req: http.IncomingMessage): string | null {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    const match = cookieHeader.match(/caterlog_session=([^;]+)/);
+    if (match) return match[1].trim();
+  }
+  return null;
+}
+
+export function requireVendorSession(
+  engine: CaterlogStage1Engine,
+  req: http.IncomingMessage,
+  requiredPermission?: StaffPermissionKey,
+  actionLabel?: string
+): VendorSession {
+  const token = getSessionToken(req);
+  if (!token) {
+    throw new HttpError(401, "Authentication required. Please sign in to access vendor operations.");
+  }
+  const session = engine.authenticateVendorSession(token);
+  if (!session) {
+    throw new HttpError(401, "Invalid or expired session. Please sign in again.");
+  }
+  if (requiredPermission) {
+    checkSessionPermission(session, requiredPermission, actionLabel);
+  }
+  return session;
+}
+
+function checkSessionPermission(
+  session: Pick<VendorSession, "staffRole" | "isOwner" | "permissions">,
+  permission: StaffPermissionKey,
+  actionLabel = "this operation"
+): void {
+  if (session.isOwner) return;
+  if (permission === "ownerOnly") {
+    throw new HttpError(
+      403,
+      `Access denied (${session.staffRole}): Only the Store Owner can perform ${actionLabel}.`
+    );
+  }
+  if (!session.permissions[permission]) {
+    throw new HttpError(
+      403,
+      `Access denied (${session.staffRole}): Your staff role does not have "${permission}" permission to perform ${actionLabel}.`
+    );
+  }
+}
+
+/**
+ * RBAC Auth Middleware:
+ * When a request carries a staff session token (`Authorization: Bearer <token>` or `caterlog_session`)
+ * or an explicit staff identity header (`x-caterlog-staff-email`), verifies the staff member is active
+ * and enforces the required role-based permission (`canManageOrders`, `canManageInventory`, etc.).
+ */
+export function enforceStaffPermission(
+  engine: CaterlogStage1Engine,
+  req: http.IncomingMessage,
+  permission: StaffPermissionKey,
+  actionLabel = "this operation"
+): VendorSession | null {
+  const token = getSessionToken(req);
+  if (token) {
+    const session = engine.authenticateVendorSession(token);
+    if (!session) {
+      throw new HttpError(401, "Invalid, expired, or suspended staff session. Please sign in again.");
+    }
+    checkSessionPermission(session, permission, actionLabel);
+    return session;
+  }
+
+  const staffEmailHeader = req.headers["x-caterlog-staff-email"];
+  const staffEmail = Array.isArray(staffEmailHeader) ? staffEmailHeader[0] : staffEmailHeader;
+  if (staffEmail && staffEmail.trim()) {
+    const cleanEmail = staffEmail.trim().toLowerCase();
+    const member = engine.teamMembers.find(
+      (m) => m.email.toLowerCase() === cleanEmail || m.id.toLowerCase() === cleanEmail
+    );
+    if (!member) {
+      throw new HttpError(401, `Unknown staff member "${staffEmail}".`);
+    }
+    if (member.status === "Suspended") {
+      throw new HttpError(403, `Staff account "${member.email}" has been suspended.`);
+    }
+    const isOwner = member.role === "Owner";
+    checkSessionPermission(
+      {
+        staffRole: member.role,
+        isOwner,
+        permissions: {
+          canManageOrders: isOwner ? true : member.canManageOrders,
+          canManageInventory: isOwner ? true : member.canManageInventory,
+          canViewPayouts: isOwner ? true : member.canViewPayouts,
+          canProcessRefunds: isOwner ? true : member.canProcessRefunds,
+          canOverrideCopilot: isOwner ? true : member.canOverrideCopilot,
+        },
+      },
+      permission,
+      actionLabel
+    );
+  }
+
+  return null;
+}
+
+function resolveRouteRbacPermission(
+  method: string | undefined,
+  path: string
+): { permission: StaffPermissionKey; label: string } | null {
+  const m = (method || "GET").toUpperCase();
+  if (
+    m === "GET" &&
+    (path === "/api/v1/vendor/state" ||
+      path === "/api/v1/vendor/analytics" ||
+      path.startsWith("/api/v1/vendor/network/suppliers") ||
+      path === "/api/v1/vendor/market-boost/pricing")
+  ) {
+    return null;
+  }
+  if (path === "/api/v1/vendor/sync" || path === "/api/v1/vendor/notifications/sync") {
+    return null;
+  }
+
+  // 1. Owner-Only Administration (Team management, Bank linking, Withdrawals, Secure Settings, Subscriptions)
+  if (
+    path.startsWith("/api/v1/vendor/team") ||
+    path.startsWith("/api/v1/vendor/bank") ||
+    path === "/api/v1/vendor/withdraw" ||
+    path === "/api/v1/vendor/settings/secure" ||
+    path.startsWith("/api/v1/vendor/subscription") ||
+    path.startsWith("/api/v1/vendor/kyc") ||
+    path.startsWith("/api/v1/vendor/trust-tier")
+  ) {
+    return { permission: "ownerOnly", label: "Store Owner administration & payout security" };
+  }
+
+  // 2. Customer Refunds (canProcessRefunds)
+  if (path.startsWith("/api/v1/vendor/orders/") && path.endsWith("/refund")) {
+    return { permission: "canProcessRefunds", label: "instant customer refund" };
+  }
+
+  // 3. Order Fulfillment & Dispatch (canManageOrders)
+  if (
+    path.startsWith("/api/v1/vendor/orders/") ||
+    path.startsWith("/api/v1/vendor/shipping-zones")
+  ) {
+    return { permission: "canManageOrders", label: "order fulfillment & dispatch" };
+  }
+
+  // 4. Catalog, Inventory, Discounts & Wholesale Mirroring (canManageInventory)
+  if (
+    path.startsWith("/api/v1/vendor/products") ||
+    path.startsWith("/api/v1/vendor/discounts") ||
+    path.startsWith("/api/v1/vendor/market-boost") ||
+    path.startsWith("/api/v1/vendor/network/mirror")
+  ) {
+    return { permission: "canManageInventory", label: "catalog & inventory management" };
+  }
+
+  // 5. Payouts, Payment Links & Split Rules (canViewPayouts)
+  if (
+    path.startsWith("/api/v1/vendor/payment-links") ||
+    path.startsWith("/api/v1/vendor/split-rules")
+  ) {
+    return { permission: "canViewPayouts", label: "payment links & settlement split configuration" };
+  }
+
+  // 6. Co-Pilot & General Settings (canOverrideCopilot)
+  if (path === "/api/v1/vendor/settings") {
+    return { permission: "canOverrideCopilot", label: "WhatsApp Co-Pilot & store settings" };
+  }
+
+  return null;
+}
+
 export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
   const sseClients = new Set<http.ServerResponse>();
 
@@ -55,14 +236,20 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
 
   const server = http.createServer(async (req, res) => {
     // Enable CORS for Web Dashboard
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const reqOrigin = req.headers.origin;
+    if (reqOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", reqOrigin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
     res.setHeader(
       "Access-Control-Allow-Methods",
       "GET, POST, PATCH, PUT, DELETE, OPTIONS"
     );
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, monnify-signature, x-hub-signature-256"
+      "Content-Type, Authorization, x-caterlog-staff-email, monnify-signature, x-hub-signature-256"
     );
 
     if (req.method === "OPTIONS") {
@@ -322,7 +509,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           code?: string;
           purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
           businessName?: string;
-          role?: "reseller" | "supplier";
+          role?: "reseller" | "starter" | "growth" | "pro" | "vendor" | "supplier";
           isExistingBusiness?: boolean;
           catalogSelection?: "mirror" | "custom";
         };
@@ -351,10 +538,24 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           await engine.flushPersistence();
         }
 
-        const token = engine.createMagicLinkToken();
+        const sessionResult = engine.createVendorSession({
+          phone: targetPhone,
+          email: `${targetPhone.replace(/\D/g, "")}@caterlog.store`,
+          ipAddress: req.socket.remoteAddress,
+          userAgent: req.headers["user-agent"],
+        });
+        const token = sessionResult.token;
+
+        res.setHeader(
+          "Set-Cookie",
+          `caterlog_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`
+        );
+
         return sendJson(res, 200, {
           authenticated: true,
           token,
+          sessionToken: token,
+          session: sessionResult.session,
           vendor: {
             id: engine.vendor.id,
             slug: engine.vendor.slug,
@@ -366,13 +567,120 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
+      // 1c1-b. Demo Session Activation for Local Testing (`POST /api/v1/auth/demo-session`)
+      if (req.method === "POST" && path === "/api/v1/auth/demo-session") {
+        const sessionResult = engine.createVendorSession({
+          phone: engine.vendor.whatsappPhone,
+          email: "owner@niastores.example",
+          ipAddress: req.socket.remoteAddress,
+          userAgent: req.headers["user-agent"],
+        });
+        const token = sessionResult.token;
+
+        res.setHeader(
+          "Set-Cookie",
+          `caterlog_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`
+        );
+
+        return sendJson(res, 200, {
+          authenticated: true,
+          token,
+          sessionToken: token,
+          session: sessionResult.session,
+          vendor: {
+            id: engine.vendor.id,
+            slug: engine.vendor.slug,
+            businessName: engine.vendor.businessName,
+            role: engine.vendor.role ?? "reseller",
+            whatsappPhone: engine.vendor.whatsappPhone,
+          },
+          state: engine.serializeState(),
+        });
+      }
+
+      // 1c1-b2. Staff Member Sub-Account Login (`POST /api/v1/auth/staff-login`)
+      if (req.method === "POST" && path === "/api/v1/auth/staff-login") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+          email?: string;
+        };
+        if (!body.email || !body.email.trim()) {
+          throw new HttpError(400, "Staff member email is required to sign in.");
+        }
+        const authResult = engine.authenticateStaffMember({
+          email: body.email,
+          ipAddress: req.socket.remoteAddress,
+          userAgent: req.headers["user-agent"],
+        });
+
+        res.setHeader(
+          "Set-Cookie",
+          `caterlog_session=${authResult.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`
+        );
+
+        return sendJson(res, 200, {
+          authenticated: true,
+          token: authResult.token,
+          sessionToken: authResult.token,
+          session: authResult.session,
+          member: authResult.member,
+          vendor: engine.vendor,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 1c1-b3. Get Current Session Identity & RBAC Permissions (`GET /api/v1/auth/session`)
+      if (req.method === "GET" && path === "/api/v1/auth/session") {
+        const token = getSessionToken(req);
+        const session = token ? engine.authenticateVendorSession(token) : null;
+        return sendJson(res, 200, {
+          authenticated: Boolean(session),
+          session,
+        });
+      }
+
+      // 1c1-c. Transaction PIN Setup (`POST /api/v1/auth/pin/setup`)
+      if (req.method === "POST" && path === "/api/v1/auth/pin/setup") {
+        requireVendorSession(engine, req);
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+          pin: string;
+          otpCode?: string;
+          currentPin?: string;
+        };
+        if (!body.pin) {
+          throw new HttpError(400, "A 6-digit transaction PIN is required.");
+        }
+        const result = await engine.setTransactionPin(body);
+        return sendJson(res, 200, {
+          status: "pin_set",
+          message: result.message,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 1c1-d. Transaction PIN Verification (`POST /api/v1/auth/pin/verify`)
+      if (req.method === "POST" && path === "/api/v1/auth/pin/verify") {
+        requireVendorSession(engine, req);
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as { pin: string };
+        if (!body.pin) {
+          throw new HttpError(400, "Transaction PIN is required.");
+        }
+        await engine.verifyTransactionPin(body.pin);
+        return sendJson(res, 200, {
+          status: "verified",
+          valid: true,
+        });
+      }
+
       // 1c2. Vendor Onboarding / Profile Setup (`POST /api/v1/auth/onboard`)
       if (req.method === "POST" && path === "/api/v1/auth/onboard") {
         const rawBody = await readRawBody(req);
         const body = (rawBody ? JSON.parse(rawBody) : {}) as {
           phone?: string;
           businessName?: string;
-          role?: "reseller" | "supplier";
+          role?: "reseller" | "starter" | "growth" | "pro" | "vendor" | "supplier";
           isExistingBusiness?: boolean;
           catalogSelection?: "mirror" | "custom";
           cacNumber?: string;
@@ -429,8 +737,24 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           throw new HttpError(401, "Invalid, expired, or already used login token.");
         }
 
+        const sessionResult = engine.createVendorSession({
+          phone: engine.vendor.whatsappPhone,
+          email: `${engine.vendor.slug}@caterlog.store`,
+          ipAddress: req.socket.remoteAddress,
+          userAgent: req.headers["user-agent"],
+        });
+        const token = sessionResult.token;
+
+        res.setHeader(
+          "Set-Cookie",
+          `caterlog_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`
+        );
+
         return sendJson(res, 200, {
           authenticated: true,
+          token,
+          sessionToken: token,
+          session: sessionResult.session,
           vendor: {
             id: engine.vendor.id,
             slug: engine.vendor.slug,
@@ -828,6 +1152,54 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
+      // 6d. Emergency Store Panic Button / Payout Freeze (`POST /api/v1/security/freeze` & `GET /security/freeze`)
+      if (req.method === "POST" && path === "/api/v1/security/freeze") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as { token?: string };
+        const token = body.token || url.searchParams.get("token");
+        if (!token) {
+          throw new HttpError(400, "Emergency cancellation token is required.");
+        }
+        const result = engine.emergencyFreezeStore(token);
+        return sendJson(res, 200, {
+          status: "frozen",
+          message: result.message,
+          state: engine.serializeState(),
+        });
+      }
+
+      if (req.method === "GET" && (path === "/security/freeze" || path === "/api/v1/security/freeze")) {
+        const token = url.searchParams.get("token");
+        if (token) {
+          engine.emergencyFreezeStore(token);
+        }
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(`<!DOCTYPE html>
+<html>
+<head><title>Caterlog Store Frozen</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #fef2f2; color: #991b1b; text-align: center; padding: 20px;">
+  <div>
+    <h1 style="font-size: 24px; margin-bottom: 8px;">🛑 Store Security Lockdown Activated</h1>
+    <p style="font-size: 14px; max-width: 480px; margin: 0 auto 16px; color: #7f1d1d;">All payouts have been frozen, pending bank account modifications discarded, and all active login sessions terminated.</p>
+    <p style="font-size: 13px; color: #b91c1c;">Contact Caterlog Security: <a href="mailto:security@caterlog.store" style="color: #991b1b; font-weight: bold;">security@caterlog.store</a></p>
+  </div>
+</body>
+</html>`);
+        return;
+      }
+
+      // -----------------------------------------------------------------------
+      // AUTHENTICATION & RBAC GUARD: All /api/v1/vendor/* endpoints require an active session
+      // and enforce role-based permissions for staff sub-accounts.
+      // -----------------------------------------------------------------------
+      if (path.startsWith("/api/v1/vendor/")) {
+        const rbacRule = resolveRouteRbacPermission(req.method, path);
+        requireVendorSession(engine, req, rbacRule?.permission, rbacRule?.label);
+        if (rbacRule) {
+          enforceStaffPermission(engine, req, rbacRule.permission, rbacRule.label);
+        }
+      }
+
       // 7. Dashboard REST API: Full Vendor State (`GET /api/v1/vendor/state`)
       if (req.method === "GET" && path === "/api/v1/vendor/state") {
         if (
@@ -871,7 +1243,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       if (req.method === "PATCH" && path === "/api/v1/vendor/profile") {
         const body = JSON.parse(await readRawBody(req)) as {
           businessName?: string;
-          role?: "reseller" | "supplier";
+          role?: "reseller" | "starter" | "growth" | "pro" | "vendor" | "supplier";
           whatsappPhone?: string;
           instagramHandle?: string;
           baseState?: string;
@@ -882,20 +1254,46 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, engine.serializeState());
       }
 
+      // 8a-2. Dashboard REST API: Update Social Channel Connections (`POST /api/v1/vendor/channels` or `PATCH /api/v1/vendor/channels`)
+      if (
+        (req.method === "POST" || req.method === "PATCH") &&
+        path === "/api/v1/vendor/channels"
+      ) {
+        const body = JSON.parse(await readRawBody(req)) as {
+          instagramHandle?: string;
+          instagramConnected?: boolean;
+          instagramBusinessId?: string;
+          facebookPageName?: string;
+          facebookPageId?: string;
+          facebookConnected?: boolean;
+        };
+        engine.updateSocialChannelConfig(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, engine.serializeState());
+      }
+
       // 8b. Dashboard REST API: Secure Fund Withdrawal (`POST /api/v1/vendor/withdraw`)
       if (req.method === "POST" && path === "/api/v1/vendor/withdraw") {
         const body = JSON.parse(await readRawBody(req)) as {
           amountNaira: number;
-          bankName: string;
-          accountNumber: string;
-          securityCode: string;
+          bankName?: string;
+          accountNumber?: string;
+          securityCode?: string;
+          pin?: string;
         };
-        if (!body.securityCode || body.securityCode.trim().length !== 6) {
-          throw new HttpError(400, "A 6-digit WhatsApp security code is required for fund withdrawals.");
-        }
-        const isValid = engine.verifyOtp(engine.vendor.whatsappPhone, body.securityCode, "WITHDRAWAL");
-        if (!isValid) {
-          throw new HttpError(401, "Invalid or expired 6-digit withdrawal security code. Please check WhatsApp.");
+
+        if (body.pin) {
+          await engine.verifyTransactionPin(body.pin);
+        } else if (body.securityCode && body.securityCode.trim().length === 6) {
+          const isValid = engine.verifyOtp(engine.vendor.whatsappPhone, body.securityCode, "WITHDRAWAL");
+          if (!isValid) {
+            throw new HttpError(401, "Invalid or expired 6-digit withdrawal security code. Please check WhatsApp.");
+          }
+        } else {
+          throw new HttpError(
+            400,
+            "A 6-digit Transaction PIN or WhatsApp security code is required to authorize fund withdrawal."
+          );
         }
 
         const withdrawal = engine.recordWithdrawal({
@@ -906,15 +1304,15 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         const withdrawAmountKobo = nairaToKobo(body.amountNaira || 0);
         await engine.whatsapp.sendTextMessage({
           toPhone: engine.vendor.whatsappPhone,
-          text: `💸 *Settlement Payout Dispatched:*\nAmount: *${formatNaira(withdrawAmountKobo)}*\nBank: *${body.bankName}* (\`${body.accountNumber}\`)\nReference: \`${withdrawal.reference}\`\n\n_Funds will reflect in your verified settlement account within 10 minutes._`,
+          text: `💸 *Settlement Payout Dispatched:*\nAmount: *${formatNaira(withdrawAmountKobo)}*\nBank: *${withdrawal.bankName}* (\`${withdrawal.accountNumber}\`)\nReference: \`${withdrawal.reference}\`\n\n_Funds will reflect in your verified settlement account within 10 minutes._`,
           vendorPhoneId: engine.vendor.whatsappPhoneId,
         });
 
         return sendJson(res, 200, {
           status: "dispatched",
           amountNaira: body.amountNaira,
-          bankName: body.bankName,
-          accountNumber: body.accountNumber,
+          bankName: withdrawal.bankName,
+          accountNumber: withdrawal.accountNumber,
           reference: withdrawal.reference,
           message: "Withdrawal successfully authorized and queued for bank settlement.",
           state: engine.serializeState(),
@@ -949,7 +1347,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
-      // 8d. Dashboard REST API: Link Settlement Bank Account & Provision Subaccount (`POST /api/v1/vendor/bank`)
+      // 8d. Dashboard REST API: Initial Settlement Bank Account Linking (`POST /api/v1/vendor/bank`)
       if (req.method === "POST" && path === "/api/v1/vendor/bank") {
         const body = JSON.parse(await readRawBody(req)) as {
           bankCode: string;
@@ -959,6 +1357,18 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         if (!body.bankCode || !body.accountNumber) {
           throw new HttpError(400, "Bank code and 10-digit account number are required.");
         }
+
+        // If an active account is already linked, reject un-cooled changes
+        if (
+          engine.vendor.bankAccountNumber &&
+          engine.vendor.bankAccountNumber !== body.accountNumber.trim().replace(/\D/g, "")
+        ) {
+          throw new HttpError(
+            400,
+            "A verified payout account is already active. Modifying payout bank accounts requires step-up verification via /api/v1/vendor/bank/request-change with a 72-hour cooling-off freeze."
+          );
+        }
+
         const result = await engine.linkVendorBankAccount(body);
         return sendJson(res, 200, {
           status: "linked",
@@ -966,6 +1376,47 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           bankName: result.vendor.bankName,
           accountNumber: result.vendor.bankAccountNumber,
           accountName: result.vendor.bankAccountName,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8d-2. Dashboard REST API: Request Payout Bank Account Change with 72h Cooling-off (`POST /api/v1/vendor/bank/request-change`)
+      if (req.method === "POST" && path === "/api/v1/vendor/bank/request-change") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          bankCode: string;
+          accountNumber: string;
+          pin: string;
+          otpCode: string;
+        };
+        if (!body.bankCode || !body.accountNumber || !body.pin || !body.otpCode) {
+          throw new HttpError(
+            400,
+            "Bank code, account number, 6-digit transaction PIN, and WhatsApp OTP are all required."
+          );
+        }
+        const result = await engine.requestPayoutAccountChange({
+          bankCode: body.bankCode,
+          accountNumber: body.accountNumber,
+          pin: body.pin,
+          otpCode: body.otpCode,
+          requestorIp: req.socket.remoteAddress,
+        });
+        return sendJson(res, 200, {
+          status: result.status,
+          bankName: result.bankName,
+          accountNumber: result.accountNumber,
+          accountName: result.accountName,
+          effectiveAt: result.effectiveAt,
+          cancelToken: result.cancelToken,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8d-3. Dashboard REST API: Apply Elapsed Bank Change (`POST /api/v1/vendor/bank/apply-pending`)
+      if (req.method === "POST" && path === "/api/v1/vendor/bank/apply-pending") {
+        const applied = await engine.applyPendingBankUpdate();
+        return sendJson(res, 200, {
+          applied,
           state: engine.serializeState(),
         });
       }
@@ -988,6 +1439,39 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, {
           reseller: reseller ?? "ALL_RESELLERS",
           catalog: engine.getMarketBoostWholesaleCatalog(reseller),
+        });
+      }
+
+      // 8f-1. Dashboard REST API: Get Wholesale Suppliers with Geofence Filtering (`GET /api/v1/vendor/network/suppliers`)
+      if (req.method === "GET" && path === "/api/v1/vendor/network/suppliers") {
+        const targetState = url.searchParams.get("state") || engine.vendor.baseState || "Lagos";
+        const targetLga = url.searchParams.get("lga") || engine.vendor.baseCity || undefined;
+        const category = url.searchParams.get("category") || undefined;
+        const deliverableOnly = url.searchParams.get("deliverableOnly") === "true";
+
+        let filtered = engine.suppliers.map((sup) => {
+          const geofence = isTerritoryDeliverable(sup, {
+            state: targetState,
+            lga: targetLga,
+          });
+          return {
+            ...sup,
+            geofence,
+          };
+        });
+
+        if (category && category !== "All Categories") {
+          filtered = filtered.filter((s) => s.category.toLowerCase().includes(category.toLowerCase()));
+        }
+        if (deliverableOnly) {
+          filtered = filtered.filter((s) => s.geofence.deliverable);
+        }
+
+        return sendJson(res, 200, {
+          status: "success",
+          territory: { state: targetState, lga: targetLga },
+          total: filtered.length,
+          suppliers: filtered,
         });
       }
 
@@ -1093,6 +1577,11 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           phone?: string;
           role: string;
           status?: "Active" | "Invited" | "Suspended";
+          canManageOrders?: boolean;
+          canManageInventory?: boolean;
+          canViewPayouts?: boolean;
+          canProcessRefunds?: boolean;
+          canOverrideCopilot?: boolean;
         };
         const member = engine.saveTeamMember(body);
         return sendJson(res, 200, {
@@ -1118,6 +1607,36 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         };
         engine.syncNotifications(body);
         return sendJson(res, 200, engine.serializeState());
+      }
+
+      // 8n. Dashboard REST API: Upgrade Subscription (`POST /api/v1/vendor/subscription/upgrade`)
+      if (req.method === "POST" && path === "/api/v1/vendor/subscription/upgrade") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          planId: "FREE" | "GROWTH" | "SCALE";
+          billingCycle?: "MONTHLY" | "ANNUALLY";
+        };
+        if (!body.planId) {
+          throw new HttpError(400, "planId is required.");
+        }
+        const subscription = engine.updateSubscription(body.planId, body.billingCycle || "MONTHLY");
+        return sendJson(res, 200, {
+          status: "upgraded",
+          subscription,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8o. Dashboard REST API: Fast-Track Trust Tier (`POST /api/v1/vendor/trust-tier/fast-track`)
+      if (req.method === "POST" && path === "/api/v1/vendor/trust-tier/fast-track") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          cacNumber?: string;
+        };
+        const trustTier = engine.fastTrackTrustTier(body.cacNumber);
+        return sendJson(res, 200, {
+          status: "fast_tracked",
+          trustTier,
+          state: engine.serializeState(),
+        });
       }
 
       // 9. Dashboard REST API: Add Product (`POST /api/v1/vendor/products`)
@@ -1480,7 +1999,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, { result, state: engine.serializeState() });
       }
 
-      // 16. Local Simulator Endpoint: WhatsApp Vendor Keyword OR Buyer Inquiry (`POST /api/v1/simulate/whatsapp`)
+      // 16. Local Simulator Endpoint: WhatsApp / Instagram / Facebook Vendor Keyword OR Buyer Inquiry (`POST /api/v1/simulate/whatsapp`)
       if (req.method === "POST" && path === "/api/v1/simulate/whatsapp") {
         const body = JSON.parse(await readRawBody(req)) as {
           role: "VENDOR_KEYWORD" | "BUYER_INQUIRY" | "VENDOR_MANUAL_BUYER_REPLY";
@@ -1490,6 +2009,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           buyerName?: string;
           quotedStatusImagePhash?: string;
           simulateFastForwardIdleTimer?: boolean;
+          sourceChannel?: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
         };
 
         let attachedImageUrl = body.attachedImageUrl;
@@ -1550,9 +2070,41 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           quotedStatusImagePhash: attachedPhash,
           attachedImageUrl,
           simulateFastForwardIdleTimer: body.simulateFastForwardIdleTimer ?? true,
+          sourceChannel: body.sourceChannel,
         });
 
         return sendJson(res, 200, { ...inquiryResult, state: engine.serializeState() });
+      }
+
+      // 16b. Unified Meta Messenger Platform & Instagram Direct Webhook (`GET /webhooks/meta` & `POST /webhooks/meta`)
+      if (req.method === "GET" && path === "/webhooks/meta") {
+        const mode = url.searchParams.get("hub.mode");
+        const token = url.searchParams.get("hub.verify_token");
+        const challenge = url.searchParams.get("hub.challenge");
+        const expectedToken =
+          process.env.META_VERIFY_TOKEN ??
+          process.env.WHATSAPP_VERIFY_TOKEN ??
+          "caterlog-whatsapp-verify-token";
+
+        if (mode === "subscribe" && token === expectedToken && challenge) {
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end(challenge);
+          return;
+        }
+        return sendJson(res, 403, { error: "Invalid Meta webhook verification token" });
+      }
+
+      if (req.method === "POST" && path === "/webhooks/meta") {
+        const rawBody = await readRawBody(req);
+        const body = JSON.parse(rawBody || "{}") as Parameters<
+          typeof engine.handleMetaSocialWebhook
+        >[0];
+        const socialResult = await engine.handleMetaSocialWebhook(body);
+        return sendJson(res, 200, {
+          status: "acknowledged",
+          ...socialResult,
+          state: engine.serializeState(),
+        });
       }
 
       // 17. Local Simulator Endpoint: Monnify Bank Transfer (`POST /api/v1/simulate/monnify-transfer`)
@@ -1662,7 +2214,13 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown) {
 }
 
 // Start server if invoked directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isDirectEntry =
+  Boolean(process.argv[1]) &&
+  (import.meta.url === `file://${process.argv[1]}` ||
+    import.meta.url.endsWith(process.argv[1].replace(/^\.?\//, "")) ||
+    process.argv[1].endsWith("server.ts"));
+
+if (isDirectEntry) {
   const port = Number(process.env.API_PORT ?? 4000);
 
   const start = async () => {

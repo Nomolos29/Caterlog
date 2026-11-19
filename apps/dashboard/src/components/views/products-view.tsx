@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import type { ProductItem, ResellerMirror, SupplierProfile } from "@/lib/types";
+import type { ProductItem, ResellerMirror, SupplierProfile, PlatformRole } from "@/lib/types";
+import { isResellerRole, isVendorRole } from "@/lib/types";
 import { PlusIcon } from "../icons";
 import { ProductEditorModal, buildStructuredSku } from "./product-editor-modal";
 import { EmptyState } from "../ui/empty-state";
@@ -11,7 +12,7 @@ interface ProductsViewProps {
   products: ProductItem[];
   suppliers?: SupplierProfile[];
   resellerMirrors?: ResellerMirror[];
-  workspaceRole?: "reseller" | "supplier";
+  workspaceRole?: PlatformRole;
   initialTab?:
     | "all"
     | "my-inventory"
@@ -88,7 +89,7 @@ export function ProductsView({
   products,
   suppliers = [],
   resellerMirrors = [],
-  workspaceRole = "reseller",
+  workspaceRole = "growth",
   initialTab = "my-inventory",
   initialEditResellSku = null,
   onConsumeEditResellSku,
@@ -100,6 +101,9 @@ export function ProductsView({
   onNavigateToSettings,
   onSyncWhatsAppCatalog,
 }: ProductsViewProps) {
+  const isVendor = isVendorRole(workspaceRole);
+  const isReseller = isResellerRole(workspaceRole);
+
   // Tabs: 'all' | 'my-inventory' | 'reselling' | 'exceptions' | 'mirror-wizard'
   const [activeTab, setActiveTab] = useState<
     "all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard"
@@ -108,10 +112,12 @@ export function ProductsView({
     useState<ResellingItem[]>(INITIAL_RESELLING);
 
   useEffect(() => {
-    if (workspaceRole === "supplier" && activeTab === "reselling") {
+    if (isVendor && activeTab === "reselling") {
       setActiveTab("my-inventory");
+    } else if (isReseller && activeTab === "my-inventory") {
+      setActiveTab("reselling");
     }
-  }, [workspaceRole, activeTab]);
+  }, [isVendor, isReseller, activeTab]);
 
   useEffect(() => {
     if (initialTab) {
@@ -126,7 +132,7 @@ export function ProductsView({
       resellingList.find(
         (item) =>
           item.sku.toUpperCase() === upperTarget ||
-          item.catalogSku?.toUpperCase() === upperTarget
+          item.catalogSku?.toUpperCase() === upperTarget,
       ) ?? resellingList[0];
     if (match) {
       setActiveTab("reselling");
@@ -490,7 +496,7 @@ export function ProductsView({
             My inventory (
             {products.filter((p) => !p.customFields?.supplierSku).length})
           </button>
-          {workspaceRole !== "supplier" && (
+          {!isVendor && (
             <button
               onClick={() => setActiveTab("reselling")}
               className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
@@ -1174,7 +1180,7 @@ export function ProductsView({
           My inventory (
           {products.filter((p) => !p.customFields?.supplierSku).length})
         </button>
-        {workspaceRole !== "supplier" && (
+        {!isVendor && (
           <button
             onClick={() => setActiveTab("reselling")}
             className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"

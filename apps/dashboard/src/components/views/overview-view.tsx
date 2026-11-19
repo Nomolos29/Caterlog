@@ -1,10 +1,12 @@
 import React, { useState } from "react";
-import type { VendorAnalytics, OrderItem, VendorProfile, ProductItem } from "@/lib/types";
+import type { VendorAnalytics, OrderItem, VendorProfile, ProductItem, PlatformRole } from "@/lib/types";
+import { isResellerRole } from "@/lib/types";
 import { ClockIcon, CheckIcon, WhatsAppBadgeIcon } from "../icons";
 
 interface OverviewViewProps {
   analytics: VendorAnalytics;
   vendor: VendorProfile;
+  workspaceRole?: PlatformRole;
   orders: OrderItem[];
   products?: ProductItem[];
   onSelectOrder?: (order: OrderItem) => void;
@@ -12,6 +14,7 @@ interface OverviewViewProps {
   onNavigateToPayments?: () => void;
   onFilterOrdersByStatus?: (status: "PENDING" | "PAID" | "PROCESSING") => void;
   onNavigateToProducts?: () => void;
+  onNavigateToNetwork?: () => void;
   onNavigateToSettings?: (tab?: "setup" | "conversations" | "detail" | "shipping" | "general") => void;
   onOpenSimulator?: () => void;
 }
@@ -19,6 +22,7 @@ interface OverviewViewProps {
 export function OverviewView({
   analytics,
   vendor,
+  workspaceRole = "growth",
   orders,
   products = [],
   onSelectOrder,
@@ -26,9 +30,11 @@ export function OverviewView({
   onNavigateToPayments,
   onFilterOrdersByStatus,
   onNavigateToProducts,
+  onNavigateToNetwork,
   onNavigateToSettings,
   onOpenSimulator,
 }: OverviewViewProps) {
+  const isReseller = isResellerRole(workspaceRole);
   const [period, setPeriod] = useState<"7D" | "30D" | "1Y">("30D");
 
   // Derive counts based on orders
@@ -49,9 +55,30 @@ export function OverviewView({
       {/* Welcome Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
-            Good morning, {vendor.businessName}
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+              Good morning, {vendor.businessName}
+            </h1>
+            <span
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                workspaceRole === "reseller"
+                  ? "bg-blue-50 text-blue-800 border-blue-200"
+                  : workspaceRole === "starter"
+                  ? "bg-amber-50 text-amber-900 border-amber-200"
+                  : workspaceRole === "growth"
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                  : "bg-purple-50 text-purple-900 border-purple-200"
+              }`}
+            >
+              {workspaceRole === "reseller"
+                ? "Reseller ($5)"
+                : workspaceRole === "starter"
+                ? "Starter Vendor ($10)"
+                : workspaceRole === "growth"
+                ? "Growth Vendor ($15)"
+                : "Pro Concierge ($20)"}
+            </span>
+          </div>
           <p className="text-xs sm:text-sm text-gray-500 mt-1">
             Here&apos;s what&apos;s happening with your business today.
           </p>
@@ -112,11 +139,11 @@ export function OverviewView({
               </p>
             </div>
 
-            {/* Step 2: Add Products -> Links to Products View */}
+            {/* Step 2: Add Products or Mirror Wholesale Catalog */}
             <div
-              onClick={onNavigateToProducts}
+              onClick={isReseller ? (onNavigateToNetwork || onNavigateToProducts) : onNavigateToProducts}
               className="bg-white/10 hover:bg-white/15 active:scale-[0.99] transition-all cursor-pointer backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2 group shadow-xs hover:border-amber-300/50"
-              title="Manage and add store products"
+              title={isReseller ? "Mirror products from wholesale suppliers" : "Manage and add store products"}
             >
               <div className="flex items-center justify-between">
                 <span className={`text-xs font-bold uppercase tracking-wider ${hasProducts ? "text-emerald-300" : "text-amber-300"}`}>
@@ -129,21 +156,25 @@ export function OverviewView({
                 </span>
               </div>
               <div className="font-bold text-sm text-white group-hover:text-amber-200 transition-colors flex items-center justify-between">
-                <span>Add Store Products</span>
+                <span>{isReseller ? "Mirror Supplier Products" : "Add Store Products"}</span>
                 <span className="text-xs text-amber-300 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all">→</span>
               </div>
               <p className="text-xs text-emerald-100/80">
-                {hasProducts
-                  ? `${products.length} products published. Tap to add more items, edit prices, or sync catalog.`
-                  : "Add items with prices and stock so Co-Pilot knows what to sell."}
+                {isReseller
+                  ? hasProducts
+                    ? `${products.length} supplier items mirrored. Tap to adjust your retail markup prices.`
+                    : "Connect with verified Nigerian suppliers and mirror products with zero inventory capital."
+                  : hasProducts
+                    ? `${products.length} products published. Tap to add more items, edit prices, or sync catalog.`
+                    : "Add items with prices and stock so Co-Pilot knows what to sell."}
               </p>
             </div>
 
-            {/* Step 3: Test Co-Pilot -> Opens Live WhatsApp Simulator */}
+            {/* Step 3: Test Co-Pilot -> Opens Live Omnichannel Simulator */}
             <div
               onClick={onOpenSimulator}
               className="bg-white/10 hover:bg-white/15 active:scale-[0.99] transition-all cursor-pointer backdrop-blur-xs rounded-2xl p-4 border border-white/15 space-y-2 group shadow-xs hover:border-emerald-300/50"
-              title="Open WhatsApp Chat Simulator"
+              title="Open Omnichannel Chat Simulator (WhatsApp, Instagram & Facebook)"
             >
               <div className="flex items-center justify-between">
                 <span className={`text-xs font-bold uppercase tracking-wider ${hasOrders ? "text-emerald-300" : "text-emerald-200/70"}`}>
@@ -156,13 +187,13 @@ export function OverviewView({
                 </span>
               </div>
               <div className="font-bold text-sm text-white group-hover:text-emerald-200 transition-colors flex items-center justify-between">
-                <span>Test WhatsApp Checkout</span>
+                <span>Test Omnichannel Checkout</span>
                 <span className="text-xs text-emerald-300 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all">→</span>
               </div>
               <p className="text-xs text-emerald-100/80">
                 {hasOrders
-                  ? "Checkout flow verified! Tap to launch simulator and test more customer turns."
-                  : "Tap to open the live WhatsApp simulator and test instant stock check & Monnify NUBAN."}
+                  ? "Checkout flow verified! Tap to launch simulator and test WhatsApp, Instagram & Facebook."
+                  : "Tap to open the live simulator and test WhatsApp, Instagram DM & Messenger with instant Monnify NUBANs."}
               </p>
             </div>
           </div>

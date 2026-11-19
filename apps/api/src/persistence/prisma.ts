@@ -198,11 +198,31 @@ export class PrismaPersistenceStore implements PersistenceStore {
   }
 
   public async loadSnapshot(_vendorSlug: string): Promise<RuntimeSnapshot | null> {
-    // Wake up Neon serverless compute via pg Pool (ipv4first, 30s timeout) before Prisma query
+    // Wake up Neon serverless compute via pg Pool (ipv4first, 30s timeout) and apply idempotent schema migrations
     try {
       await getNeonPgPool().query("SELECT 1");
     } catch {
       // Proceed to Prisma retry loop
+    }
+
+    const schemaFixes = [
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "isDropship" BOOLEAN DEFAULT false`,
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "supplierSubAccountCode" TEXT`,
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "resellerSubAccountCode" TEXT`,
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "supplierShareKobo" BIGINT DEFAULT 0`,
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "resellerShareKobo" BIGINT DEFAULT 0`,
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "platformFeeKobo" BIGINT DEFAULT 0`,
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "splitSettlementStatus" TEXT DEFAULT 'NOT_APPLICABLE'`,
+      `UPDATE "Order" SET "isDropship" = COALESCE("isDropship", false), "supplierShareKobo" = COALESCE("supplierShareKobo", 0), "resellerShareKobo" = COALESCE("resellerShareKobo", 0), "platformFeeKobo" = COALESCE("platformFeeKobo", 0), "splitSettlementStatus" = COALESCE("splitSettlementStatus", 'NOT_APPLICABLE') WHERE "platformFeeKobo" IS NULL OR "supplierShareKobo" IS NULL OR "resellerShareKobo" IS NULL OR "isDropship" IS NULL OR "splitSettlementStatus" IS NULL`,
+      `ALTER TABLE "MarketBoostListing" ADD COLUMN IF NOT EXISTS "coveredLgas" JSONB DEFAULT '[]'::jsonb`,
+      `ALTER TABLE "SupplierProfile" ADD COLUMN IF NOT EXISTS "coveredLgas" JSONB DEFAULT '[]'::jsonb`,
+    ];
+    for (const sql of schemaFixes) {
+      try {
+        await prisma.$executeRawUnsafe(sql);
+      } catch {
+        // Ignore if table or column already handled
+      }
     }
 
     let vendor: Awaited<ReturnType<typeof this.fetchVendorSnapshotRow>> = null;
@@ -352,6 +372,9 @@ export class PrismaPersistenceStore implements PersistenceStore {
             coveredStates: Array.isArray(vendor.marketBoostListing.coveredStates)
               ? (vendor.marketBoostListing.coveredStates as string[])
               : [vendor.marketBoostListing.baseState],
+            coveredLgas: Array.isArray((vendor.marketBoostListing as any).coveredLgas)
+              ? ((vendor.marketBoostListing as any).coveredLgas as string[])
+              : [],
             description: vendor.marketBoostListing.description ?? "",
             moq: vendor.marketBoostListing.moq,
             startingPriceKobo: vendor.marketBoostListing.startingPriceKobo,
@@ -385,6 +408,7 @@ export class PrismaPersistenceStore implements PersistenceStore {
         shippingScope: (sup.shippingScope as "LOCAL_STATE" | "SELECTED_STATES" | "NATIONWIDE") || "LOCAL_STATE",
         allowInterstate: sup.allowInterstate,
         coveredStates: Array.isArray(sup.coveredStates) ? (sup.coveredStates as string[]) : [sup.state],
+        coveredLgas: Array.isArray((sup as any).coveredLgas) ? ((sup as any).coveredLgas as string[]) : [],
         warehouseAddress: sup.warehouseAddress ?? sup.location,
         phone: sup.phone,
         whatsapp: sup.whatsapp,
@@ -888,6 +912,13 @@ export class PrismaPersistenceStore implements PersistenceStore {
               paymentExpiresAt: order.paymentExpiresAt,
               paidAt: order.paidAt ?? null,
               dispatchedAt: order.dispatchedAt ?? null,
+              isDropship: order.isDropship ?? false,
+              supplierSubAccountCode: order.supplierSubAccountCode ?? null,
+              resellerSubAccountCode: order.resellerSubAccountCode ?? null,
+              supplierShareKobo: order.supplierShareKobo ?? 0n,
+              resellerShareKobo: order.resellerShareKobo ?? 0n,
+              platformFeeKobo: order.platformFeeKobo ?? 0n,
+              splitSettlementStatus: order.splitSettlementStatus ?? "NOT_APPLICABLE",
               createdAt: order.createdAt,
               items: {
                 create: orderItemsCreate,
@@ -988,6 +1019,13 @@ export class PrismaPersistenceStore implements PersistenceStore {
               paidAt: order.paidAt ?? null,
               dispatchedAt: order.dispatchedAt ?? null,
               reservationReleased: order.reservationReleased ?? false,
+              isDropship: order.isDropship ?? false,
+              supplierSubAccountCode: order.supplierSubAccountCode ?? null,
+              resellerSubAccountCode: order.resellerSubAccountCode ?? null,
+              supplierShareKobo: order.supplierShareKobo ?? 0n,
+              resellerShareKobo: order.resellerShareKobo ?? 0n,
+              platformFeeKobo: order.platformFeeKobo ?? 0n,
+              splitSettlementStatus: order.splitSettlementStatus ?? "NOT_APPLICABLE",
             },
           });
 
@@ -1321,6 +1359,7 @@ export class PrismaPersistenceStore implements PersistenceStore {
         shippingScope: listing.shippingScope,
         allowInterstate: listing.allowInterstate,
         coveredStates: toJson(listing.coveredStates),
+        coveredLgas: toJson(listing.coveredLgas ?? []),
         description: listing.description || null,
         moq: listing.moq,
         startingPriceKobo: listing.startingPriceKobo,
@@ -1703,6 +1742,13 @@ export class PrismaPersistenceStore implements PersistenceStore {
       createdAt: order.createdAt,
       paidAt: order.paidAt ?? undefined,
       dispatchedAt: order.dispatchedAt ?? undefined,
+      isDropship: (order as any).isDropship ?? false,
+      supplierSubAccountCode: (order as any).supplierSubAccountCode ?? undefined,
+      resellerSubAccountCode: (order as any).resellerSubAccountCode ?? undefined,
+      supplierShareKobo: (order as any).supplierShareKobo ?? undefined,
+      resellerShareKobo: (order as any).resellerShareKobo ?? undefined,
+      platformFeeKobo: (order as any).platformFeeKobo ?? undefined,
+      splitSettlementStatus: (order as any).splitSettlementStatus ?? "NOT_APPLICABLE",
     };
   }
 
