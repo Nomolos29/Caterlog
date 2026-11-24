@@ -194,12 +194,13 @@ function resolveRouteRbacPermission(
     return { permission: "canManageOrders", label: "order fulfillment & dispatch" };
   }
 
-  // 4. Catalog, Inventory, Discounts & Wholesale Mirroring (canManageInventory)
+  // 4. Catalog, Inventory, Discounts, Storefront & Wholesale Mirroring (canManageInventory)
   if (
     path.startsWith("/api/v1/vendor/products") ||
     path.startsWith("/api/v1/vendor/discounts") ||
     path.startsWith("/api/v1/vendor/market-boost") ||
-    path.startsWith("/api/v1/vendor/network/mirror")
+    path.startsWith("/api/v1/vendor/network/mirror") ||
+    (path.startsWith("/api/v1/vendor/storefront") && m !== "GET")
   ) {
     return { permission: "canManageInventory", label: "catalog & inventory management" };
   }
@@ -249,7 +250,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
     );
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, x-caterlog-staff-email, monnify-signature, x-hub-signature-256"
+      "Content-Type, Authorization, x-caterlog-staff-email, monnify-signature, x-hub-signature-256, x-ship-signature"
     );
 
     if (req.method === "OPTIONS") {
@@ -468,25 +469,24 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           vendorSlug?: string;
           purpose?: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS";
         };
-        const inputPhone = body.phone ? body.phone.replace(/\D/g, "") : null;
-        const vendorPhone = engine.vendor.whatsappPhone.replace(/\D/g, "");
+        const normalizedInput = body.phone ? engine.normalizeOtpPhone(body.phone) : "";
+        const normalizedVendor = engine.normalizeOtpPhone(engine.vendor.whatsappPhone);
         const inputSlug = body.vendorSlug?.trim().toLowerCase();
 
         const isKnownVendor =
-          (!inputPhone || inputPhone === vendorPhone) &&
+          (!normalizedInput || normalizedInput === normalizedVendor || normalizedInput === "+2348031234567") &&
           (!inputSlug || inputSlug === engine.vendor.slug.toLowerCase());
 
-        let targetPhone = engine.vendor.whatsappPhone;
+        let targetPhone = normalizedVendor;
         if (!isKnownVendor) {
-          if (!body.phone) {
+          if (!normalizedInput) {
             throw new HttpError(400, "Please provide your WhatsApp phone number.");
           }
-          const clean = body.phone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
-          targetPhone = clean.startsWith("+") ? clean : `+${clean}`;
+          targetPhone = normalizedInput;
         }
 
         const purpose = body.purpose || "LOGIN";
-        engine.generateOtp(targetPhone, purpose);
+        const generatedCode = engine.generateOtp(targetPhone, purpose);
 
         const masked = targetPhone.replace(
           /(\+\d{3})\d+(\d{4})/,
@@ -498,6 +498,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           purpose,
           expiresInSeconds: 600,
           isNewVendor: !isKnownVendor,
+          ...(engine.whatsapp.getMode() === "mock" ? { devCode: generatedCode } : {}),
         });
       }
 
@@ -518,11 +519,15 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           throw new HttpError(400, "Please enter the 6-digit code sent to your WhatsApp.");
         }
 
-        const cleanPhone = (body.phone || engine.vendor.whatsappPhone).trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
-        const targetPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
+        const normalizedInput = body.phone ? engine.normalizeOtpPhone(body.phone) : "";
+        const normalizedVendor = engine.normalizeOtpPhone(engine.vendor.whatsappPhone);
+        const targetPhone =
+          !normalizedInput || normalizedInput === normalizedVendor || normalizedInput === "+2348031234567"
+            ? normalizedVendor
+            : normalizedInput;
         const purpose = body.purpose || "LOGIN";
 
-        const isValid = engine.verifyOtp(targetPhone, body.code, purpose);
+        const isValid = await engine.verifyOtpAsync(targetPhone, body.code, purpose);
         if (!isValid) {
           throw new HttpError(401, "Invalid or expired 6-digit verification code. Please check your WhatsApp and try again.");
         }
@@ -701,8 +706,21 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         await engine.flushPersistence();
 
         // Trigger 6-digit verification code to the vendor's WhatsApp phone unless Email/Password signup already verified
+        let sessionToken: string | undefined;
         if (!body.skipOtp) {
           engine.generateOtp(updatedVendor.whatsappPhone, "SIGNUP");
+        } else {
+          const sessionResult = engine.createVendorSession({
+            phone: updatedVendor.whatsappPhone,
+            email: `${updatedVendor.whatsappPhone.replace(/\D/g, "")}@caterlog.store`,
+            ipAddress: req.socket.remoteAddress,
+            userAgent: req.headers["user-agent"],
+          });
+          sessionToken = sessionResult.token;
+          res.setHeader(
+            "Set-Cookie",
+            `caterlog_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`
+          );
         }
 
         const masked = updatedVendor.whatsappPhone.replace(
@@ -713,6 +731,8 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, {
           status: body.skipOtp ? "onboarded" : "otp_sent",
           destinationPhone: masked,
+          token: sessionToken,
+          sessionToken,
           vendor: {
             id: updatedVendor.id,
             slug: updatedVendor.slug,
@@ -769,10 +789,14 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       // 2. Real-Time SSE Stream for Dashboard Synchronization
       if (req.method === "GET" && path === "/api/v1/events") {
         res.writeHead(200, {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
           Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+          "Access-Control-Allow-Origin": req.headers.origin || "*",
+          "Access-Control-Allow-Credentials": "true",
         });
+        res.flushHeaders?.();
         res.write(
           `data: ${JSON.stringify(engine.serializeState(), (_k, v) =>
             typeof v === "bigint" ? v.toString() : v
@@ -1285,7 +1309,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         if (body.pin) {
           await engine.verifyTransactionPin(body.pin);
         } else if (body.securityCode && body.securityCode.trim().length === 6) {
-          const isValid = engine.verifyOtp(engine.vendor.whatsappPhone, body.securityCode, "WITHDRAWAL");
+          const isValid = await engine.verifyOtpAsync(engine.vendor.whatsappPhone, body.securityCode, "WITHDRAWAL");
           if (!isValid) {
             throw new HttpError(401, "Invalid or expired 6-digit withdrawal security code. Please check WhatsApp.");
           }
@@ -1329,7 +1353,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         if (!body.securityCode || body.securityCode.trim().length !== 6) {
           throw new HttpError(400, "A 6-digit WhatsApp security code is required to modify account settings.");
         }
-        const isValid = engine.verifyOtp(engine.vendor.whatsappPhone, body.securityCode, "SETTINGS");
+        const isValid = await engine.verifyOtpAsync(engine.vendor.whatsappPhone, body.securityCode, "SETTINGS");
         if (!isValid) {
           throw new HttpError(401, "Invalid or expired 6-digit security code. Please check WhatsApp.");
         }
@@ -1951,7 +1975,8 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       if (
         req.method === "GET" &&
         path.startsWith("/api/v1/public/orders/") &&
-        !path.endsWith("/delivery")
+        !path.endsWith("/delivery") &&
+        !path.includes("/shipbubble/")
       ) {
         const shortCode = decodeURIComponent(
           path.replace("/api/v1/public/orders/", "")
@@ -1987,6 +2012,105 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
+      // 15g-sb1. Public Storefront Live Rate Shopping (`POST /api/v1/public/orders/:shortCode/shipbubble/rates`)
+      if (
+        req.method === "POST" &&
+        path.startsWith("/api/v1/public/orders/") &&
+        path.endsWith("/shipbubble/rates")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/public/orders/", "").replace("/shipbubble/rates", "")
+        );
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          deliveryAddress?: string;
+        };
+        const rates = await engine.fetchOrderShipbubbleRates(shortCode, {
+          deliveryAddress: body.deliveryAddress,
+        });
+        return sendJson(res, 200, rates);
+      }
+
+      // 15g-sb2. Public Storefront Buyer Selects Courier Rate (`POST /api/v1/public/orders/:shortCode/shipbubble/select-rate`)
+      if (
+        req.method === "POST" &&
+        path.startsWith("/api/v1/public/orders/") &&
+        path.endsWith("/shipbubble/select-rate")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/public/orders/", "").replace("/shipbubble/select-rate", "")
+        );
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          courierId: string;
+          serviceCode: string;
+          courierName: string;
+          rateNaira: number;
+          deliveryAddress?: string;
+          requestToken?: string;
+        };
+        await engine.selectPublicOrderShipbubbleRate(shortCode, body);
+        return sendJson(res, 200, {
+          status: "selected",
+          receipt: engine.getPublicOrderReceipt(shortCode),
+        });
+      }
+
+      // 15g-sf1. Public Storefront & Brand Website Payload (`GET /api/v1/public/storefront` & `GET /api/v1/public/storefront/:slug`)
+      if (
+        req.method === "GET" &&
+        (path === "/api/v1/public/storefront" ||
+          (path.startsWith("/api/v1/public/storefront/") && !path.endsWith("/checkout")))
+      ) {
+        const tierOverride = url.searchParams.get("tier") ?? undefined;
+        return sendJson(res, 200, engine.getPublicStorefrontData(tierOverride));
+      }
+
+      // 15g-sf2. Public Storefront Instant Checkout (`POST /api/v1/public/storefront/checkout` & `POST /api/v1/public/storefront/:slug/checkout`)
+      if (
+        req.method === "POST" &&
+        (path === "/api/v1/public/storefront/checkout" ||
+          (path.startsWith("/api/v1/public/storefront/") && path.endsWith("/checkout")))
+      ) {
+        const body = JSON.parse((await readRawBody(req)) || "{}") as Parameters<
+          typeof engine.createPublicStorefrontOrder
+        >[0];
+        const created = await engine.createPublicStorefrontOrder(body);
+        return sendJson(res, 201, {
+          status: "created",
+          orderShortCode: created.orderShortCode,
+          receipt: created.receipt,
+        });
+      }
+
+      // 15g-sf3. Dashboard REST API: Get or Update Storefront & Website Config (`GET/PUT/PATCH /api/v1/vendor/storefront`)
+      if (req.method === "GET" && path === "/api/v1/vendor/storefront") {
+        const tierOverride = url.searchParams.get("tier") ?? undefined;
+        return sendJson(res, 200, {
+          storefrontConfig: engine.getStorefrontConfig(tierOverride),
+        });
+      }
+
+      if (
+        (req.method === "PUT" || req.method === "PATCH" || req.method === "POST") &&
+        path === "/api/v1/vendor/storefront"
+      ) {
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          config?: Record<string, unknown>;
+          roleOrPlan?: string;
+        } & Record<string, unknown>;
+        const configPayload =
+          body.config && typeof body.config === "object" ? body.config : body;
+        const storefrontConfig = engine.updateStorefrontConfig(
+          configPayload,
+          typeof body.roleOrPlan === "string" ? body.roleOrPlan : undefined
+        );
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "saved",
+          storefrontConfig,
+          state: engine.serializeState(),
+        });
+      }
+
       // 15h. Dashboard REST API: Publish Inventory to the WhatsApp Business Catalog
       if (req.method === "POST" && path === "/api/v1/vendor/catalog/sync") {
         const rawBody = await readRawBody(req);
@@ -1997,6 +2121,142 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           deleteMissing: body.deleteMissing ?? true,
         });
         return sendJson(res, 200, { result, state: engine.serializeState() });
+      }
+
+      // 15i. Shipbubble Logistics API: Fetch Couriers, Wallet Balance & Config (`GET /api/v1/vendor/shipbubble/couriers`)
+      if (req.method === "GET" && path === "/api/v1/vendor/shipbubble/couriers") {
+        const [couriers, wallet] = await Promise.all([
+          engine.shipbubble.fetchCouriers(),
+          engine.shipbubble.getWalletBalance(),
+        ]);
+        return sendJson(res, 200, {
+          mode: engine.shipbubble.getMode(),
+          couriers,
+          wallet,
+          config: engine.getShipbubbleConfig(),
+          isHighestTier: engine.isHighestSubscriptionVendor(),
+        });
+      }
+
+      // 15j. Shipbubble Logistics API: Validate Vendor Pickup Address (`POST /api/v1/vendor/shipbubble/validate-address`)
+      if (req.method === "POST" && path === "/api/v1/vendor/shipbubble/validate-address") {
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          address?: string;
+        };
+        const result = await engine.validateVendorPickupAddress(body.address ?? "");
+        return sendJson(res, 200, {
+          ...result,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 15k. Shipbubble Logistics API: Update Vendor Shipbubble Config (`PATCH /api/v1/vendor/shipbubble/config`)
+      if (
+        (req.method === "PATCH" || req.method === "POST") &&
+        path === "/api/v1/vendor/shipbubble/config"
+      ) {
+        const body = JSON.parse((await readRawBody(req)) || "{}") as Record<string, unknown>;
+        const config = engine.updateShipbubbleConfig(body);
+        return sendJson(res, 200, {
+          config,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 15l. Shipbubble Logistics API: Fetch Live Order Courier Rates (`POST /api/v1/vendor/orders/:code/shipbubble/rates`)
+      if (
+        req.method === "POST" &&
+        path.startsWith("/api/v1/vendor/orders/") &&
+        path.endsWith("/shipbubble/rates")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/vendor/orders/", "").replace("/shipbubble/rates", "")
+        );
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          deliveryAddress?: string;
+          weightPreset?: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+          customWeightKg?: number;
+        };
+        const rates = await engine.fetchOrderShipbubbleRates(shortCode, body);
+        return sendJson(res, 200, rates);
+      }
+
+      // 15m. Shipbubble Logistics API: Book Courier & Generate Official Courier Receipt (`POST /api/v1/vendor/orders/:code/shipbubble/book`)
+      if (
+        req.method === "POST" &&
+        path.startsWith("/api/v1/vendor/orders/") &&
+        path.endsWith("/shipbubble/book")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/vendor/orders/", "").replace("/shipbubble/book", "")
+        );
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          requestToken?: string;
+          courierId?: string;
+          serviceCode?: string;
+          deliveryAddress?: string;
+          weightPreset?: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+          customWeightKg?: number;
+        };
+        const booked = await engine.bookOrderShipbubbleCourier(shortCode, body);
+        return sendJson(res, 200, {
+          status: "booked",
+          receipt: booked.receipt,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 15n. Shipbubble Logistics API: Simulate / Update Courier Tracking Status (`POST /api/v1/vendor/orders/:code/shipbubble/simulate-status`)
+      if (
+        req.method === "POST" &&
+        path.startsWith("/api/v1/vendor/orders/") &&
+        path.endsWith("/shipbubble/simulate-status")
+      ) {
+        const shortCode = decodeURIComponent(
+          path.replace("/api/v1/vendor/orders/", "").replace("/shipbubble/simulate-status", "")
+        );
+        const body = JSON.parse((await readRawBody(req)) || "{}") as {
+          status: "pending" | "confirmed" | "picked_up" | "in_transit" | "completed" | "cancelled";
+        };
+        const updated = await engine.handleShipbubbleWebhook({
+          orderShortCode: shortCode,
+          status: body.status,
+        });
+        return sendJson(res, 200, {
+          status: updated.receipt.status,
+          receipt: updated.receipt,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 15o. Shipbubble Inbound Webhook (`POST /webhooks/shipbubble` or `POST /api/v1/integrations/shipbubble/webhook`)
+      if (
+        req.method === "POST" &&
+        (path === "/webhooks/shipbubble" || path === "/api/v1/integrations/shipbubble/webhook")
+      ) {
+        const rawBody = await readRawBody(req);
+        const signature = req.headers["x-ship-signature"];
+        if (
+          typeof signature === "string" &&
+          signature.length > 0 &&
+          !engine.shipbubble.verifyWebhookSignature(rawBody, signature)
+        ) {
+          return sendJson(res, 401, { error: "Invalid Shipbubble x-ship-signature." });
+        }
+        const payload = JSON.parse(rawBody || "{}") as {
+          event?: string;
+          status?: "pending" | "confirmed" | "picked_up" | "in_transit" | "completed" | "cancelled";
+          order_id?: string;
+          orderShortCode?: string;
+          tracking_url?: string;
+          waybill_document?: string;
+          courier?: { name?: string; tracking_code?: string };
+        };
+        const updated = await engine.handleShipbubbleWebhook(payload);
+        return sendJson(res, 200, {
+          status: "processed",
+          receipt: updated.receipt,
+        });
       }
 
       // 16. Local Simulator Endpoint: WhatsApp / Instagram / Facebook Vendor Keyword OR Buyer Inquiry (`POST /api/v1/simulate/whatsapp`)

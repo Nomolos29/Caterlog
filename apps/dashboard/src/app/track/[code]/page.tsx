@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
-import type { PublicOrderReceipt } from "@/lib/types";
+import type { PublicOrderReceipt, ShipbubbleCourierQuoteItem } from "@/lib/types";
 
 export default function PublicOrderTrackerPage() {
   const params = useParams<{ code: string }>();
@@ -20,6 +20,51 @@ export default function PublicOrderTrackerPage() {
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [deliverySavedBanner, setDeliverySavedBanner] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
+
+  // Live Storefront Shipbubble Rate Shopping state
+  const [liveCouriers, setLiveCouriers] = useState<ShipbubbleCourierQuoteItem[]>([]);
+  const [liveRequestToken, setLiveRequestToken] = useState<string>("");
+  const [loadingLiveRates, setLoadingLiveRates] = useState(false);
+  const [selectingCourierId, setSelectingCourierId] = useState<string | null>(null);
+
+  const handleFetchLiveCourierRates = async () => {
+    if (!receipt) return;
+    setLoadingLiveRates(true);
+    try {
+      const addr = deliveryAddress.trim() || receipt.deliveryAddress || `${receipt.shippingZoneName}, Lagos, Nigeria`;
+      const res = await api.fetchPublicOrderShipbubbleRates(receipt.shortCode, addr);
+      setLiveCouriers(res.couriers);
+      setLiveRequestToken(res.requestToken);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to fetch live courier quotes.");
+    } finally {
+      setLoadingLiveRates(false);
+    }
+  };
+
+  const handleSelectLiveCourierRate = async (c: ShipbubbleCourierQuoteItem) => {
+    if (!receipt) return;
+    setSelectingCourierId(c.courier_id);
+    try {
+      const res = await api.selectPublicOrderShipbubbleRate(receipt.shortCode, {
+        courierId: c.courier_id,
+        serviceCode: c.service_code,
+        courierName: c.courier_name,
+        rateNaira: Math.round(c.total),
+        deliveryAddress: deliveryAddress.trim() || undefined,
+        requestToken: liveRequestToken,
+      });
+      setReceipt(res.receipt);
+      setDeliverySavedBanner(
+        `✓ Selected ${c.courier_name} (₦${Math.round(c.total).toLocaleString()}). Order total updated!`
+      );
+      setTimeout(() => setDeliverySavedBanner(null), 5000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to apply courier rate.");
+    } finally {
+      setSelectingCourierId(null);
+    }
+  };
 
   const loadReceipt = useCallback(async (showSpinner = false) => {
     if (!rawCode) return;
@@ -430,6 +475,138 @@ export default function PublicOrderTrackerPage() {
             </button>
           </form>
         )}
+
+        {/* Official Shipping Courier Receipt Card (when booked via Shipbubble) */}
+        {receipt.courierShipment && (
+          <div className="bg-white rounded-2xl border-2 border-emerald-300 p-5 shadow-2xs space-y-4 text-xs">
+            <div className="flex items-start justify-between gap-2 border-b border-dashed border-gray-200 pb-3">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-emerald-900 text-white text-[10px] font-black uppercase">
+                    Official Courier Receipt
+                  </span>
+                  <span className="font-mono font-bold text-gray-800">
+                    {receipt.courierShipment.receiptNumber}
+                  </span>
+                </div>
+                <h2 className="text-base font-black text-gray-900 mt-1">
+                  {receipt.courierShipment.courierName}
+                </h2>
+                <p className="text-[11px] text-gray-500">
+                  Waybill / Tracking ID:{" "}
+                  <span className="font-mono font-bold text-emerald-800">
+                    {receipt.courierShipment.trackingCode}
+                  </span>{" "}
+                  · Status:{" "}
+                  <span className="font-bold uppercase text-gray-900">
+                    {receipt.courierShipment.status.replace("_", " ")}
+                  </span>
+                </p>
+              </div>
+              <a
+                href={receipt.courierShipment.trackingUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shrink-0"
+              >
+                Track Package Live ↗
+              </a>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                <div className="text-[10px] font-bold uppercase text-gray-400">Ship From</div>
+                <div className="font-bold text-gray-900">{receipt.courierShipment.shipFrom.name}</div>
+                <div className="text-[11px] text-gray-600">{receipt.courierShipment.shipFrom.address}</div>
+              </div>
+              <div className="p-3 rounded-xl bg-emerald-50/50 border border-emerald-200">
+                <div className="text-[10px] font-bold uppercase text-emerald-700">Deliver To</div>
+                <div className="font-bold text-gray-900">{receipt.courierShipment.shipTo.name}</div>
+                <div className="text-[11px] text-gray-700">{receipt.courierShipment.shipTo.address}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100 text-[11px] text-gray-600">
+              <span>
+                Package:{" "}
+                <strong className="text-gray-900">
+                  {receipt.courierShipment.packageWeightKg} kg ({receipt.courierShipment.boxName || "Small Box"})
+                </strong>
+              </span>
+              <span>
+                Courier Fee Settled:{" "}
+                <strong className="text-emerald-800">
+                  ₦{receipt.courierShipment.shippingFeeNaira.toLocaleString()}
+                </strong>
+              </span>
+              <span>
+                ETA:{" "}
+                <strong className="text-gray-900">
+                  {receipt.courierShipment.deliveryEta || "Within 24 - 48 hrs"}
+                </strong>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Live Storefront Courier Rate Shopping (Buyer selects preferred courier) */}
+        {!receipt.courierShipment &&
+          receipt.liveCheckoutRatesEnabled !== false &&
+          receipt.status !== "FULFILLED" &&
+          receipt.status !== "REFUNDED" &&
+          receipt.status !== "EXPIRED" && (
+            <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-2xs space-y-3.5 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-bold text-gray-900">
+                    🚚 Select Your Preferred Delivery Courier (Live Rates)
+                  </h2>
+                  <p className="text-[11px] text-gray-500">
+                    Compare live Shipbubble courier quotes for your address and choose your preferred carrier.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={loadingLiveRates}
+                  onClick={handleFetchLiveCourierRates}
+                  className="px-3.5 py-2 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white text-xs font-semibold rounded-xl cursor-pointer"
+                >
+                  {loadingLiveRates ? "Loading Live Rates..." : "Compare Live Courier Rates"}
+                </button>
+              </div>
+
+              {liveCouriers.length > 0 && (
+                <div className="space-y-2 pt-1">
+                  {liveCouriers.map((c) => (
+                    <div
+                      key={`${c.courier_id}-${c.service_code}`}
+                      className="p-3 rounded-xl border border-gray-200 hover:border-emerald-500 flex items-center justify-between gap-3 bg-gray-50/60"
+                    >
+                      <div>
+                        <div className="font-bold text-gray-900">{c.courier_name}</div>
+                        <div className="text-[11px] text-gray-500">
+                          ETA: {c.delivery_eta} · {c.service_type.toUpperCase()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-sm font-black text-gray-900">
+                          ₦{Math.round(c.total).toLocaleString()}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={selectingCourierId === c.courier_id}
+                          onClick={() => void handleSelectLiveCourierRate(c)}
+                          className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg cursor-pointer"
+                        >
+                          {selectingCourierId === c.courier_id ? "Applying..." : "Select"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
         {/* Itemized Order Breakdown */}
         <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-2xs space-y-3 text-xs">

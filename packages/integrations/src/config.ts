@@ -21,6 +21,7 @@ export type CatalogMode = "mock" | "live";
 export const MONNIFY_SANDBOX_BASE_URL = "https://sandbox.monnify.com";
 export const MONNIFY_LIVE_BASE_URL = "https://api.monnify.com";
 export const WHATSAPP_GRAPH_BASE_URL = "https://graph.facebook.com";
+export const SHIPBUBBLE_BASE_URL = "https://api.shipbubble.com/v1";
 export const DEFAULT_WHATSAPP_GRAPH_VERSION = "v21.0";
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -56,15 +57,24 @@ export interface WhatsAppCatalogIntegrationConfig {
   requestTimeoutMs: number;
 }
 
+export interface ShipbubbleIntegrationConfig {
+  mode: IntegrationMode;
+  baseUrl: string;
+  apiKey: string;
+  webhookSecret?: string;
+  requestTimeoutMs: number;
+}
+
 export interface IntegrationConfig {
   monnify: MonnifyIntegrationConfig;
   whatsapp: WhatsAppIntegrationConfig;
   catalog: WhatsAppCatalogIntegrationConfig;
+  shipbubble?: ShipbubbleIntegrationConfig;
 }
 
 export interface ConfigIssue {
   severity: "error" | "warning";
-  provider: "monnify" | "whatsapp" | "catalog";
+  provider: "monnify" | "whatsapp" | "catalog" | "shipbubble";
   variable: string;
   message: string;
 }
@@ -189,11 +199,44 @@ export function resolveWhatsAppCatalogConfig(
   };
 }
 
+function parseShipbubbleMode(env: EnvLike): IntegrationMode {
+  const explicit = read(env, "SHIPBUBBLE_MODE")?.toLowerCase();
+  if (explicit === "mock" || explicit === "sandbox" || explicit === "live") {
+    return explicit;
+  }
+  const apiKey = read(env, "SHIPBUBBLE_API_KEY");
+  if (apiKey && !isPlaceholderValue(apiKey)) {
+    if (apiKey.startsWith("sb_prod_") || apiKey.startsWith("sb_live_")) {
+      return "live";
+    }
+    return "sandbox";
+  }
+  return "mock";
+}
+
+export function resolveShipbubbleConfig(
+  env: EnvLike = process.env
+): ShipbubbleIntegrationConfig {
+  const apiKey = read(env, "SHIPBUBBLE_API_KEY") ?? "";
+  return {
+    mode: parseShipbubbleMode(env),
+    baseUrl: (read(env, "SHIPBUBBLE_BASE_URL") ?? SHIPBUBBLE_BASE_URL).replace(/\/+$/, ""),
+    apiKey,
+    webhookSecret: read(env, "SHIPBUBBLE_WEBHOOK_SECRET") ?? apiKey,
+    requestTimeoutMs: readPositiveInt(
+      env,
+      "SHIPBUBBLE_TIMEOUT_MS",
+      DEFAULT_REQUEST_TIMEOUT_MS
+    ),
+  };
+}
+
 export function resolveIntegrationConfig(env: EnvLike = process.env): IntegrationConfig {
   return {
     monnify: resolveMonnifyConfig(env),
     whatsapp: resolveWhatsAppConfig(env),
     catalog: resolveWhatsAppCatalogConfig(env),
+    shipbubble: resolveShipbubbleConfig(env),
   };
 }
 
@@ -345,6 +388,16 @@ export function describeIntegrationConfig(config: IntegrationConfig) {
       businessAccountId: config.catalog.businessAccountId || null,
       credentialsConfigured: !isPlaceholderValue(config.catalog.accessToken),
     },
+    ...(config.shipbubble
+      ? {
+          shipbubble: {
+            mode: config.shipbubble.mode,
+            baseUrl: config.shipbubble.baseUrl,
+            apiKeySuffix: redactTail(config.shipbubble.apiKey, 6),
+            credentialsConfigured: !isPlaceholderValue(config.shipbubble.apiKey),
+          },
+        }
+      : {}),
     issues,
   };
 }

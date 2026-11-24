@@ -15,6 +15,7 @@ interface PaymentsViewProps {
   onSaveSplitRule?: (input: { supplierShareBps: number; resellerShareBps: number }) => Promise<boolean>;
   onNavigateToOrder?: (orderCode: string) => void;
   onSimulateTransfer?: (orderCode: string, amountNaira: number) => Promise<void>;
+  onOpenTour?: () => void;
 }
 
 interface TransactionItem {
@@ -104,6 +105,7 @@ export function PaymentsView({
   onSaveSplitRule,
   onNavigateToOrder,
   onSimulateTransfer,
+  onOpenTour,
 }: PaymentsViewProps) {
   // Tabs: 'splits' | 'accounts' | 'detail' | 'rules'
   const [activeTab, setActiveTab] = useState<"splits" | "accounts" | "detail" | "rules">(initialTab);
@@ -1334,17 +1336,30 @@ export function PaymentsView({
             Track customer payments separately from each recipient&apos;s settlement.
           </p>
         </div>
-        <button
-          onClick={handleExportCSV}
-          className="px-3.5 py-1.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 rounded-lg text-xs font-semibold transition-all shadow-2xs hover:shadow-xs flex items-center gap-1.5 self-start sm:self-center cursor-pointer active:scale-95"
-        >
-          <svg className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" x2="12" y1="15" y2="3" />
-          </svg>
-          <span>Export CSV</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          {onOpenTour && (
+            <button
+              onClick={onOpenTour}
+              className="px-3 py-1.5 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 rounded-lg text-xs font-semibold transition-all shadow-2xs hover:shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Learn how Monnify Split Settlements &amp; Bank Withdrawals work"
+            >
+              <span>🧭</span>
+              <span className="hidden sm:inline">Payments Guide</span>
+              <span className="sm:hidden">Guide</span>
+            </button>
+          )}
+          <button
+            onClick={handleExportCSV}
+            className="px-3.5 py-1.5 border border-gray-300 hover:border-gray-500 hover:bg-gray-100 hover:text-gray-900 text-gray-700 rounded-lg text-xs font-semibold transition-all shadow-2xs hover:shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+          >
+            <svg className="w-3.5 h-3.5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" x2="12" y1="15" y2="3" />
+            </svg>
+            <span>Export CSV</span>
+          </button>
+        </div>
       </div>
 
       {/* Tab Strip */}

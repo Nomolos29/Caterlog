@@ -284,6 +284,12 @@ export class PrismaPersistenceStore implements PersistenceStore {
         instagramHandle: vendor.instagramHandle ?? undefined,
         baseState: vendor.baseState ?? "Lagos",
         baseCity: vendor.baseCity ?? "Ikeja",
+        storefrontConfig:
+          vendor.storefrontConfig &&
+          typeof vendor.storefrontConfig === "object" &&
+          !Array.isArray(vendor.storefrontConfig)
+            ? (vendor.storefrontConfig as Record<string, unknown>)
+            : undefined,
       },
       products: vendor.products.map((product) => ({
         id: product.id,
@@ -562,6 +568,9 @@ export class PrismaPersistenceStore implements PersistenceStore {
           instagramHandle: vendor.instagramHandle || null,
           baseState: vendor.baseState || "Lagos",
           baseCity: vendor.baseCity || "Ikeja",
+          storefrontConfig: vendor.storefrontConfig
+            ? toJson(vendor.storefrontConfig)
+            : Prisma.JsonNull,
         },
       });
     });

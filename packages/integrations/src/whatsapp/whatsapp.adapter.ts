@@ -192,7 +192,10 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
       return this.mediaIdCache.get(params.cacheKey)!;
     }
 
-    const phoneId = params.vendorPhoneId ?? this.config.defaultPhoneNumberId;
+    const phoneId =
+      params.vendorPhoneId && params.vendorPhoneId !== "105992837465001"
+        ? params.vendorPhoneId
+        : (this.config.defaultPhoneNumberId ?? params.vendorPhoneId);
     if (!phoneId) return null;
 
     try {
@@ -687,7 +690,10 @@ export class WhatsAppCloudAdapter implements MessagingChannelPort {
     text: string;
     payload: Record<string, unknown>;
   }): Promise<void> {
-    const phoneId = params.vendorPhoneId ?? this.config.defaultPhoneNumberId;
+    const phoneId =
+      params.vendorPhoneId && params.vendorPhoneId !== "105992837465001"
+        ? params.vendorPhoneId
+        : (this.config.defaultPhoneNumberId ?? params.vendorPhoneId);
 
     if (this.isMockMode()) {
       this.sandboxOutbox.push({

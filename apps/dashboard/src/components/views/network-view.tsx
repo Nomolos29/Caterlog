@@ -25,6 +25,7 @@ interface NetworkViewProps {
     productSkus?: string[],
   ) => Promise<void>;
   onMirrorProducts?: (selectedSkus?: string[]) => void;
+  onOpenTour?: () => void;
 }
 
 interface SupplierProduct {
@@ -300,6 +301,7 @@ export function NetworkView({
   resellerMirrors = [],
   onMirrorSupplier,
   onMirrorProducts,
+  onOpenTour,
 }: NetworkViewProps) {
   const isVendor = isVendorRole(workspaceRole);
   const isReseller = isResellerRole(workspaceRole);
@@ -389,18 +391,23 @@ export function NetworkView({
     }
   }, [dbSuppliers, resellerMirrors]);
 
+  const isPro = workspaceRole === "pro";
+  const isGrowth = workspaceRole === "growth";
+  const showResellersTab = isPro || isGrowth;
+  const showSuppliersTabs = !isPro; // Starter, Growth, and Reseller have Suppliers
+
   // Default tab based on role
   const [activeTab, setActiveTab] = useState<
     "my-suppliers" | "find-suppliers" | "supplier-catalog" | "my-resellers"
-  >(initialTab || (isVendor ? "my-resellers" : "my-suppliers"));
+  >(initialTab || (isPro ? "my-resellers" : "my-suppliers"));
 
   useEffect(() => {
-    if (isReseller && activeTab === "my-resellers") {
-      setActiveTab("my-suppliers");
-    } else if (isVendor && (activeTab === "my-suppliers" || activeTab === "find-suppliers")) {
+    if (isPro && activeTab !== "my-resellers") {
       setActiveTab("my-resellers");
+    } else if (!showResellersTab && activeTab === "my-resellers") {
+      setActiveTab("my-suppliers");
     }
-  }, [isReseller, isVendor, activeTab]);
+  }, [isPro, showResellersTab, activeTab]);
 
   // Supplier Catalog selection
   const [selectedProductSkus, setSelectedProductSkus] = useState<string[]>([]);
@@ -698,14 +705,32 @@ export function NetworkView({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
-            Supplier Network
+            {isPro
+              ? "My Resellers & Distribution Network"
+              : isGrowth
+              ? "Wholesale Network (Resellers & Suppliers)"
+              : "Supplier Network & Wholesale Directory"}
           </h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-            Partner with verified Nigerian wholesale importers, mirror live
-            product stock, and split payments via Monnify.
+            {isPro
+              ? "Manage your network of independent retailers, mirror your catalog with custom split rules, and track subaccount settlements."
+              : isGrowth
+              ? "Manage both your downstream dropshipper network and upstream wholesale suppliers with dynamic Monnify split settlements."
+              : "Partner with verified Nigerian wholesale importers, mirror live product stock, and split payments via Monnify."}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {onOpenTour && (
+            <button
+              onClick={onOpenTour}
+              className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 hover:bg-emerald-100 transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Learn how Reseller Networks &amp; Supplier Sourcing work"
+            >
+              <span>🧭</span>
+              <span className="hidden sm:inline">Network Guide</span>
+              <span className="sm:hidden">Guide</span>
+            </button>
+          )}
           {activeTab === "supplier-catalog" && (
             <button
               onClick={handleMirrorSelected}
@@ -722,9 +747,9 @@ export function NetworkView({
         </div>
       </div>
 
-      {/* Main Tab Strip: Adapts to Vendor vs Reseller */}
-      <div className="flex border-b border-gray-200 text-xs font-semibold gap-6 overflow-x-auto pb-0.5">
-        {isVendor && (
+      {/* Main Tab Strip: Adapts to Pro (Resellers) vs Starter/Growth/Reseller (Suppliers) */}
+      <div data-tour="network-tabs" className="flex border-b border-gray-200 text-xs font-semibold gap-6 overflow-x-auto pb-0.5">
+        {showResellersTab && (
           <button
             onClick={() => setActiveTab("my-resellers")}
             className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
@@ -733,31 +758,35 @@ export function NetworkView({
                 : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
             }`}
           >
-            My Resellers (Distribution)
+            My Resellers ({isVendor ? "8 Active" : "Network"})
           </button>
         )}
 
-        <button
-          onClick={() => setActiveTab("my-suppliers")}
-          className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
-            activeTab === "my-suppliers"
-              ? "border-emerald-600 text-emerald-700 font-bold"
-              : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
-          }`}
-        >
-          My Suppliers ({connectedSuppliers.length})
-        </button>
+        {showSuppliersTabs && (
+          <>
+            <button
+              onClick={() => setActiveTab("my-suppliers")}
+              className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+                activeTab === "my-suppliers"
+                  ? "border-emerald-600 text-emerald-700 font-bold"
+                  : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
+              }`}
+            >
+              My Suppliers ({connectedSuppliers.length})
+            </button>
 
-        <button
-          onClick={() => setActiveTab("find-suppliers")}
-          className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
-            activeTab === "find-suppliers"
-              ? "border-emerald-600 text-emerald-700 font-bold"
-              : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
-          }`}
-        >
-          Find Suppliers (Directory)
-        </button>
+            <button
+              onClick={() => setActiveTab("find-suppliers")}
+              className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer active:scale-95 ${
+                activeTab === "find-suppliers"
+                  ? "border-emerald-600 text-emerald-700 font-bold"
+                  : "border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
+              }`}
+            >
+              Find Suppliers (Directory)
+            </button>
+          </>
+        )}
 
         {activeTab === "supplier-catalog" && selectedSupplier && (
           <button

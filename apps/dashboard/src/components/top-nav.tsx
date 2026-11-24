@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from "react";
-import { SearchIcon, BellIcon, MenuIcon, CheckIcon } from "./icons";
+import { SearchIcon, BellIcon, MenuIcon } from "./icons";
 import type {
   VendorProfile,
   OrderItem,
   ProductItem,
   PlatformRole,
 } from "@/lib/types";
-import { isResellerRole } from "@/lib/types";
+import type { NavView } from "./sidebar";
 
 interface TopNavProps {
   vendor: VendorProfile;
@@ -15,8 +15,6 @@ interface TopNavProps {
   simulatorOpen?: boolean;
   breadcrumb?: string;
   activeWorkspace?: PlatformRole;
-  onToggleWorkspace?: () => void;
-  onSelectRole?: (role: PlatformRole) => void;
   onOpenMobileNav?: () => void;
   orders?: OrderItem[];
   products?: ProductItem[];
@@ -24,6 +22,10 @@ interface TopNavProps {
   onSelectProduct?: (sku: string) => void;
   onNavigateToView?: (view: string) => void;
   onSignOut?: () => void;
+  onOpenTour?: (chapter?: NavView) => void;
+  currentView?: NavView;
+  onToggleWorkspace?: (role: PlatformRole) => void;
+  onSelectRole?: (role: PlatformRole) => void;
 }
 
 interface NotificationItem {
@@ -42,8 +44,6 @@ export function TopNav({
   simulatorOpen = false,
   breadcrumb = "Overview",
   activeWorkspace = "growth",
-  onToggleWorkspace,
-  onSelectRole,
   onOpenMobileNav,
   orders = [],
   products = [],
@@ -51,6 +51,10 @@ export function TopNav({
   onSelectProduct,
   onNavigateToView,
   onSignOut,
+  onOpenTour,
+  currentView = "overview",
+  onToggleWorkspace,
+  onSelectRole,
 }: TopNavProps) {
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const initials = vendor.businessName
@@ -218,119 +222,28 @@ export function TopNav({
 
         {/* Right Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Active Workspace / 4-Role Switcher Pill */}
-          <div className="relative">
+          {/* View-Aware Platform Tour Guide Trigger */}
+          {onOpenTour && (
             <button
-              onClick={() => {
-                setRoleMenuOpen(!roleMenuOpen);
-                setNotificationsOpen(false);
-                setProfileOpen(false);
-              }}
-              className={`hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
-                activeWorkspace === "reseller"
-                  ? "bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100"
-                  : activeWorkspace === "starter"
-                    ? "bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100"
-                    : activeWorkspace === "growth"
-                      ? "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
-                      : "bg-purple-50 text-purple-900 border-purple-200 hover:bg-purple-100"
-              }`}
-              title="Click to switch workspace role (Reseller, Starter, Growth, or Pro)"
+              onClick={() => onOpenTour(currentView)}
+              data-tour="top-tour-guide"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 transition-all cursor-pointer shadow-2xs active:scale-95 group"
+              title={`Learn how this screen (${breadcrumb}) works`}
             >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  activeWorkspace === "reseller"
-                    ? "bg-blue-600"
-                    : activeWorkspace === "starter"
-                      ? "bg-amber-600"
-                      : activeWorkspace === "growth"
-                        ? "bg-emerald-600"
-                        : "bg-purple-600"
-                }`}
-              />
-              <span>
-                {activeWorkspace === "reseller"
-                  ? "Reseller ($5)"
-                  : activeWorkspace === "starter"
-                    ? "Starter Vendor ($10)"
-                    : activeWorkspace === "growth"
-                      ? "Growth Vendor ($15)"
-                      : "Pro Concierge ($20)"}
+              <span className="text-sm group-hover:rotate-12 transition-transform">
+                🧭
               </span>
-              <span className="text-[9px] text-gray-400 font-mono ml-0.5">
-                ▼
+              <span className="hidden md:inline font-bold">Guide</span>
+              <span className="hidden xl:inline text-emerald-800 font-normal">
+                · {breadcrumb.split("/")[0].trim()}
               </span>
             </button>
-
-            {/* 4-Role Popover Menu */}
-            {roleMenuOpen && (
-              <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-gray-100 p-2 z-50 animate-in fade-in duration-100">
-                <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                  Switch Platform Role
-                </div>
-                <div className="space-y-1">
-                  {[
-                    {
-                      id: "reseller" as const,
-                      label: "Reseller / Dropshipper",
-                      price: "$5/mo",
-                      desc: "Mirror supplier catalogs with zero inventory",
-                      color: "blue",
-                    },
-                    {
-                      id: "starter" as const,
-                      label: "Starter Vendor",
-                      price: "$10/mo",
-                      desc: "Solo brand storefront + self-managed shipping",
-                      color: "amber",
-                    },
-                    {
-                      id: "growth" as const,
-                      label: "Growth Vendor",
-                      price: "$15/mo",
-                      desc: "Market Boost directory + pickup station hubs",
-                      color: "emerald",
-                    },
-                    {
-                      id: "pro" as const,
-                      label: "Pro Concierge",
-                      price: "$20/mo",
-                      desc: "3 daily pickup sweeps + concierge support + team",
-                      color: "purple",
-                    },
-                  ].map((r) => (
-                    <button
-                      key={r.id}
-                      onClick={() => {
-                        setRoleMenuOpen(false);
-                        if (onSelectRole) onSelectRole(r.id);
-                        else onToggleWorkspace?.();
-                      }}
-                      className={`w-full text-left p-2 rounded-xl text-xs transition-colors cursor-pointer flex flex-col gap-0.5 ${
-                        activeWorkspace === r.id
-                          ? "bg-indigo-50/70 border border-indigo-200 text-indigo-950 font-bold"
-                          : "hover:bg-gray-50 text-gray-700"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs">{r.label}</span>
-                        <span className="text-[10px] font-semibold text-gray-500 font-mono">
-                          {r.price}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-gray-400 font-normal leading-tight">
-                        {r.desc}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          )}
 
           {/* Toggle Omnichannel Simulator Live Test Drawer */}
           <button
             onClick={onOpenSimulator}
+            data-tour="top-simulator-btn"
             className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer shadow-2xs active:scale-95 ${
               simulatorOpen
                 ? "bg-emerald-50 text-emerald-900 border-emerald-400 ring-2 ring-emerald-200/50"

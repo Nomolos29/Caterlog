@@ -17,12 +17,15 @@ import {
   BellIcon,
   PlusIcon,
   SparklesIcon,
+  BookingsIcon,
 } from "./icons";
 
 export type NavView =
   | "overview"
   | "orders"
   | "products"
+  | "storefront"
+  | "bookings"
   | "network"
   | "customers"
   | "payments"
@@ -67,45 +70,185 @@ export function Sidebar({
 }: SidebarProps) {
   const planId = subscription?.planId || "GROWTH";
 
-  const navItems: Array<{ id: NavView; label: string; icon: React.ReactNode; badge?: number }> = [
-    { id: "overview", label: "Overview", icon: <OverviewIcon className="w-5 h-5" /> },
-    { id: "orders", label: "Orders", icon: <OrdersIcon className="w-5 h-5" />, badge: pendingCount > 0 ? pendingCount : undefined },
-    { id: "products", label: "Products", icon: <ProductsIcon className="w-5 h-5" /> },
-    { id: "network", label: "Network", icon: <NetworkIcon className="w-5 h-5" /> },
-    { id: "customers", label: "Customers", icon: <CustomersIcon className="w-5 h-5" /> },
-    { id: "payments", label: "Payments", icon: <PaymentsIcon className="w-5 h-5" /> },
-    { id: "subscriptions", label: "Plans & Pricing", icon: <SparklesIcon className="w-5 h-5" /> },
-    { id: "market-boost", label: "Market Boost", icon: <MarketBoostIcon className="w-5 h-5" /> },
-    { id: "analytics", label: "Analytics", icon: <AnalyticsIcon className="w-5 h-5" /> },
-    { id: "team", label: "Team & Audit", icon: <TeamIcon className="w-5 h-5" /> },
-    { id: "notifications", label: "Notifications", icon: <BellIcon className="w-5 h-5" /> },
-    { id: "settings", label: "Settings", icon: <SettingsIcon className="w-5 h-5" /> },
+  const isPro = activeWorkspace === "pro";
+  const isGrowth = activeWorkspace === "growth";
+  const isReseller = activeWorkspace === "reseller";
+
+  const networkLabel = isPro
+    ? "My Resellers"
+    : isGrowth
+      ? "Network"
+      : isReseller
+        ? "Find Suppliers"
+        : "My Suppliers";
+
+  const navItems: Array<{
+    id: NavView;
+    label: string;
+    icon: React.ReactNode;
+    badge?: number;
+  }> = [
+    {
+      id: "overview",
+      label: "Overview",
+      icon: <OverviewIcon className="w-5 h-5" />,
+    },
+    {
+      id: "orders",
+      label: "Orders",
+      icon: <OrdersIcon className="w-5 h-5" />,
+      badge: pendingCount > 0 ? pendingCount : undefined,
+    },
+    {
+      id: "products",
+      label: "Products",
+      icon: <ProductsIcon className="w-5 h-5" />,
+    },
+    {
+      id: "storefront",
+      label: isPro || isGrowth ? "Storefront & Website" : "Storefront",
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 9l2-5h14l2 5M3 9c0 1.657 1.343 3 3 3s3-1.343 3-3m-6 0h18M9 9c0 1.657 1.343 3 3 3s3-1.343 3-3m0 0c0 1.657 1.343 3 3 3s3-1.343 3-3M5 12v8a1 1 0 001 1h12a1 1 0 001-1v-8" />
+        </svg>
+      ),
+    },
+    {
+      id: "bookings",
+      label: "Bookings",
+      icon: <BookingsIcon className="w-5 h-5" />,
+    },
+    {
+      id: "network",
+      label: networkLabel,
+      icon: <NetworkIcon className="w-5 h-5" />,
+    },
+    {
+      id: "customers",
+      label: "Customers",
+      icon: <CustomersIcon className="w-5 h-5" />,
+    },
+    {
+      id: "payments",
+      label: "Payments",
+      icon: <PaymentsIcon className="w-5 h-5" />,
+    },
+    {
+      id: "subscriptions",
+      label: "Plans & Pricing",
+      icon: <SparklesIcon className="w-5 h-5" />,
+    },
+    {
+      id: "market-boost",
+      label: "Market Boost",
+      icon: <MarketBoostIcon className="w-5 h-5" />,
+    },
+    {
+      id: "analytics",
+      label: "Analytics",
+      icon: <AnalyticsIcon className="w-5 h-5" />,
+    },
+    {
+      id: "team",
+      label: "Team & Audit",
+      icon: <TeamIcon className="w-5 h-5" />,
+    },
+    {
+      id: "notifications",
+      label: "Notifications",
+      icon: <BellIcon className="w-5 h-5" />,
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      icon: <SettingsIcon className="w-5 h-5" />,
+    },
   ];
 
   let allowedViews: NavView[] = [];
   if (impersonatedStaffRole === "Dispatch Coordinator") {
     allowedViews = ["overview", "orders", "notifications"];
   } else if (impersonatedStaffRole === "Catalog Editor") {
-    allowedViews = ["overview", "products", "notifications"];
+    allowedViews = ["overview", "products", "storefront", "notifications"];
   } else if (impersonatedStaffRole === "Accountant") {
     allowedViews = ["overview", "payments", "notifications"];
   } else if (impersonatedStaffRole === "Store Attendant") {
-    allowedViews = ["overview", "orders", "products", "customers", "notifications"];
+    allowedViews = [
+      "overview",
+      "orders",
+      "products",
+      "storefront",
+      "customers",
+      "notifications",
+    ];
   } else if (activeWorkspace === "reseller") {
     // 1. Reseller ($5)
-    allowedViews = ["overview", "orders", "products", "network", "customers", "payments", "subscriptions", "notifications", "settings"];
+    allowedViews = [
+      "overview",
+      "orders",
+      "products",
+      "storefront",
+      "network",
+      "customers",
+      "payments",
+      "subscriptions",
+      "notifications",
+      "settings",
+    ];
   } else if (activeWorkspace === "starter") {
-    // 2. Starter Vendor ($10)
-    allowedViews = ["overview", "orders", "products", "network", "customers", "payments", "subscriptions", "notifications", "settings"];
+    // 2. Starter Vendor ($10) - My Suppliers and Find Suppliers only, NO reseller network
+    allowedViews = [
+      "overview",
+      "orders",
+      "products",
+      "storefront",
+      "network",
+      "customers",
+      "payments",
+      "subscriptions",
+      "notifications",
+      "settings",
+    ];
   } else if (activeWorkspace === "growth") {
-    // 3. Growth Vendor ($15) - includes Team & Audit capped to 4
-    allowedViews = ["overview", "orders", "products", "market-boost", "network", "customers", "payments", "subscriptions", "analytics", "team", "notifications", "settings"];
+    // 3. Growth Vendor ($15) - My Suppliers and Find Suppliers, Market Boost, Team & Audit capped to 4
+    allowedViews = [
+      "overview",
+      "orders",
+      "products",
+      "storefront",
+      "market-boost",
+      "network",
+      "customers",
+      "payments",
+      "subscriptions",
+      "analytics",
+      "team",
+      "notifications",
+      "settings",
+    ];
   } else {
-    // 4. Pro Concierge Vendor ($20)
-    allowedViews = ["overview", "orders", "products", "market-boost", "network", "customers", "payments", "subscriptions", "analytics", "team", "notifications", "settings"];
+    // 4. Pro Concierge Vendor ($20) - My Resellers, Bookings, Analytics, Team & Audit (Suppliers removed)
+    allowedViews = [
+      "overview",
+      "orders",
+      "products",
+      "storefront",
+      "bookings",
+      "market-boost",
+      "network",
+      "customers",
+      "payments",
+      "subscriptions",
+      "analytics",
+      "team",
+      "notifications",
+      "settings",
+    ];
   }
 
-  const visibleNavItems = navItems.filter((item) => allowedViews.includes(item.id));
+  const visibleNavItems = navItems.filter((item) =>
+    allowedViews.includes(item.id),
+  );
 
   const handleItemClick = (id: NavView) => {
     onSelectView(id);
@@ -120,8 +263,12 @@ export function Sidebar({
           <div className="flex items-center gap-3">
             <CaterlogIcon className="w-8 h-8 shrink-0" />
             <div>
-              <div className="font-bold text-gray-900 tracking-tight text-lg leading-tight">Caterlog</div>
-              <div className="text-[10px] font-semibold tracking-wider uppercase text-gray-400">BUSINESS MANAGER</div>
+              <div className="font-bold text-gray-900 tracking-tight text-lg leading-tight">
+                Caterlog
+              </div>
+              <div className="text-[10px] font-semibold tracking-wider uppercase text-gray-400">
+                BUSINESS MANAGER
+              </div>
             </div>
           </div>
           {/* Close button on mobile */}
@@ -142,6 +289,7 @@ export function Sidebar({
             return (
               <button
                 key={item.id}
+                data-tour={`nav-${item.id}`}
                 onClick={() => handleItemClick(item.id)}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium cursor-pointer transition-all active:scale-[0.98] ${
                   isActive
@@ -150,7 +298,11 @@ export function Sidebar({
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <span className={isActive ? "text-[#1e1b4b]" : "text-gray-400"}>{item.icon}</span>
+                  <span
+                    className={isActive ? "text-[#1e1b4b]" : "text-gray-400"}
+                  >
+                    {item.icon}
+                  </span>
                   <span>{item.label}</span>
                 </div>
                 {item.badge ? (
@@ -167,29 +319,35 @@ export function Sidebar({
       {/* Footer Navigation & Merchant Store Card */}
       <div className="p-4 space-y-3">
         {/* Merchant Store Card with 4-Role Switcher */}
-        <div className="bg-[#f3f4f8] rounded-2xl p-3 border border-gray-200/60 shadow-2xs space-y-2.5">
+        <div
+          data-tour="sidebar-role-card"
+          className="bg-[#f3f4f8] rounded-2xl p-3 border border-gray-200/60 shadow-2xs space-y-2.5"
+        >
           <div className="flex items-center justify-between">
             <span className="font-semibold text-xs text-gray-900 truncate pr-2">
-              {vendorName || (activeWorkspace === "reseller" ? "Nia Stores" : "Aroko Wholesale")}
+              {vendorName ||
+                (activeWorkspace === "reseller"
+                  ? "Nia Stores"
+                  : "Aroko Wholesale")}
             </span>
             <span
               className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 uppercase tracking-wide ${
                 activeWorkspace === "reseller"
                   ? "bg-blue-100 text-blue-800"
                   : activeWorkspace === "starter"
-                  ? "bg-amber-100 text-amber-900"
-                  : activeWorkspace === "growth"
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-purple-100 text-purple-900"
+                    ? "bg-amber-100 text-amber-900"
+                    : activeWorkspace === "growth"
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-purple-100 text-purple-900"
               }`}
             >
               {activeWorkspace === "reseller"
                 ? "Reseller"
                 : activeWorkspace === "starter"
-                ? "Starter"
-                : activeWorkspace === "growth"
-                ? "Growth"
-                : "Pro"}
+                  ? "Starter"
+                  : activeWorkspace === "growth"
+                    ? "Growth"
+                    : "Pro"}
             </span>
           </div>
 
@@ -198,10 +356,10 @@ export function Sidebar({
               {activeWorkspace === "reseller"
                 ? "Reseller ($5/mo)"
                 : activeWorkspace === "starter"
-                ? "Starter ($10/mo)"
-                : activeWorkspace === "growth"
-                ? "Growth ($15/mo)"
-                : "Pro Concierge ($20/mo)"}
+                  ? "Starter ($10/mo)"
+                  : activeWorkspace === "growth"
+                    ? "Growth ($15/mo)"
+                    : "Pro Concierge ($20/mo)"}
             </span>
             <button
               type="button"
@@ -213,15 +371,24 @@ export function Sidebar({
           </div>
 
           {/* 4-Role Interactive Switcher Pills */}
-          <div className="pt-2 border-t border-gray-200/80">
+          <div
+            className="pt-2 border-t border-gray-200/80"
+            data-tour="sidebar-role-pills"
+          >
             <div className="text-[10px] uppercase font-bold text-gray-400 mb-1.5 flex items-center justify-between">
               <span>Platform Role</span>
-              <span className="font-normal text-[9px] text-gray-400">1-tap switch</span>
+              <span className="font-normal text-[9px] text-gray-400">
+                1-tap switch
+              </span>
             </div>
             <div className="grid grid-cols-2 gap-1 text-[11px]">
               <button
                 type="button"
-                onClick={() => onSelectRole ? onSelectRole("reseller") : onToggleWorkspace?.()}
+                onClick={() =>
+                  onSelectRole
+                    ? onSelectRole("reseller")
+                    : onToggleWorkspace?.()
+                }
                 className={`py-1.5 px-2 rounded-lg font-semibold text-center transition-all cursor-pointer ${
                   activeWorkspace === "reseller"
                     ? "bg-blue-600 text-white shadow-2xs"
@@ -233,7 +400,9 @@ export function Sidebar({
               </button>
               <button
                 type="button"
-                onClick={() => onSelectRole ? onSelectRole("starter") : onToggleWorkspace?.()}
+                onClick={() =>
+                  onSelectRole ? onSelectRole("starter") : onToggleWorkspace?.()
+                }
                 className={`py-1.5 px-2 rounded-lg font-semibold text-center transition-all cursor-pointer ${
                   activeWorkspace === "starter"
                     ? "bg-amber-600 text-white shadow-2xs"
@@ -245,7 +414,9 @@ export function Sidebar({
               </button>
               <button
                 type="button"
-                onClick={() => onSelectRole ? onSelectRole("growth") : onToggleWorkspace?.()}
+                onClick={() =>
+                  onSelectRole ? onSelectRole("growth") : onToggleWorkspace?.()
+                }
                 className={`py-1.5 px-2 rounded-lg font-semibold text-center transition-all cursor-pointer ${
                   activeWorkspace === "growth"
                     ? "bg-emerald-700 text-white shadow-2xs"
@@ -257,7 +428,9 @@ export function Sidebar({
               </button>
               <button
                 type="button"
-                onClick={() => onSelectRole ? onSelectRole("pro") : onToggleWorkspace?.()}
+                onClick={() =>
+                  onSelectRole ? onSelectRole("pro") : onToggleWorkspace?.()
+                }
                 className={`py-1.5 px-2 rounded-lg font-semibold text-center transition-all cursor-pointer ${
                   activeWorkspace === "pro"
                     ? "bg-purple-700 text-white shadow-2xs"
@@ -290,7 +463,13 @@ export function Sidebar({
           rel="noreferrer"
           className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
         >
-          <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            className="w-4 h-4 text-gray-400"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <circle cx="12" cy="12" r="10" />
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
             <line x1="12" y1="17" x2="12.01" y2="17" />

@@ -1,4 +1,5 @@
 import type {
+  CourierShipmentReceipt,
   Discount,
   KycSubmissionItem,
   MarketBoostListing,
@@ -9,6 +10,8 @@ import type {
   PublicOrderReceipt,
   ResellerMirror,
   SettlementSplitRuleItem,
+  ShipbubbleCourierQuoteItem,
+  ShipbubbleVendorConfig,
   TeamMemberItem,
   VendorState,
   WhatsAppSimulationResult,
@@ -149,7 +152,11 @@ function jsonBody(value: unknown): RequestInit {
 export const api = {
   get eventsUrl(): string {
     if (typeof window !== "undefined") {
-      return "/api/v1/events";
+      const configured = process.env.NEXT_PUBLIC_API_BASE_URL;
+      if (configured) {
+        return `${configured.replace(/\/+$/, "")}/api/v1/events`;
+      }
+      return `http://${window.location.hostname}:4000/api/v1/events`;
     }
     return `${API_BASE_URL}/api/v1/events`;
   },
@@ -423,6 +430,7 @@ export const api = {
     purpose: string;
     expiresInSeconds: number;
     isNewVendor?: boolean;
+    devCode?: string;
   }> {
     return request("/api/v1/auth/request-otp", {
       method: "POST",
@@ -613,7 +621,7 @@ export const api = {
     return res;
   },
 
-  onboardVendor(input: {
+  async onboardVendor(input: {
     phone?: string;
     businessName: string;
     role?: PlatformRole | "vendor" | "supplier";
@@ -624,14 +632,26 @@ export const api = {
   }): Promise<{
     status: string;
     token?: string;
+    sessionToken?: string;
     loginUrl?: string;
     vendor: VendorState["vendor"];
     state: VendorState;
   }> {
-    return request("/api/v1/auth/onboard", {
+    const res = await request<{
+      status: string;
+      token?: string;
+      sessionToken?: string;
+      loginUrl?: string;
+      vendor: VendorState["vendor"];
+      state: VendorState;
+    }>("/api/v1/auth/onboard", {
       method: "POST",
       ...jsonBody(input),
     });
+    if (res.token) {
+      setStoredSessionToken(res.token);
+    }
+    return res;
   },
 
   getNeonStatus(): Promise<Record<string, unknown>> {
@@ -876,6 +896,227 @@ export const api = {
     return request("/api/v1/vendor/trust-tier/fast-track", {
       method: "POST",
       ...jsonBody(input ?? {}),
+    });
+  },
+
+  getShipbubbleCouriers(): Promise<{
+    mode: "mock" | "sandbox" | "live";
+    couriers: Array<{
+      name: string;
+      service_code: string;
+      pin_image: string;
+      origin_country: string;
+      international: boolean;
+      domestic: boolean;
+      on_demand: boolean;
+      status: string;
+    }>;
+    wallet: { currency: string; balance: number };
+    config: ShipbubbleVendorConfig;
+    isHighestTier: boolean;
+  }> {
+    return request("/api/v1/vendor/shipbubble/couriers");
+  },
+
+  validateShipbubblePickupAddress(address: string): Promise<{
+    validated: {
+      address_code: number;
+      formatted_address: string;
+      city: string;
+      state: string;
+      postal_code: string;
+    };
+    config: ShipbubbleVendorConfig;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/shipbubble/validate-address", {
+      method: "POST",
+      ...jsonBody({ address }),
+    });
+  },
+
+  updateShipbubbleConfig(
+    input: Partial<ShipbubbleVendorConfig>
+  ): Promise<{ config: ShipbubbleVendorConfig; state: VendorState }> {
+    return request("/api/v1/vendor/shipbubble/config", {
+      method: "PATCH",
+      ...jsonBody(input),
+    });
+  },
+
+  fetchOrderShipbubbleRates(
+    shortCode: string,
+    input: {
+      deliveryAddress?: string;
+      weightPreset?: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+      customWeightKg?: number;
+    } = {}
+  ): Promise<{
+    orderShortCode: string;
+    requestToken: string;
+    couriers: ShipbubbleCourierQuoteItem[];
+    fastestCourier: ShipbubbleCourierQuoteItem | null;
+    cheapestCourier: ShipbubbleCourierQuoteItem | null;
+    packageWeightKg: number;
+    weightPreset: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+    boxName: string;
+    isPremiumTier: boolean;
+  }> {
+    return request(`/api/v1/vendor/orders/${encodeURIComponent(shortCode)}/shipbubble/rates`, {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  bookOrderShipbubbleCourier(
+    shortCode: string,
+    input: {
+      requestToken?: string;
+      courierId?: string;
+      serviceCode?: string;
+      deliveryAddress?: string;
+      weightPreset?: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+      customWeightKg?: number;
+    }
+  ): Promise<{
+    status: string;
+    receipt: CourierShipmentReceipt;
+    state: VendorState;
+  }> {
+    return request(`/api/v1/vendor/orders/${encodeURIComponent(shortCode)}/shipbubble/book`, {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  simulateOrderShipbubbleStatus(
+    shortCode: string,
+    status: "pending" | "confirmed" | "picked_up" | "in_transit" | "completed" | "cancelled"
+  ): Promise<{
+    status: string;
+    receipt: CourierShipmentReceipt;
+    state: VendorState;
+  }> {
+    return request(
+      `/api/v1/vendor/orders/${encodeURIComponent(shortCode)}/shipbubble/simulate-status`,
+      {
+        method: "POST",
+        ...jsonBody({ status }),
+      }
+    );
+  },
+
+  fetchPublicOrderShipbubbleRates(
+    shortCode: string,
+    deliveryAddress?: string
+  ): Promise<{
+    orderShortCode: string;
+    requestToken: string;
+    couriers: ShipbubbleCourierQuoteItem[];
+    fastestCourier: ShipbubbleCourierQuoteItem | null;
+    cheapestCourier: ShipbubbleCourierQuoteItem | null;
+    packageWeightKg: number;
+    boxName: string;
+  }> {
+    return request(`/api/v1/public/orders/${encodeURIComponent(shortCode)}/shipbubble/rates`, {
+      method: "POST",
+      ...jsonBody({ deliveryAddress }),
+    });
+  },
+
+  selectPublicOrderShipbubbleRate(
+    shortCode: string,
+    input: {
+      courierId: string;
+      serviceCode: string;
+      courierName: string;
+      rateNaira: number;
+      deliveryAddress?: string;
+      requestToken?: string;
+    }
+  ): Promise<{
+    status: string;
+    receipt: PublicOrderReceipt;
+  }> {
+    return request(`/api/v1/public/orders/${encodeURIComponent(shortCode)}/shipbubble/select-rate`, {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  getPublicStorefront(
+    slug?: string,
+    tierOverride?: string
+  ): Promise<{
+    vendor: {
+      id: string;
+      slug: string;
+      businessName: string;
+      role?: PlatformRole;
+      whatsappPhone: string;
+      verificationStatus: "VERIFIED" | "PENDING" | "REJECTED";
+      cacNumber?: string;
+      instagramHandle?: string;
+      facebookPageName?: string;
+      baseState: string;
+      baseCity: string;
+      reservationTtlMinutes: number;
+      subscriptionPlanId: string;
+    };
+    canUseFullWebsite: boolean;
+    storefrontConfig: import("./storefront-presets").StorefrontConfig;
+    presets: import("./storefront-presets").StorefrontPresetDefinition[];
+    products: import("./types").Product[];
+    shippingZones: import("./types").ShippingZone[];
+    discounts: import("./types").Discount[];
+  }> {
+    const slugSegment = slug ? `/${encodeURIComponent(slug)}` : "";
+    const query = tierOverride ? `?tier=${encodeURIComponent(tierOverride)}` : "";
+    return request(`/api/v1/public/storefront${slugSegment}${query}`);
+  },
+
+  createPublicStorefrontOrder(
+    input: {
+      buyerName: string;
+      buyerPhone: string;
+      shippingZoneId?: string;
+      shippingZoneName?: string;
+      discountCode?: string;
+      deliveryAddress?: string;
+      deliveryLandmark?: string;
+      alternatePhone?: string;
+      items: Array<{
+        productSku?: string;
+        productId?: string;
+        variantId?: string;
+        variantSku?: string;
+        quantity: number;
+      }>;
+    },
+    slug?: string
+  ): Promise<{
+    status: "created";
+    orderShortCode: string;
+    receipt: PublicOrderReceipt;
+  }> {
+    const slugSegment = slug ? `/${encodeURIComponent(slug)}` : "";
+    return request(`/api/v1/public/storefront${slugSegment}/checkout`, {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  saveStorefrontConfig(
+    config: Partial<import("./storefront-presets").StorefrontConfig>,
+    roleOrPlan?: string
+  ): Promise<{
+    status: "saved";
+    storefrontConfig: import("./storefront-presets").StorefrontConfig;
+    state: VendorState;
+  }> {
+    return request(`/api/v1/vendor/storefront`, {
+      method: "PUT",
+      ...jsonBody({ config, roleOrPlan }),
     });
   },
 };

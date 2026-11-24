@@ -17,6 +17,7 @@ interface OverviewViewProps {
   onNavigateToNetwork?: () => void;
   onNavigateToSettings?: (tab?: "setup" | "conversations" | "detail" | "shipping" | "general") => void;
   onOpenSimulator?: () => void;
+  onOpenTour?: () => void;
 }
 
 export function OverviewView({
@@ -33,6 +34,7 @@ export function OverviewView({
   onNavigateToNetwork,
   onNavigateToSettings,
   onOpenSimulator,
+  onOpenTour,
 }: OverviewViewProps) {
   const isReseller = isResellerRole(workspaceRole);
   const [period, setPeriod] = useState<"7D" | "30D" | "1Y">("30D");
@@ -84,6 +86,17 @@ export function OverviewView({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {onOpenTour && (
+            <button
+              onClick={onOpenTour}
+              className="text-xs font-semibold px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 hover:bg-emerald-100 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Learn how the Overview &amp; Co-Pilot setup works"
+            >
+              <span>🧭</span>
+              <span className="hidden sm:inline">Overview Guide</span>
+              <span className="sm:hidden">Guide</span>
+            </button>
+          )}
           <button
             onClick={onViewAllOrders}
             className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
@@ -101,7 +114,7 @@ export function OverviewView({
 
       {/* Onboarding Checklist for newly connected WhatsApp Business account */}
       {completedSteps < 3 && (
-        <div className="bg-gradient-to-r from-emerald-950 via-[#0d5c3a] to-emerald-900 text-white rounded-3xl p-6 sm:p-8 shadow-sm space-y-5">
+        <div data-tour="overview-onboarding" className="bg-gradient-to-r from-emerald-950 via-[#0d5c3a] to-emerald-900 text-white rounded-3xl p-6 sm:p-8 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-800/80 text-emerald-200 text-xs font-semibold mb-2">
@@ -201,7 +214,7 @@ export function OverviewView({
       )}
 
       {/* 4 Top KPI Metric Cards (Interactive) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div data-tour="overview-kpi-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* TOTAL REVENUE */}
         <div
           onClick={onNavigateToPayments}

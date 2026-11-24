@@ -106,6 +106,7 @@ interface TeamViewProps {
     canOverrideCopilot?: boolean;
   }) => Promise<void>;
   onDeleteTeamMember?: (idOrEmail: string) => Promise<void>;
+  onOpenTour?: () => void;
 }
 
 export function TeamView({
@@ -117,6 +118,7 @@ export function TeamView({
   onImpersonateRole,
   onSaveTeamMember,
   onDeleteTeamMember,
+  onOpenTour,
 }: TeamViewProps) {
   const [activeTab, setActiveTab] = useState<"roles" | "audit">("roles");
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -363,21 +365,32 @@ export function TeamView({
             </button>
           ) : (
             <div className="flex items-center gap-2">
-              {isGrowth && members.length >= 4 && (
+              {onOpenTour && (
+                <button
+                  onClick={onOpenTour}
+                  className="px-3 py-2 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 rounded-xl text-xs font-semibold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  title="Learn how Roles, Sub-Accounts &amp; RBAC Scopes work"
+                >
+                  <span>🧭</span>
+                  <span className="hidden sm:inline">Team Guide</span>
+                  <span className="sm:hidden">Guide</span>
+                </button>
+              )}
+              {isGrowth && members.length >= 5 && (
                 <span className="hidden sm:inline-block text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
-                  Growth limit: 4/4 seats
+                  Growth limit: 5/5 seats
                 </span>
               )}
               <button
                 onClick={() => {
-                  if (isGrowth && members.length >= 4) {
+                  if (isGrowth && members.length >= 5) {
                     setUpgradeCapModalOpen(true);
                   } else {
                     setInviteModalOpen(true);
                   }
                 }}
                 className={`text-xs font-semibold px-3.5 py-2 rounded-xl transition-all shadow-2xs hover:shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
-                  isGrowth && members.length >= 4
+                  isGrowth && members.length >= 5
                     ? "bg-amber-600 hover:bg-amber-700 text-white"
                     : "bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white"
                 }`}
@@ -423,16 +436,16 @@ export function TeamView({
               <div>
                 <span className="font-bold text-emerald-950">Growth Plan Team Capacity:</span>{" "}
                 <span className="text-emerald-800">
-                  Currently using <strong>{members.length} / 4</strong> team seats. Full activity &amp; audit logging is enabled.
+                  Currently using <strong>{members.length} / 5</strong> team seats. Full activity &amp; audit logging is enabled.
                 </span>
               </div>
-              {members.length >= 4 ? (
+              {members.length >= 5 ? (
                 <span className="font-bold text-amber-800 bg-amber-100 border border-amber-200 px-3 py-1 rounded-full text-[11px] shrink-0">
-                  Seat Limit Reached (4/4)
+                  Seat Limit Reached (5/5)
                 </span>
               ) : (
                 <span className="font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-3 py-1 rounded-full text-[11px] shrink-0">
-                  {4 - members.length} Seats Available
+                  {5 - members.length} Seats Available
                 </span>
               )}
             </div>

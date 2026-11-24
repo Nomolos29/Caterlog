@@ -16,6 +16,7 @@ interface ProductsViewProps {
   initialTab?:
     | "all"
     | "my-inventory"
+    | "wholesale"
     | "reselling"
     | "exceptions"
     | "mirror-wizard";
@@ -69,6 +70,8 @@ interface ProductsViewProps {
     catalogId: string | null;
     failed?: Array<{ skuCode: string; error?: string }>;
   } | null>;
+  onOpenTour?: () => void;
+  onNavigateToBookings?: () => void;
 }
 
 interface ResellingItem {
@@ -100,16 +103,54 @@ export function ProductsView({
   onNavigateToNetwork,
   onNavigateToSettings,
   onSyncWhatsAppCatalog,
+  onOpenTour,
+  onNavigateToBookings,
 }: ProductsViewProps) {
   const isVendor = isVendorRole(workspaceRole);
   const isReseller = isResellerRole(workspaceRole);
 
-  // Tabs: 'all' | 'my-inventory' | 'reselling' | 'exceptions' | 'mirror-wizard'
+  // Tabs: 'all' | 'my-inventory' | 'wholesale' | 'reselling' | 'exceptions' | 'mirror-wizard'
   const [activeTab, setActiveTab] = useState<
-    "all" | "my-inventory" | "reselling" | "exceptions" | "mirror-wizard"
+    "all" | "my-inventory" | "wholesale" | "reselling" | "exceptions" | "mirror-wizard"
   >(initialTab);
   const [resellingList, setResellingList] =
     useState<ResellingItem[]>(INITIAL_RESELLING);
+
+  // Wholesale Catalog & Category Rules State
+  const [allCatalogBookable, setAllCatalogBookable] = useState(false);
+  const [selectedBookableCategories, setSelectedBookableCategories] = useState<string[]>([]);
+  const [bookableProductOverrides, setBookableProductOverrides] = useState<
+    Record<string, { isBookable: boolean; moq: number; depositPercent: number }>
+  >({});
+
+  // Categories for wholesale configuration
+  const allCategories = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const p of products) {
+      if (p.category) set.add(p.category);
+    }
+    return Array.from(set).sort();
+  }, [products]);
+
+  const toggleCategoryBookable = (cat: string) => {
+    setSelectedBookableCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const toggleProductBookable = (skuCode: string) => {
+    setBookableProductOverrides((prev) => {
+      const current = prev[skuCode]?.isBookable ?? false;
+      return {
+        ...prev,
+        [skuCode]: {
+          isBookable: !current,
+          moq: prev[skuCode]?.moq || 10,
+          depositPercent: prev[skuCode]?.depositPercent || 30,
+        },
+      };
+    });
+  };
 
   useEffect(() => {
     if (isVendor && activeTab === "reselling") {
@@ -496,6 +537,14 @@ export function ProductsView({
             My inventory (
             {products.filter((p) => !p.customFields?.supplierSku).length})
           </button>
+          {isVendor && (
+            <button
+              onClick={() => setActiveTab("wholesale")}
+              className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+            >
+              Wholesale &amp; Pre-Orders
+            </button>
+          )}
           {!isVendor && (
             <button
               onClick={() => setActiveTab("reselling")}
@@ -706,6 +755,14 @@ export function ProductsView({
             My inventory (
             {products.filter((p) => !p.customFields?.supplierSku).length})
           </button>
+          {isVendor && (
+            <button
+              onClick={() => setActiveTab("wholesale")}
+              className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+            >
+              Wholesale &amp; Pre-Orders
+            </button>
+          )}
           <button
             onClick={() => setActiveTab("reselling")}
             className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
@@ -1133,6 +1190,255 @@ export function ProductsView({
   }
 
   /* -------------------------------------------------------------------------- */
+  /* Screen: Wholesale & Advance Booking Rules (Pro-Vendor MOQ & Pre-orders)    */
+  /* -------------------------------------------------------------------------- */
+  if (activeTab === "wholesale") {
+    return (
+      <div className="space-y-6 max-w-7xl mx-auto w-full pb-16">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
+          <div>
+            <div className="text-xs text-gray-500 mb-1">
+              Products / Wholesale &amp; Advance Booking Rules
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              Wholesale &amp; Pre-Order Rules
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Set minimum order quantities (MOQ), required escrow deposits, and open categories for wholesale network reservations.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {onNavigateToBookings && (
+              <button
+                onClick={onNavigateToBookings}
+                className="bg-white border border-gray-200 hover:border-gray-300 text-gray-800 font-semibold text-xs py-2 px-3.5 rounded-lg flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              >
+                <span>📦 View Bookings Pipeline</span>
+                <span>→</span>
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setEditingProduct(null);
+                setEditorModalOpen(true);
+              }}
+              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-semibold text-xs py-2 px-3.5 rounded-lg flex items-center gap-2 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span>Add Product</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Tab Strip */}
+        <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
+          <button
+            onClick={() => setActiveTab("all")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            All products ({products.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("my-inventory")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            My inventory (
+            {products.filter((p) => !p.customFields?.supplierSku).length})
+          </button>
+          <button
+            onClick={() => setActiveTab("wholesale")}
+            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
+          >
+            Wholesale &amp; Pre-Orders
+          </button>
+          {!isVendor && (
+            <button
+              onClick={() => setActiveTab("reselling")}
+              className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+            >
+              Reselling ({resellingList.length})
+            </button>
+          )}
+          <button
+            onClick={() => setActiveTab("exceptions")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Selling exceptions ({sellingExceptions.length})
+          </button>
+        </div>
+
+        {/* Master 1-Click Toggle Card */}
+        <div className="bg-white border border-gray-200/80 rounded-2xl p-5 sm:p-6 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                1-Click Master Control
+              </span>
+              {allCatalogBookable && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                  Active
+                </span>
+              )}
+            </div>
+            <h2 className="text-base font-bold text-gray-900">
+              Make Entire Catalog Bookable for Wholesalers
+            </h2>
+            <p className="text-xs text-gray-500 max-w-xl">
+              When enabled, all published products in your catalog can be booked in advance by verified wholesale buyers and reseller networks, subject to your default MOQ and deposit rules.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => {
+                setAllCatalogBookable((prev) => !prev);
+              }}
+              className={`px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-2xs cursor-pointer active:scale-95 ${
+                allCatalogBookable
+                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  : "bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300"
+              }`}
+            >
+              {allCatalogBookable ? "✓ Entire Catalog Bookable" : "Enable Entire Catalog"}
+            </button>
+          </div>
+        </div>
+
+        {/* Category-Level Bookability */}
+        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-gray-200/80 shadow-2xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">Bookable Product Categories</h3>
+              <p className="text-xs text-gray-500">
+                Select which product categories wholesalers can place pre-orders and advance reservations on.
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-full w-fit border border-emerald-200">
+              {allCatalogBookable ? "All categories open" : `${selectedBookableCategories.length} categories active`}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+            {allCategories.map((cat) => {
+              const isSelected = allCatalogBookable || selectedBookableCategories.includes(cat);
+              const count = products.filter((p) => p.category === cat).length;
+              return (
+                <div
+                  key={cat}
+                  onClick={() => toggleCategoryBookable(cat)}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                    isSelected
+                      ? "border-emerald-300 bg-emerald-50/50 shadow-2xs"
+                      : "border-gray-200 hover:border-gray-300 bg-gray-50/40"
+                  }`}
+                >
+                  <div>
+                    <div className="text-xs font-bold text-gray-900">{cat}</div>
+                    <div className="text-[11px] text-gray-500">{count} products</div>
+                  </div>
+                  <span
+                    className={`text-xs px-2.5 py-0.5 rounded-md font-bold ${
+                      isSelected
+                        ? "bg-emerald-600 text-white"
+                        : "bg-gray-200 text-gray-600"
+                    }`}
+                  >
+                    {isSelected ? "Bookable" : "Off"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* SKU-Level Granular Overrides Table */}
+        <div className="bg-white rounded-2xl border border-gray-200/80 shadow-2xs overflow-hidden">
+          <div className="p-5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">Product Wholesale &amp; Advance Booking Rules</h3>
+              <p className="text-xs text-gray-500">
+                Override booking status, set specific Minimum Order Quantities (MOQ), and custom escrow deposit % per SKU.
+              </p>
+            </div>
+            <span className="text-xs text-gray-500">
+              {products.length} products listed
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[700px]">
+              <thead>
+                <tr className="bg-gray-50/80 text-gray-500 font-semibold border-b border-gray-100">
+                  <th className="py-3 px-5">Product &amp; SKU</th>
+                  <th className="py-3 px-4">Category</th>
+                  <th className="py-3 px-4">Retail Price</th>
+                  <th className="py-3 px-4">Wholesale MOQ</th>
+                  <th className="py-3 px-4">Escrow Deposit</th>
+                  <th className="py-3 px-5 text-right">Status &amp; Edit</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {products.map((p) => {
+                  const override = bookableProductOverrides[p.skuCode];
+                  const explicitBookable = p.customFields?.isBookable === "true";
+                  const isBookable = allCatalogBookable || (p.category && selectedBookableCategories.includes(p.category)) || explicitBookable || Boolean(override?.isBookable);
+                  const moq = override?.moq || (p.customFields?.bookingMoq ? Number(p.customFields.bookingMoq) : 10);
+                  const dep = override?.depositPercent || (p.customFields?.bookingDepositPercent ? Number(p.customFields.bookingDepositPercent) : 30);
+
+                  return (
+                    <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="py-3.5 px-5">
+                        <div className="font-bold text-gray-900">{p.name}</div>
+                        <div className="text-[10px] text-gray-400 font-mono">{p.skuCode}</div>
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-gray-600">
+                        {p.category || "General"}
+                      </td>
+                      <td className="py-3.5 px-4 font-bold text-gray-900">
+                        ₦{p.basePriceNaira.toLocaleString()}
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-gray-800">
+                        {moq} units min.
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-emerald-800">
+                        {dep}% deposit
+                      </td>
+                      <td className="py-3.5 px-5 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => toggleProductBookable(p.skuCode)}
+                            className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                              isBookable
+                                ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                : "bg-gray-100 text-gray-600 border border-gray-300 hover:bg-gray-200"
+                            }`}
+                          >
+                            {isBookable ? "✓ Bookable" : "Not Bookable"}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingProduct(p);
+                              setEditorModalOpen(true);
+                            }}
+                            className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 text-xs font-semibold cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* -------------------------------------------------------------------------- */
   /* Screen: All Products / My Inventory (Original Catalog with tabs)           */
   /* -------------------------------------------------------------------------- */
   return (
@@ -1180,6 +1486,14 @@ export function ProductsView({
           My inventory (
           {products.filter((p) => !p.customFields?.supplierSku).length})
         </button>
+        {isVendor && (
+          <button
+            onClick={() => setActiveTab("wholesale")}
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
+          >
+            Wholesale &amp; Pre-Orders
+          </button>
+        )}
         {!isVendor && (
           <button
             onClick={() => setActiveTab("reselling")}

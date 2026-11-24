@@ -56,7 +56,8 @@ export type SalesChannel =
   | "INSTAGRAM"
   | "FACEBOOK"
   | "PAYMENT_LINK"
-  | "RESELLER_NETWORK";
+  | "RESELLER_NETWORK"
+  | "WEB_STOREFRONT";
 
 export interface RuntimeVendor {
   id: string;
@@ -100,6 +101,82 @@ export interface RuntimeVendor {
   subscription?: RuntimeSubscriptionInfo;
   trustTier?: RuntimeTrustTierInfo;
   invoices?: RuntimePlatformInvoice[];
+  shipbubbleConfig?: RuntimeShipbubbleConfig;
+  storefrontConfig?: Record<string, unknown>;
+}
+
+export interface RuntimeShipbubbleConfig {
+  pickupAddress: string;
+  pickupAddressCode?: number;
+  pickupFormattedAddress?: string;
+  pickupCity?: string;
+  pickupState?: string;
+  pickupPostalCode?: string;
+  defaultCategoryId: number;
+  defaultWeightPreset: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+  customWeightKg: number;
+  selectedCarriers: string[];
+  autoBookOnPaid: boolean;
+  liveCheckoutRatesEnabled: boolean;
+}
+
+export interface RuntimeCourierShipmentReceipt {
+  provider: "shipbubble";
+  receiptNumber: string;
+  shipbubbleOrderId: string;
+  requestToken?: string;
+  courierId: string;
+  courierName: string;
+  courierEmail: string;
+  courierPhone: string;
+  courierImage?: string;
+  serviceCode: string;
+  serviceType: string;
+  status: "pending" | "confirmed" | "picked_up" | "in_transit" | "completed" | "cancelled";
+  trackingCode: string;
+  trackingUrl: string;
+  waybillDocumentUrl?: string;
+  shippingFeeNaira: number;
+  vatNaira: number;
+  paymentType: string;
+  paymentStatus: string;
+  currency: string;
+  packageWeightKg: number;
+  packageAmountNaira: number;
+  weightPreset?: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+  boxName?: string;
+  pickupEta?: string;
+  deliveryEta?: string;
+  shipFrom: {
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  shipTo: {
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  items: Array<{
+    name: string;
+    description: string;
+    weight: number;
+    amount: number;
+    quantity: number;
+    total: number;
+  }>;
+  autoBooked?: boolean;
+  bookedAt: string;
+  pickedUpAt?: string;
+  inTransitAt?: string;
+  deliveredAt?: string;
+  message?: string;
 }
 
 export type SubscriptionPlanId =
@@ -473,6 +550,7 @@ export interface RuntimeOrder {
   platformFeeKobo?: bigint;
   splitSettlementStatus?: "PENDING" | "SETTLED" | "NOT_APPLICABLE";
   salesChannel?: SalesChannel;
+  courierShipment?: RuntimeCourierShipmentReceipt;
 }
 
 export interface QuickReplyOption {

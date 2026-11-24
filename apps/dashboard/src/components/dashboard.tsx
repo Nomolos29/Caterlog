@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { api, ApiError, setStoredSessionToken } from "@/lib/api";
+import { api, ApiError, getStoredSessionToken, setStoredSessionToken } from "@/lib/api";
 import { subscribeToNeonRealtime } from "@/lib/neon-realtime";
 import type { VendorState, OrderItem, PlatformRole } from "@/lib/types";
 import {
@@ -28,8 +28,11 @@ import { VerificationView } from "./views/verification-view";
 import { TeamView, type StaffRole } from "./views/team-view";
 import { NotificationsView } from "./views/notifications-view";
 import { SubscriptionsView } from "./views/subscriptions-view";
+import { BookingsView } from "./views/bookings-view";
+import { StorefrontView } from "./views/storefront-view";
 import { AuthView } from "./views/auth-view";
 import { ChatDrawer } from "./chat-drawer";
+import { PlatformTourGuide } from "./platform-tour";
 import type { SubscriptionPlanId, BillingCycle } from "@/lib/types";
 
 export function Dashboard() {
@@ -88,7 +91,7 @@ export function Dashboard() {
     if (impersonatedStaffRole === "Dispatch Coordinator") {
       allowedViews = ["overview", "orders", "notifications", "profile"];
     } else if (impersonatedStaffRole === "Catalog Editor") {
-      allowedViews = ["overview", "products", "notifications", "profile"];
+      allowedViews = ["overview", "products", "storefront", "notifications", "profile"];
     } else if (impersonatedStaffRole === "Accountant") {
       allowedViews = ["overview", "payments", "notifications", "profile"];
     } else if (impersonatedStaffRole === "Store Attendant") {
@@ -96,6 +99,7 @@ export function Dashboard() {
         "overview",
         "orders",
         "products",
+        "storefront",
         "customers",
         "notifications",
         "profile",
@@ -106,6 +110,7 @@ export function Dashboard() {
         "overview",
         "orders",
         "products",
+        "storefront",
         "network",
         "customers",
         "payments",
@@ -123,6 +128,7 @@ export function Dashboard() {
         "overview",
         "orders",
         "products",
+        "storefront",
         "network",
         "customers",
         "payments",
@@ -137,6 +143,7 @@ export function Dashboard() {
         "overview",
         "orders",
         "products",
+        "storefront",
         "market-boost",
         "network",
         "customers",
@@ -149,11 +156,13 @@ export function Dashboard() {
         "profile",
       ];
     } else {
-      // 4. Pro Concierge Vendor ($20)
+      // 4. Pro Concierge Vendor ($20) - includes Bookings and My Resellers
       allowedViews = [
         "overview",
         "orders",
         "products",
+        "storefront",
+        "bookings",
         "market-boost",
         "network",
         "customers",
@@ -182,9 +191,18 @@ export function Dashboard() {
       : null;
   const [connected, setConnected] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [tourInitialChapter, setTourInitialChapter] = useState<NavView | null>(
+    null,
+  );
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const handleOpenTour = (chapter?: NavView) => {
+    setTourInitialChapter(chapter || currentView);
+    setTourOpen(true);
+  };
 
   const handleSelectOrder = (order: OrderItem | null) => {
     setSelectedOrderId(order ? order.id : null);
@@ -227,6 +245,16 @@ export function Dashboard() {
       setError(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
+        try {
+          const demo = await api.requestDemoSession();
+          if (demo?.state) {
+            setState(demo.state);
+            setError(null);
+            return;
+          }
+        } catch {
+          // If auto-recovery fails, clear session
+        }
         setAuthSession(null);
         setStoredSessionToken(null);
         localStorage.removeItem("caterlog_auth");
@@ -271,25 +299,47 @@ export function Dashboard() {
     }
   }, [loadState]);
 
-  // Real-time synchronization over Server-Sent Events (SSE)
+  // Real-time synchronization over Server-Sent Events (SSE) + live background heartbeat sync
   useEffect(() => {
-    if (typeof window === "undefined" || !("EventSource" in window)) return;
+    if (typeof window === "undefined") return;
 
-    const source = new EventSource(api.eventsUrl);
-    source.onopen = () => setConnected(true);
-    source.onerror = () => setConnected(false);
-    source.onmessage = (event) => {
-      try {
-        const next = JSON.parse(event.data) as VendorState;
-        setState(next);
-        setConnected(true);
-      } catch {
-        // Ignore malformed frames
+    let source: EventSource | null = null;
+    if ("EventSource" in window) {
+      source = new EventSource(api.eventsUrl);
+      source.onopen = () => setConnected(true);
+      source.onerror = () => setConnected(false);
+      source.onmessage = (event) => {
+        try {
+          const next = JSON.parse(event.data) as VendorState;
+          setState(next);
+          setConnected(true);
+        } catch {
+          // Ignore malformed frames
+        }
+      };
+    }
+
+    const syncInterval = window.setInterval(() => {
+      if (document.visibilityState === "visible" && getStoredSessionToken()) {
+        void loadState();
+      }
+    }, 3000);
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "visible" && getStoredSessionToken()) {
+        void loadState();
       }
     };
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
 
-    return () => source.close();
-  }, []);
+    return () => {
+      if (source) source.close();
+      window.clearInterval(syncInterval);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
+  }, [loadState]);
 
   // Neon Realtime WebSocket live query subscription on Lakebase Postgres orders
   useEffect(() => {
@@ -327,6 +377,9 @@ export function Dashboard() {
         initialMode="login"
         onLoginSuccess={(user) => {
           setAuthSession(user);
+          if (typeof window !== "undefined") {
+            localStorage.setItem("caterlog_auth", JSON.stringify(user));
+          }
           if (user.role) {
             const roleMap: Record<string, PlatformRole> = {
               reseller: "reseller",
@@ -791,8 +844,20 @@ export function Dashboard() {
         return selectedOrder ? `Orders / ${selectedOrder.shortCode}` : "Orders";
       case "products":
         return "Products / Reselling";
+      case "storefront":
+        return activeWorkspace === "growth" || activeWorkspace === "pro"
+          ? "Storefront & Website / Visual Brand Studio"
+          : "Storefront / Catalog Customizer";
+      case "bookings":
+        return "Bookings / Wholesale & Network";
       case "network":
-        return "Network / My suppliers";
+        return activeWorkspace === "pro"
+          ? "My Resellers / Distribution Network"
+          : activeWorkspace === "growth"
+            ? "Network / Resellers & Suppliers"
+            : activeWorkspace === "reseller"
+              ? "Find Suppliers / Sourcing Directory"
+              : "My Suppliers / Supply Chain";
       case "customers":
         return "Customers / Directory";
       case "payments":
@@ -865,6 +930,8 @@ export function Dashboard() {
           connected={connected}
           onOpenSimulator={() => setSimulatorOpen(true)}
           simulatorOpen={simulatorOpen}
+          onOpenTour={handleOpenTour}
+          currentView={currentView}
           breadcrumb={getBreadcrumb()}
           activeWorkspace={activeWorkspace}
           onToggleWorkspace={handleToggleWorkspace}
@@ -1006,6 +1073,7 @@ export function Dashboard() {
                 setCurrentView("settings");
               }}
               onOpenSimulator={() => setSimulatorOpen(true)}
+              onOpenTour={() => handleOpenTour("overview")}
             />
           )}
 
@@ -1013,6 +1081,9 @@ export function Dashboard() {
             <OrdersView
               orders={state.orders}
               selectedOrder={selectedOrder}
+              vendor={state.vendor}
+              workspaceRole={activeWorkspace}
+              onStateChange={setState}
               initialStatusFilter={ordersFilter}
               onSelectOrder={handleSelectOrder}
               onSimulateTransfer={handleSimulateTransfer}
@@ -1020,6 +1091,7 @@ export function Dashboard() {
               onRefundOrder={handleRefundOrder}
               onNavigateToPayments={() => setCurrentView("payments")}
               onNavigateToSettings={() => setCurrentView("settings")}
+              onOpenTour={() => handleOpenTour("orders")}
             />
           )}
 
@@ -1039,6 +1111,27 @@ export function Dashboard() {
               onNavigateToNetwork={() => setCurrentView("network")}
               onNavigateToSettings={() => setCurrentView("settings")}
               onSyncWhatsAppCatalog={handleSyncWhatsAppCatalog}
+              onOpenTour={() => handleOpenTour("products")}
+              onNavigateToBookings={() => setCurrentView("bookings")}
+            />
+          )}
+
+          {currentView === "storefront" && (
+            <StorefrontView
+              state={state}
+              activeWorkspace={activeWorkspace}
+              onStateChange={setState}
+              onNavigateToPlans={() => setCurrentView("subscriptions")}
+            />
+          )}
+
+          {currentView === "bookings" && (
+            <BookingsView
+              products={state.products}
+              orders={state.orders}
+              onNavigateToProducts={() => setCurrentView("products")}
+              onNavigateToPayments={() => setCurrentView("payments")}
+              onOpenTour={() => handleOpenTour("bookings")}
             />
           )}
 
@@ -1053,6 +1146,7 @@ export function Dashboard() {
                 setEditResellSku(skus?.[0] ?? null);
                 setCurrentView("products");
               }}
+              onOpenTour={() => handleOpenTour("network")}
             />
           )}
 
@@ -1079,6 +1173,7 @@ export function Dashboard() {
               onSaveSplitRule={handleSaveSplitRule}
               initialOrderCode={selectedOrder?.shortCode}
               onSimulateTransfer={handleSimulateTransfer}
+              onOpenTour={() => handleOpenTour("payments")}
               onNavigateToOrder={(code) => {
                 const target =
                   state.orders.find((o) => o.shortCode === code) ||
@@ -1107,8 +1202,14 @@ export function Dashboard() {
               analytics={state.analytics}
               orders={state.orders}
               products={state.products}
+              workspaceRole={activeWorkspace}
+              trustTier={state.trustTier}
+              resellerMirrors={state.resellerMirrors}
+              chatMessages={state.chatMessages}
               onNavigateToOrders={() => setCurrentView("orders")}
               onNavigateToPayments={() => setCurrentView("payments")}
+              onNavigateToProducts={() => setCurrentView("products")}
+              onOpenTour={() => handleOpenTour("analytics")}
             />
           )}
 
@@ -1134,6 +1235,7 @@ export function Dashboard() {
               onImpersonateRole={setImpersonatedStaffRole}
               onSaveTeamMember={handleSaveTeamMember}
               onDeleteTeamMember={handleDeleteTeamMember}
+              onOpenTour={() => handleOpenTour("team")}
             />
           )}
 
@@ -1209,6 +1311,7 @@ export function Dashboard() {
               initialTab={settingsTab}
               vendor={state.vendor}
               workspaceRole={activeWorkspace}
+              onStateChange={setState}
               shippingZones={state.shippingZones}
               discounts={state.discounts}
               chatMessages={state.chatMessages}
@@ -1255,6 +1358,18 @@ export function Dashboard() {
         onSimulateTransfer={handleSimulateTransfer}
         onNavigateToAnalytics={() => setCurrentView("analytics")}
         onNavigateToOrders={() => setCurrentView("orders")}
+      />
+
+      {/* Role-Aware Platform Tour Guide (Owners & Sub-Account Managers) */}
+      <PlatformTourGuide
+        isOpen={tourOpen}
+        onClose={() => setTourOpen(false)}
+        activeWorkspace={activeWorkspace}
+        impersonatedStaffRole={impersonatedStaffRole}
+        vendorName={state.vendor.businessName}
+        onNavigate={(view) => setCurrentView(view)}
+        onOpenSimulator={() => setSimulatorOpen(true)}
+        initialChapter={tourInitialChapter}
       />
     </div>
   );

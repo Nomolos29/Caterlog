@@ -16,12 +16,20 @@ import {
   type DomainOrderStatus,
   type ServerVerifiedPaymentRecord,
 } from "@caterlog/commerce-core";
-import { isTerritoryDeliverable } from "@caterlog/shared";
+import {
+  canUseFullWebsiteMode,
+  isTerritoryDeliverable,
+  resolveVendorStorefrontConfig,
+  STOREFRONT_PRESETS,
+  type StorefrontConfig,
+} from "@caterlog/shared";
 import {
   assertValidIntegrationConfig,
   describeIntegrationConfig,
   MonnifyPaymentAdapter,
   resolveIntegrationConfig,
+  ShipbubbleAdapter,
+  SHIPBUBBLE_WEIGHT_PRESETS,
   WhatsAppCatalogAdapter,
   WhatsAppCloudAdapter,
   type CatalogProductInput,
@@ -30,6 +38,8 @@ import {
   type SubAccountResult,
   type EnvLike,
   type IntegrationConfig,
+  type ShipbubbleCourierQuote,
+  type ShipbubbleWeightPresetId,
 } from "@caterlog/integrations";
 import type {
   BuyerConversationSession,
@@ -38,6 +48,7 @@ import type {
   QuickReplyOption,
   RuntimeCartItem,
   RuntimeCommerceEvent,
+  RuntimeCourierShipmentReceipt,
   RuntimeDiscount,
   RuntimeKycSubmission,
   RuntimeMarketBoostListing,
@@ -49,6 +60,7 @@ import type {
   RuntimeProductVariant,
   RuntimeResellerMirror,
   RuntimeSettlementSplitRule,
+  RuntimeShipbubbleConfig,
   RuntimeShippingZone,
   RuntimeSnapshot,
   RuntimeSupplierProfile,
@@ -321,6 +333,7 @@ export class CaterlogStage1Engine {
   public readonly monnify: MonnifyPaymentAdapter;
   public readonly whatsapp: WhatsAppCloudAdapter;
   public readonly catalog: WhatsAppCatalogAdapter;
+  public readonly shipbubble: ShipbubbleAdapter;
   public readonly integrationConfig: IntegrationConfig;
 
   public vendor: RuntimeVendor = {
@@ -425,6 +438,20 @@ export class CaterlogStage1Engine {
         planId: "GROWTH",
       },
     ],
+    shipbubbleConfig: {
+      pickupAddress: "14 Admiralty Way, Lekki Phase 1, Lagos, Nigeria",
+      pickupAddressCode: 871341691,
+      pickupFormattedAddress: "Road 14 Admiralty Wy, Lekki Phase I, Lagos 106104, Lagos, Nigeria",
+      pickupCity: "Eti Osa",
+      pickupState: "Lagos",
+      pickupPostalCode: "106104",
+      defaultCategoryId: 74794423,
+      defaultWeightPreset: "SHOEBOX",
+      customWeightKg: 1.5,
+      selectedCarriers: ["test_1_courier"],
+      autoBookOnPaid: false,
+      liveCheckoutRatesEnabled: true,
+    },
   };
 
   public products: RuntimeProduct[] = [
@@ -961,6 +988,7 @@ export class CaterlogStage1Engine {
       brand: this.vendor.businessName,
       productUrlBase: env.CATALOG_PRODUCT_URL_BASE,
     });
+    this.shipbubble = ShipbubbleAdapter.fromConfig(this.integrationConfig.shipbubble);
   }
 
   /**
@@ -1049,7 +1077,31 @@ export class CaterlogStage1Engine {
   }
 
   private applySnapshot(snapshot: RuntimeSnapshot): void {
-    this.vendor = { ...snapshot.vendor };
+    const existingShipbubbleConfig = this.vendor.shipbubbleConfig;
+    const existingCourierMap = new Map<string, RuntimeCourierShipmentReceipt>();
+    for (const o of this.orders) {
+      if (o.courierShipment) {
+        existingCourierMap.set(o.shortCode.toUpperCase(), o.courierShipment);
+      }
+    }
+
+    this.vendor = {
+      ...snapshot.vendor,
+      shipbubbleConfig: snapshot.vendor.shipbubbleConfig ?? existingShipbubbleConfig ?? {
+        pickupAddress: "14 Admiralty Way, Lekki Phase 1, Lagos, Nigeria",
+        pickupAddressCode: 871341691,
+        pickupFormattedAddress: "Road 14 Admiralty Wy, Lekki Phase I, Lagos 106104, Lagos, Nigeria",
+        pickupCity: "Eti Osa",
+        pickupState: "Lagos",
+        pickupPostalCode: "106104",
+        defaultCategoryId: 74794423,
+        defaultWeightPreset: "SHOEBOX",
+        customWeightKg: 1.5,
+        selectedCarriers: ["test_1_courier"],
+        autoBookOnPaid: false,
+        liveCheckoutRatesEnabled: true,
+      },
+    };
     const envPhoneId =
       this.integrationConfig.whatsapp.defaultPhoneNumberId?.trim() ||
       process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
@@ -1158,6 +1210,33 @@ export class CaterlogStage1Engine {
     }
     if (snapshot.commerceEvents) {
       this.commerceEvents = snapshot.commerceEvents.map((e) => ({ ...e }));
+      // Re-hydrate persisted Shipbubble config and order courier receipts from durable CommerceEvents
+      for (let i = this.commerceEvents.length - 1; i >= 0; i--) {
+        const ev = this.commerceEvents[i]!;
+        if (ev.eventType === "SHIPBUBBLE_CONFIG_UPDATED" && ev.payload?.config) {
+          this.vendor.shipbubbleConfig = {
+            ...this.vendor.shipbubbleConfig!,
+            ...(ev.payload.config as Partial<RuntimeShipbubbleConfig>),
+          };
+        } else if (
+          (ev.eventType === "SHIPBUBBLE_COURIER_BOOKED" ||
+            ev.eventType === "SHIPBUBBLE_STATUS_UPDATED") &&
+          ev.payload?.receipt
+        ) {
+          existingCourierMap.set(
+            ev.entityId.toUpperCase(),
+            ev.payload.receipt as RuntimeCourierShipmentReceipt
+          );
+        }
+      }
+    }
+    for (const order of this.orders) {
+      if (!order.courierShipment) {
+        const cachedReceipt = existingCourierMap.get(order.shortCode.toUpperCase());
+        if (cachedReceipt) {
+          order.courierShipment = cachedReceipt;
+        }
+      }
     }
   }
 
@@ -1214,6 +1293,15 @@ export class CaterlogStage1Engine {
       catalog: {
         ...described.catalog,
         runtime: this.catalog.getIntegrationStatus(),
+      },
+      shipbubble: {
+        ...(described.shipbubble ?? {
+          mode: this.shipbubble.getMode(),
+          baseUrl: "https://api.shipbubble.com/v1",
+          apiKeySuffix: null,
+          credentialsConfigured: !this.shipbubble.isMockMode(),
+        }),
+        runtime: this.shipbubble.getIntegrationStatus(),
       },
     };
   }
@@ -2500,6 +2588,13 @@ export class CaterlogStage1Engine {
           fromPhone: "CATERLOG",
           text: `📍 *Delivery Address Provided for ${order.shortCode}:*\n👤 ${order.customerName} (${order.customerPhone})\n🏠 *${order.deliveryAddress}* (${order.shippingZoneName})\n\n_Reply \`dispatch ${order.shortCode} <riderPhone>\` when handed to rider._`,
         });
+
+        if (this.isHighestSubscriptionVendor() && this.getShipbubbleConfig().autoBookOnPaid && !order.courierShipment) {
+          await this.bookOrderShipbubbleCourier(order.shortCode, {
+            deliveryAddress: order.deliveryAddress,
+            autoBooked: true,
+          }).catch(console.error);
+        }
 
         await this.broadcastStateChange();
         return { step: "INVOICE_CREATED", createdOrder: order };
@@ -4112,6 +4207,14 @@ export class CaterlogStage1Engine {
           state: "AWAITING_DELIVERY_ADDRESS",
           updatedAt: new Date(),
         });
+
+        // For highest-tier / premium vendors with Auto-Booking enabled, auto-book courier immediately on PAID
+        if (this.isHighestSubscriptionVendor() && this.getShipbubbleConfig().autoBookOnPaid && !order.courierShipment) {
+          void this.bookOrderShipbubbleCourier(order.shortCode, {
+            deliveryAddress: order.deliveryAddress,
+            autoBooked: true,
+          }).catch(console.error);
+        }
       }
 
       if (this.jobScheduler) {
@@ -4645,11 +4748,27 @@ export class CaterlogStage1Engine {
 
   private readonly activeOtps = new Map<string, {
     code: string;
+    codes?: string[];
     phone: string;
     purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET";
     expiresAt: number;
     attempts: number;
   }>();
+
+  public normalizeOtpPhone(raw: string): string {
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return "";
+    if (digits.length === 11 && digits.startsWith("0")) {
+      return `+234${digits.slice(1)}`;
+    }
+    if (digits.length === 14 && digits.startsWith("2340")) {
+      return `+234${digits.slice(4)}`;
+    }
+    if (digits.length === 10 && /^[789]/.test(digits)) {
+      return `+234${digits}`;
+    }
+    return `+${digits}`;
+  }
 
   /**
    * Generates a cryptographically random 6-digit numeric OTP/PIN and delivers it
@@ -4659,14 +4778,19 @@ export class CaterlogStage1Engine {
     phone: string,
     purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET" = "LOGIN"
   ): string {
-    const cleanPhone = phone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
-    const formattedPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
+    const formattedPhone = this.normalizeOtpPhone(phone) || this.normalizeOtpPhone(this.vendor.whatsappPhone);
 
     const code = randomNumericCode(6);
     const key = `${formattedPhone}:${purpose}`;
     const expiresAtMs = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const existing = this.activeOtps.get(key);
+    const previousValidCodes =
+      existing && existing.expiresAt > Date.now()
+        ? (existing.codes ?? [existing.code]).slice(-4)
+        : [];
     this.activeOtps.set(key, {
       code,
+      codes: [...previousValidCodes, code],
       phone: formattedPhone,
       purpose,
       expiresAt: expiresAtMs,
@@ -4694,11 +4818,17 @@ export class CaterlogStage1Engine {
     };
 
     const label = purposeDescriptions[purpose] || "Verification";
+    const effectivePhoneId =
+      this.vendor.whatsappPhoneId && this.vendor.whatsappPhoneId !== "105992837465001"
+        ? this.vendor.whatsappPhoneId
+        : this.integrationConfig.whatsapp.defaultPhoneNumberId ||
+          process.env.WHATSAPP_PHONE_NUMBER_ID ||
+          this.vendor.whatsappPhoneId;
 
     void this.whatsapp.sendTextMessage({
       toPhone: formattedPhone,
       text: `🔐 *Caterlog Security Verification*\n\nYour 6-digit verification code for *${label}* is:\n\n*${code}*\n\n⏳ _Valid for 10 minutes. NEVER share this code with anyone._`,
-      vendorPhoneId: this.vendor.whatsappPhoneId,
+      vendorPhoneId: effectivePhoneId,
     }).catch(console.error);
 
     return code;
@@ -4712,18 +4842,17 @@ export class CaterlogStage1Engine {
     inputCode: string,
     purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET" = "LOGIN"
   ): boolean {
-    const cleanPhone = phone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
-    const formattedPhone = cleanPhone.startsWith("+") ? cleanPhone : `+${cleanPhone}`;
+    const cleanInput = inputCode.trim();
+    const formattedPhone = this.normalizeOtpPhone(phone) || this.normalizeOtpPhone(this.vendor.whatsappPhone);
     const key = `${formattedPhone}:${purpose}`;
     let record = this.activeOtps.get(key);
 
     if (!record) {
-      // Check against vendor's registered whatsapp phone if target phone formatted matches
-      const vendorClean = this.vendor.whatsappPhone.trim().replace(/^0/, "+234").replace(/[^\d+]/g, "");
-      const vendorFormatted = vendorClean.startsWith("+") ? vendorClean : `+${vendorClean}`;
-      if (vendorFormatted === formattedPhone) {
-        const vendorKey = `${this.vendor.whatsappPhone}:${purpose}`;
-        record = this.activeOtps.get(vendorKey);
+      // Check against vendor's registered whatsapp phone if target phone formatted matches or is demo placeholder
+      const vendorFormatted = this.normalizeOtpPhone(this.vendor.whatsappPhone);
+      if (vendorFormatted === formattedPhone || formattedPhone === "+2348031234567") {
+        const vendorKey = `${vendorFormatted}:${purpose}`;
+        record = this.activeOtps.get(vendorKey) ?? this.activeOtps.get(`${this.vendor.whatsappPhone}:${purpose}`);
       }
     }
 
@@ -4736,7 +4865,10 @@ export class CaterlogStage1Engine {
       return false;
     }
 
-    if (!safeEqual(record.code, inputCode.trim())) {
+    const candidates = record.codes && record.codes.length > 0 ? record.codes : [record.code];
+    const matched = candidates.some((c) => safeEqual(c, cleanInput));
+
+    if (!matched) {
       record.attempts += 1;
       if (record.attempts >= 5) {
         this.activeOtps.delete(key);
@@ -4745,19 +4877,59 @@ export class CaterlogStage1Engine {
     }
 
     this.activeOtps.delete(key);
-    const vendorKey = `${this.vendor.whatsappPhone}:${purpose}`;
-    this.activeOtps.delete(vendorKey);
+    const vendorFormatted = this.normalizeOtpPhone(this.vendor.whatsappPhone);
+    this.activeOtps.delete(`${vendorFormatted}:${purpose}`);
+    this.activeOtps.delete(`${this.vendor.whatsappPhone}:${purpose}`);
 
     if (this.persistence.consumeOtpVerification) {
       this.persistInBackground("consumeOtpVerification", async () => {
         await this.persistence.consumeOtpVerification!({
-          phone: formattedPhone,
-          code: inputCode.trim(),
+          phone: record!.phone,
+          code: cleanInput,
           purpose,
         });
       });
     }
     return true;
+  }
+
+  /**
+   * Async OTP verification that checks in-memory records first and falls back to
+   * persistent database OtpVerification records (e.g. if the API process reloaded).
+   */
+  public async verifyOtpAsync(
+    phone: string,
+    inputCode: string,
+    purpose: "LOGIN" | "SIGNUP" | "WITHDRAWAL" | "SETTINGS" | "BANK_CHANGE" | "PIN_RESET" = "LOGIN"
+  ): Promise<boolean> {
+    if (this.verifyOtp(phone, inputCode, purpose)) {
+      return true;
+    }
+    if (!this.persistence.consumeOtpVerification) {
+      return false;
+    }
+    const cleanInput = inputCode.trim();
+    const formattedPhone = this.normalizeOtpPhone(phone) || this.normalizeOtpPhone(this.vendor.whatsappPhone);
+    const consumedDirect = await this.persistence.consumeOtpVerification({
+      phone: formattedPhone,
+      code: cleanInput,
+      purpose,
+    });
+    if (consumedDirect) {
+      return true;
+    }
+    const vendorFormatted = this.normalizeOtpPhone(this.vendor.whatsappPhone);
+    if (vendorFormatted && vendorFormatted !== formattedPhone) {
+      const consumedVendor = await this.persistence.consumeOtpVerification({
+        phone: vendorFormatted,
+        code: cleanInput,
+        purpose,
+      });
+      if (consumedVendor) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public async setTransactionPin(input: {
@@ -4776,7 +4948,7 @@ export class CaterlogStage1Engine {
       if (input.currentPin) {
         await this.verifyTransactionPin(input.currentPin);
       } else if (input.otpCode) {
-        const otpValid = this.verifyOtp(this.vendor.whatsappPhone, input.otpCode, "PIN_RESET");
+        const otpValid = await this.verifyOtpAsync(this.vendor.whatsappPhone, input.otpCode, "PIN_RESET");
         if (!otpValid) {
           throw new Error("Invalid or expired 6-digit WhatsApp verification code for PIN reset.");
         }
@@ -4859,7 +5031,7 @@ export class CaterlogStage1Engine {
 
     // Step-up authentication: PIN + OTP required
     await this.verifyTransactionPin(input.pin);
-    const otpValid = this.verifyOtp(this.vendor.whatsappPhone, input.otpCode, "BANK_CHANGE");
+    const otpValid = await this.verifyOtpAsync(this.vendor.whatsappPhone, input.otpCode, "BANK_CHANGE");
     if (!otpValid) {
       throw new Error("Invalid or expired 6-digit WhatsApp security code.");
     }
@@ -5631,6 +5803,8 @@ export class CaterlogStage1Engine {
       dispatchedAt: ord.dispatchedAt,
       paymentExpiresAt: ord.paymentExpiresAt,
       trackUrl: `${dashboardBase}/track/${encodeURIComponent(ord.shortCode)}`,
+      courierShipment: ord.courierShipment,
+      liveCheckoutRatesEnabled: this.getShipbubbleConfig().liveCheckoutRatesEnabled,
       vendor: {
         businessName: this.vendor.businessName,
         slug: this.vendor.slug,
@@ -6891,10 +7065,217 @@ export class CaterlogStage1Engine {
       },
       subscription: this.vendor.subscription,
       trustTier: this.vendor.trustTier,
+      storefrontConfig: this.getStorefrontConfig(),
       platformInvoices: this.vendor.invoices?.map((inv) => ({
         ...inv,
         amountFormatted: `₦${inv.amountNaira.toLocaleString()}`,
       })),
+    };
+  }
+
+  public getStorefrontConfig(overrideRoleOrPlan?: string): StorefrontConfig {
+    const effectiveRoleOrPlan =
+      overrideRoleOrPlan ||
+      this.vendor.subscription?.planId ||
+      this.vendor.role ||
+      "GROWTH";
+    return resolveVendorStorefrontConfig(
+      this.vendor.storefrontConfig ?? null,
+      effectiveRoleOrPlan,
+      this.vendor.businessName
+    );
+  }
+
+  public updateStorefrontConfig(
+    input: Partial<StorefrontConfig> | Record<string, unknown>,
+    overrideRoleOrPlan?: string
+  ): StorefrontConfig {
+    const current = this.getStorefrontConfig(overrideRoleOrPlan);
+    const incoming = (input ?? {}) as Partial<StorefrontConfig>;
+    const mergedRaw: Record<string, unknown> = {
+      ...current,
+      ...incoming,
+      theme: {
+        ...current.theme,
+        ...(incoming.theme ?? {}),
+      },
+      visibility: {
+        ...current.visibility,
+        ...(incoming.visibility ?? {}),
+      },
+      copy: {
+        ...current.copy,
+        ...(incoming.copy ?? {}),
+      },
+    };
+
+    const resolved = resolveVendorStorefrontConfig(
+      mergedRaw,
+      overrideRoleOrPlan ||
+        this.vendor.subscription?.planId ||
+        this.vendor.role ||
+        "GROWTH",
+      this.vendor.businessName
+    );
+    this.vendor.storefrontConfig = resolved as unknown as Record<string, unknown>;
+
+    this.persistInBackground("updateStorefrontConfig", () =>
+      this.persistence.saveVendor(this.vendor)
+    );
+    this.recordAuditEvent(
+      "STOREFRONT_CONFIG_UPDATED",
+      "VENDOR_WEB_DASHBOARD",
+      "VENDOR",
+      this.vendor.id,
+      {
+        presetId: resolved.presetId,
+        mode: resolved.mode,
+        headerVariant: resolved.headerVariant,
+        heroVariant: resolved.heroVariant,
+        productCardVariant: resolved.productCardVariant,
+      }
+    );
+    void this.broadcastStateChange();
+    return resolved;
+  }
+
+  public getPublicStorefrontData(overrideRoleOrPlan?: string) {
+    const state = this.serializeState();
+    const roleOrPlan =
+      overrideRoleOrPlan ||
+      this.vendor.subscription?.planId ||
+      this.vendor.role ||
+      "GROWTH";
+    const storefrontConfig = this.getStorefrontConfig(roleOrPlan);
+    return {
+      vendor: {
+        id: this.vendor.id,
+        slug: this.vendor.slug,
+        businessName: this.vendor.businessName,
+        role: this.vendor.role,
+        whatsappPhone: this.vendor.whatsappPhone,
+        verificationStatus: this.vendor.verificationStatus,
+        cacNumber: this.vendor.cacNumber,
+        instagramHandle: this.vendor.instagramHandle,
+        facebookPageName: this.vendor.facebookPageName,
+        baseState: this.vendor.baseState ?? "Lagos",
+        baseCity: this.vendor.baseCity ?? "Ikeja",
+        reservationTtlMinutes: this.vendor.reservationTtlMinutes,
+        subscriptionPlanId: this.vendor.subscription?.planId ?? "GROWTH",
+      },
+      canUseFullWebsite: canUseFullWebsiteMode(roleOrPlan),
+      storefrontConfig,
+      presets: STOREFRONT_PRESETS,
+      products: state.products,
+      shippingZones: state.shippingZones,
+      discounts: state.discounts,
+    };
+  }
+
+  public async createPublicStorefrontOrder(input: {
+    buyerName: string;
+    buyerPhone: string;
+    shippingZoneId?: string;
+    shippingZoneName?: string;
+    discountCode?: string;
+    deliveryAddress?: string;
+    deliveryLandmark?: string;
+    alternatePhone?: string;
+    items: Array<{
+      productSku?: string;
+      productId?: string;
+      variantId?: string;
+      variantSku?: string;
+      quantity: number;
+    }>;
+  }) {
+    if (!input.buyerName?.trim() || !input.buyerPhone?.trim()) {
+      throw new Error("Please enter your full name and WhatsApp phone number.");
+    }
+    if (!input.items || input.items.length === 0) {
+      throw new Error("Your shopping bag is empty.");
+    }
+
+    const activeZones = this.shippingZones.filter((z) => z.isActive);
+    const matchedZone =
+      activeZones.find(
+        (z) =>
+          (input.shippingZoneId && z.id === input.shippingZoneId) ||
+          (input.shippingZoneName &&
+            z.name.toLowerCase() === input.shippingZoneName.trim().toLowerCase())
+      ) ??
+      activeZones[0] ?? {
+        id: "zone-default",
+        code: 1,
+        name: "Standard Delivery",
+        feeKobo: 250000n,
+        isActive: true,
+      };
+
+    const cartItems: RuntimeCartItem[] = [];
+    for (const raw of input.items) {
+      const qty = Math.max(1, Math.round(Number(raw.quantity) || 1));
+      const prod = this.products.find(
+        (p) =>
+          (raw.productId && p.id === raw.productId) ||
+          (raw.productSku && p.skuCode.toUpperCase() === raw.productSku.trim().toUpperCase())
+      );
+      if (!prod) {
+        throw new Error(`Product "${raw.productSku || raw.productId}" is no longer available.`);
+      }
+      const matchedVar =
+        raw.variantId || raw.variantSku
+          ? prod.variants?.find(
+              (v) =>
+                (raw.variantId && v.id === raw.variantId) ||
+                (raw.variantSku && v.skuCode.toUpperCase() === raw.variantSku.trim().toUpperCase())
+            )
+          : undefined;
+
+      cartItems.push({
+        productId: prod.id,
+        productSku: prod.skuCode,
+        productName: prod.name,
+        variantId: matchedVar?.id,
+        variantSku: matchedVar?.skuCode,
+        variantName: matchedVar?.name,
+        quantity: qty,
+        unitPriceKobo: matchedVar?.priceKobo ?? prod.basePriceKobo,
+      });
+    }
+
+    const normalizedPhone = this.normalizeOtpPhone(input.buyerPhone.trim());
+    const order = await this.finalizeOrderAndSendVirtualAccount({
+      buyerPhone: normalizedPhone,
+      buyerName: input.buyerName.trim(),
+      cartItems,
+      shippingZone: matchedZone,
+      discountCode: input.discountCode?.trim() || undefined,
+    });
+
+    if (!order) {
+      throw new Error("Could not reserve stock for one or more items in your bag. Please check available stock.");
+    }
+
+    order.salesChannel = "WEB_STOREFRONT";
+    if (input.deliveryAddress?.trim()) {
+      order.deliveryAddress = input.deliveryAddress.trim();
+    }
+    if (input.deliveryLandmark?.trim()) {
+      order.deliveryLandmark = input.deliveryLandmark.trim();
+    }
+    if (input.alternatePhone?.trim()) {
+      order.alternatePhone = input.alternatePhone.trim();
+    }
+
+    await this.persistNow("saveWebStorefrontOrderMeta", () =>
+      this.persistence.saveOrder(order)
+    );
+    await this.broadcastStateChange();
+
+    return {
+      orderShortCode: order.shortCode,
+      receipt: this.getPublicOrderReceipt(order.shortCode),
     };
   }
 
@@ -7002,6 +7383,574 @@ export class CaterlogStage1Engine {
       senderName,
       ...result,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Shipbubble Logistics, Multi-Courier Rate Shopping & Official Courier Receipt
+  // -------------------------------------------------------------------------
+
+  public isHighestSubscriptionVendor(): boolean {
+    const role = this.vendor.role;
+    const planId = this.vendor.subscription?.planId;
+    return role === "pro" || planId === "PRO" || planId === "SCALE";
+  }
+
+  public getShipbubbleConfig(): RuntimeShipbubbleConfig {
+    if (!this.vendor.shipbubbleConfig) {
+      this.vendor.shipbubbleConfig = {
+        pickupAddress: "14 Admiralty Way, Lekki Phase 1, Lagos, Nigeria",
+        pickupAddressCode: 871341691,
+        pickupFormattedAddress:
+          "Road 14 Admiralty Wy, Lekki Phase I, Lagos 106104, Lagos, Nigeria",
+        pickupCity: "Eti Osa",
+        pickupState: "Lagos",
+        pickupPostalCode: "106104",
+        defaultCategoryId: 74794423,
+        defaultWeightPreset: "SHOEBOX",
+        customWeightKg: 1.5,
+        selectedCarriers: ["test_1_courier"],
+        autoBookOnPaid: this.isHighestSubscriptionVendor(),
+        liveCheckoutRatesEnabled: true,
+      };
+    }
+    return this.vendor.shipbubbleConfig;
+  }
+
+  public async validateVendorPickupAddress(address: string) {
+    const cfg = this.getShipbubbleConfig();
+    const validated = await this.shipbubble.validateAddress({
+      name: this.vendor.businessName,
+      email: `${this.vendor.slug}@caterlog.store`,
+      phone: this.vendor.whatsappPhone,
+      address: address.trim() || cfg.pickupAddress,
+    });
+
+    cfg.pickupAddress = address.trim() || validated.address;
+    cfg.pickupAddressCode = validated.address_code;
+    cfg.pickupFormattedAddress = validated.formatted_address;
+    cfg.pickupCity = validated.city;
+    cfg.pickupState = validated.state;
+    cfg.pickupPostalCode = validated.postal_code;
+
+    this.recordAuditEvent(
+      "SHIPBUBBLE_CONFIG_UPDATED",
+      "VENDOR_WEB_DASHBOARD",
+      "VENDOR",
+      this.vendor.id,
+      { config: cfg, validatedAddress: validated }
+    );
+    await this.broadcastStateChange();
+    return { validated, config: cfg };
+  }
+
+  public updateShipbubbleConfig(input: Partial<RuntimeShipbubbleConfig>): RuntimeShipbubbleConfig {
+    const cfg = this.getShipbubbleConfig();
+    const isPremium = this.isHighestSubscriptionVendor();
+
+    if (input.pickupAddress !== undefined && input.pickupAddress.trim()) {
+      cfg.pickupAddress = input.pickupAddress.trim();
+    }
+    if (input.pickupAddressCode !== undefined) {
+      cfg.pickupAddressCode = input.pickupAddressCode;
+    }
+    if (input.pickupFormattedAddress !== undefined) {
+      cfg.pickupFormattedAddress = input.pickupFormattedAddress;
+    }
+    if (input.defaultCategoryId !== undefined && Number.isFinite(input.defaultCategoryId)) {
+      cfg.defaultCategoryId = input.defaultCategoryId;
+    }
+
+    // Weight handling rule: Manual input is only open to premium (highest subscription) vendors
+    if (input.defaultWeightPreset !== undefined) {
+      if (input.defaultWeightPreset === "CUSTOM" && !isPremium) {
+        cfg.defaultWeightPreset = "SHOEBOX";
+      } else {
+        cfg.defaultWeightPreset = input.defaultWeightPreset;
+      }
+    }
+    if (input.customWeightKg !== undefined && isPremium) {
+      const w = Number(input.customWeightKg);
+      if (Number.isFinite(w) && w > 0) {
+        cfg.customWeightKg = Math.min(100, Math.max(0.1, Number(w.toFixed(2))));
+      }
+    }
+
+    // Carrier selection rule: Starter & standard can select 1; highest subscription can select multiple
+    if (Array.isArray(input.selectedCarriers) && input.selectedCarriers.length > 0) {
+      const cleaned = Array.from(new Set(input.selectedCarriers.map((c) => c.trim()).filter(Boolean)));
+      cfg.selectedCarriers = isPremium ? cleaned : cleaned.slice(0, 1);
+    }
+
+    // Auto-booking rule: Pro/Standard must manually select; highest subscription can use automatic booking on PAID
+    if (input.autoBookOnPaid !== undefined) {
+      cfg.autoBookOnPaid = isPremium ? Boolean(input.autoBookOnPaid) : false;
+    }
+
+    if (input.liveCheckoutRatesEnabled !== undefined) {
+      cfg.liveCheckoutRatesEnabled = Boolean(input.liveCheckoutRatesEnabled);
+    }
+
+    this.recordAuditEvent(
+      "SHIPBUBBLE_CONFIG_UPDATED",
+      "VENDOR_WEB_DASHBOARD",
+      "VENDOR",
+      this.vendor.id,
+      { config: cfg }
+    );
+    void this.broadcastStateChange();
+    return cfg;
+  }
+
+  public async fetchOrderShipbubbleRates(
+    shortCode: string,
+    options: {
+      deliveryAddress?: string;
+      weightPreset?: ShipbubbleWeightPresetId;
+      customWeightKg?: number;
+      filterByVendorCarriers?: boolean;
+    } = {}
+  ) {
+    const clean = shortCode.trim().toUpperCase();
+    const ord = this.orders.find((o) => o.shortCode.toUpperCase() === clean);
+    if (!ord) {
+      throw new Error(`Order ${shortCode} not found.`);
+    }
+
+    const cfg = this.getShipbubbleConfig();
+    const isPremium = this.isHighestSubscriptionVendor();
+
+    if (options.deliveryAddress && options.deliveryAddress.trim()) {
+      ord.deliveryAddress = options.deliveryAddress.trim();
+    }
+
+    const effectivePreset: ShipbubbleWeightPresetId =
+      options.weightPreset === "CUSTOM" && !isPremium
+        ? cfg.defaultWeightPreset === "CUSTOM"
+          ? "SHOEBOX"
+          : cfg.defaultWeightPreset
+        : options.weightPreset ?? cfg.defaultWeightPreset;
+
+    const presetObj =
+      effectivePreset !== "CUSTOM"
+        ? SHIPBUBBLE_WEIGHT_PRESETS[effectivePreset]
+        : SHIPBUBBLE_WEIGHT_PRESETS.SHOEBOX;
+
+    const totalWeightKg =
+      effectivePreset === "CUSTOM" && isPremium
+        ? Math.max(0.1, Number(options.customWeightKg ?? cfg.customWeightKg ?? 1.5))
+        : presetObj.weightKg;
+
+    const orderItems =
+      ord.items && ord.items.length > 0
+        ? ord.items.map((it) => ({
+            name: it.variantName ? `${it.productName} (${it.variantName})` : it.productName,
+            description: `${it.productName} [${it.variantSku || it.productSku}]`,
+            unit_weight: Number((totalWeightKg / Math.max(1, it.quantity)).toFixed(2)),
+            unit_amount: koboToNaira(it.unitPriceKobo),
+            quantity: it.quantity,
+          }))
+        : [
+            {
+              name: ord.variantName ? `${ord.productName} (${ord.variantName})` : ord.productName,
+              description: `${ord.productName} [${ord.variantSku || ord.productSku}]`,
+              unit_weight: Number((totalWeightKg / Math.max(1, ord.quantity || 1)).toFixed(2)),
+              unit_amount: koboToNaira(ord.subtotalKobo) / Math.max(1, ord.quantity || 1),
+              quantity: ord.quantity || 1,
+            },
+          ];
+
+    const deliveryAddr =
+      ord.deliveryAddress?.trim() ||
+      (ord.shippingZoneName ? `${ord.shippingZoneName}, Lagos, Nigeria` : "25 Allen Avenue, Ikeja, Lagos, Nigeria");
+
+    const { rateResponse, senderValidated, receiverValidated } = await this.shipbubble.fetchRates({
+      sender: {
+        name: this.vendor.businessName,
+        email: `${this.vendor.slug}@caterlog.store`,
+        phone: this.vendor.whatsappPhone,
+        address: cfg.pickupAddress,
+        addressCode: cfg.pickupAddressCode,
+      },
+      receiver: {
+        name: ord.customerName,
+        email: `${ord.customerPhone.replace(/\D/g, "")}@caterlog.store`,
+        phone: ord.customerPhone,
+        address: deliveryAddr,
+      },
+      categoryId: cfg.defaultCategoryId,
+      items: orderItems,
+      dimension: presetObj.dimension,
+    });
+
+    return {
+      orderShortCode: ord.shortCode,
+      requestToken: rateResponse.request_token,
+      couriers: rateResponse.couriers,
+      fastestCourier: rateResponse.fastest_courier,
+      cheapestCourier: rateResponse.cheapest_courier,
+      senderValidated,
+      receiverValidated,
+      packageWeightKg: totalWeightKg,
+      weightPreset: effectivePreset,
+      boxName: effectivePreset === "CUSTOM" ? "Custom Package" : presetObj.boxName,
+      isPremiumTier: isPremium,
+    };
+  }
+
+  public async bookOrderShipbubbleCourier(
+    shortCode: string,
+    input: {
+      requestToken?: string;
+      courierId?: string;
+      serviceCode?: string;
+      deliveryAddress?: string;
+      weightPreset?: ShipbubbleWeightPresetId;
+      customWeightKg?: number;
+      autoBooked?: boolean;
+    } = {}
+  ): Promise<{ order: RuntimeOrder; receipt: RuntimeCourierShipmentReceipt }> {
+    const clean = shortCode.trim().toUpperCase();
+    const ord = this.orders.find((o) => o.shortCode.toUpperCase() === clean);
+    if (!ord) {
+      throw new Error(`Order ${shortCode} not found.`);
+    }
+
+    const cfg = this.getShipbubbleConfig();
+    let requestToken = input.requestToken;
+    let courierId = input.courierId;
+    let serviceCode = input.serviceCode;
+    let selectedQuote: ShipbubbleCourierQuote | undefined;
+    let weightPreset = input.weightPreset ?? cfg.defaultWeightPreset;
+    let boxName = "Small Box";
+
+    // Always fetch fresh rates if requestToken or courierId was not provided (or during auto-booking)
+    const quoted = await this.fetchOrderShipbubbleRates(ord.shortCode, {
+      deliveryAddress: input.deliveryAddress,
+      weightPreset: input.weightPreset,
+      customWeightKg: input.customWeightKg,
+    });
+    weightPreset = quoted.weightPreset;
+    boxName = quoted.boxName;
+
+    if (!requestToken) {
+      requestToken = quoted.requestToken;
+    }
+
+    if (courierId || serviceCode) {
+      selectedQuote = quoted.couriers.find(
+        (c) => c.courier_id === courierId || c.service_code === serviceCode
+      );
+    }
+    if (!selectedQuote) {
+      // Check vendor's preferred carriers first, then cheapest courier
+      selectedQuote =
+        quoted.couriers.find(
+          (c) =>
+            cfg.selectedCarriers.includes(c.courier_id) ||
+            cfg.selectedCarriers.includes(c.service_code)
+        ) ??
+        quoted.cheapestCourier ??
+        quoted.couriers[0];
+    }
+
+    if (!selectedQuote) {
+      throw new Error("No operational courier quotes returned by Shipbubble for this route.");
+    }
+
+    courierId = selectedQuote.courier_id;
+    serviceCode = selectedQuote.service_code;
+
+    const label = await this.shipbubble.createShipmentLabel({
+      requestToken,
+      courierId,
+      serviceCode,
+    });
+
+    const receipt: RuntimeCourierShipmentReceipt = {
+      provider: "shipbubble",
+      receiptNumber: `RCP-${label.order_id}`,
+      shipbubbleOrderId: label.order_id,
+      requestToken,
+      courierId,
+      courierName: label.courier?.name || selectedQuote.courier_name,
+      courierEmail: label.courier?.email || "dispatch@shipbubble.com",
+      courierPhone: label.courier?.phone || "+2348007447282",
+      courierImage: selectedQuote.courier_image,
+      serviceCode,
+      serviceType: selectedQuote.service_type || "pickup",
+      status: label.status || "confirmed",
+      trackingCode: label.tracking_code || label.order_id,
+      trackingUrl:
+        label.tracking_url || `https://trackshipment.shipbubble.com/shipment/${label.order_id}`,
+      waybillDocumentUrl: label.waybill_document,
+      shippingFeeNaira: label.payment?.shipping_fee ?? selectedQuote.total,
+      vatNaira: selectedQuote.vat ?? 0,
+      paymentType: label.payment?.type ?? "wallet",
+      paymentStatus: label.payment?.status ?? "completed",
+      currency: label.payment?.currency ?? "NGN",
+      packageWeightKg: label.package_weight ?? quoted.packageWeightKg,
+      packageAmountNaira: label.package_amount ?? koboToNaira(ord.subtotalKobo),
+      weightPreset,
+      boxName,
+      pickupEta: selectedQuote.pickup_eta,
+      deliveryEta: selectedQuote.delivery_eta,
+      shipFrom: label.ship_from,
+      shipTo: label.ship_to,
+      items: (label.items ?? []).map((it) => ({
+        name: it.name,
+        description: it.description,
+        weight: it.weight,
+        amount: it.amount,
+        quantity: it.quantity,
+        total: it.total,
+      })),
+      autoBooked: Boolean(input.autoBooked),
+      bookedAt: new Date().toISOString(),
+      message: label.message,
+    };
+
+    ord.courierShipment = receipt;
+    ord.riderPhone = `${receipt.courierName} (${receipt.trackingCode})`;
+    ord.dispatchedAt = ord.dispatchedAt ?? new Date();
+    if (ord.status === "PAID" || ord.status === "PROCESSING") {
+      ord.status = "OUT_FOR_DELIVERY";
+    }
+
+    await this.persistNow("bookOrderShipbubbleCourier", () => this.persistence.saveOrder(ord));
+
+    const dashboardBase = (process.env.DASHBOARD_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+    const trackUrl = `${dashboardBase}/track/${encodeURIComponent(ord.shortCode)}`;
+
+    const buyerReceiptMsg = [
+      `🧾 *OFFICIAL COURIER SHIPPING RECEIPT (${receipt.receiptNumber})*`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `🚚 *Courier:* *${receipt.courierName}*`,
+      `🔖 *Waybill / Tracking ID:* \`${receipt.trackingCode}\``,
+      `📦 *Order Reference:* *#${ord.shortCode}*`,
+      `⚖️ *Package Weight:* *${receipt.packageWeightKg} kg* (${receipt.boxName})`,
+      `💳 *Courier Fee Settled:* *₦${receipt.shippingFeeNaira.toLocaleString()}* (${receipt.paymentStatus.toUpperCase()})`,
+      `⏱️ *Estimated Delivery:* *${receipt.deliveryEta || "Within 24-48 hrs"}*`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `📤 *Sender:* ${receipt.shipFrom.name} (${receipt.shipFrom.address})`,
+      `📥 *Deliver To:* ${receipt.shipTo.name} (${receipt.shipTo.address})`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `🔗 *Shipbubble Live Courier Tracker:*`,
+      `${receipt.trackingUrl}`,
+      ``,
+      `🧾 *Caterlog Order & Receipt Page:*`,
+      `${trackUrl}`,
+    ].join("\n");
+
+    await this.dispatchWhatsAppAndRecordChat({
+      channel: "BUYER_SHOP_WA",
+      toPhone: ord.customerPhone,
+      text: buyerReceiptMsg,
+      headerText: `Courier Receipt · ${receipt.courierName}`,
+    });
+
+    this.appendChat({
+      channel: "VENDOR_ADMIN_WA",
+      sender: "CATERLOG_BOT",
+      fromPhone: "CATERLOG",
+      text: [
+        `🚚 *Shipbubble Courier Booked ${input.autoBooked ? "(Auto-Booked)" : ""} — #${ord.shortCode}*`,
+        `• Receipt No: \`${receipt.receiptNumber}\``,
+        `• Courier: *${receipt.courierName}*`,
+        `• Waybill ID: \`${receipt.trackingCode}\``,
+        `• Fee Paid: *₦${receipt.shippingFeeNaira.toLocaleString()}* (Wallet)`,
+        `• Live Tracker: ${receipt.trackingUrl}`,
+      ].join("\n"),
+    });
+
+    this.recordAuditEvent(
+      "SHIPBUBBLE_COURIER_BOOKED",
+      input.autoBooked ? "COPILOT_AUTO" : "VENDOR_WEB_DASHBOARD",
+      "ORDER",
+      ord.shortCode,
+      {
+        receiptNumber: receipt.receiptNumber,
+        shipbubbleOrderId: receipt.shipbubbleOrderId,
+        courierName: receipt.courierName,
+        shippingFeeNaira: receipt.shippingFeeNaira,
+        trackingUrl: receipt.trackingUrl,
+        autoBooked: Boolean(input.autoBooked),
+        receipt,
+      }
+    );
+
+    await this.broadcastStateChange();
+    return { order: ord, receipt };
+  }
+
+  public async selectPublicOrderShipbubbleRate(
+    shortCode: string,
+    input: {
+      courierId: string;
+      serviceCode: string;
+      courierName: string;
+      rateNaira: number;
+      deliveryAddress?: string;
+      requestToken?: string;
+    }
+  ): Promise<RuntimeOrder> {
+    const clean = shortCode.trim().toUpperCase();
+    const ord = this.orders.find((o) => o.shortCode.toUpperCase() === clean);
+    if (!ord) {
+      throw new Error(`Order ${shortCode} not found.`);
+    }
+
+    if (input.deliveryAddress && input.deliveryAddress.trim()) {
+      ord.deliveryAddress = input.deliveryAddress.trim();
+    }
+
+    const newFeeKobo = nairaToKobo(Math.max(0, Math.round(Number(input.rateNaira) || 0)));
+    ord.shippingZoneName = `${input.courierName} (Shipbubble Live Rate)`;
+    ord.shippingFeeKobo = newFeeKobo;
+    const netSubtotal =
+      ord.subtotalKobo > ord.discountAmountKobo
+        ? ord.subtotalKobo - ord.discountAmountKobo
+        : 0n;
+    ord.totalAmountKobo = netSubtotal + newFeeKobo;
+
+    await this.persistNow("selectPublicOrderShipbubbleRate", () => this.persistence.saveOrder(ord));
+    await this.broadcastStateChange();
+    return ord;
+  }
+
+  public async handleShipbubbleWebhook(payload: {
+    event?: string;
+    status?: "pending" | "confirmed" | "picked_up" | "in_transit" | "completed" | "cancelled";
+    order_id?: string;
+    orderShortCode?: string;
+    tracking_url?: string;
+    waybill_document?: string;
+    courier?: { name?: string; tracking_code?: string };
+  }): Promise<{ order: RuntimeOrder; receipt: RuntimeCourierShipmentReceipt }> {
+    const ord = this.orders.find(
+      (o) =>
+        (payload.orderShortCode &&
+          o.shortCode.toUpperCase() === payload.orderShortCode.trim().toUpperCase()) ||
+        (payload.order_id &&
+          o.courierShipment?.shipbubbleOrderId.toUpperCase() ===
+            payload.order_id.trim().toUpperCase())
+    );
+
+    if (!ord || !ord.courierShipment) {
+      throw new Error(
+        `No matching Shipbubble shipment found for ${payload.order_id || payload.orderShortCode || "webhook"}.`
+      );
+    }
+
+    const receipt = ord.courierShipment;
+    const nextStatus = payload.status ?? receipt.status;
+    receipt.status = nextStatus;
+
+    if (payload.tracking_url) {
+      receipt.trackingUrl = payload.tracking_url;
+    }
+    if (payload.waybill_document) {
+      receipt.waybillDocumentUrl = payload.waybill_document;
+    }
+    if (payload.courier?.tracking_code) {
+      receipt.trackingCode = payload.courier.tracking_code;
+    }
+
+    const nowIso = new Date().toISOString();
+    if (nextStatus === "picked_up") {
+      receipt.pickedUpAt = receipt.pickedUpAt ?? nowIso;
+      if (ord.status === "PAID" || ord.status === "PROCESSING") {
+        ord.status = "OUT_FOR_DELIVERY";
+      }
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: ord.customerPhone,
+        text: [
+          `📦 *PACKAGE PICKED UP BY ${receipt.courierName.toUpperCase()}!*`,
+          `🧾 Receipt: \`${receipt.receiptNumber}\` · Order *#${ord.shortCode}*`,
+          `🔖 Tracking ID: \`${receipt.trackingCode}\``,
+          `⏱️ Delivery ETA: *${receipt.deliveryEta || "On the way"}*`,
+          `🔗 Track Live: ${receipt.trackingUrl}`,
+        ].join("\n"),
+        headerText: "Courier Picked Up Package",
+      });
+    } else if (nextStatus === "in_transit") {
+      receipt.inTransitAt = receipt.inTransitAt ?? nowIso;
+      if (ord.status === "PAID" || ord.status === "PROCESSING") {
+        ord.status = "OUT_FOR_DELIVERY";
+      }
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: ord.customerPhone,
+        text: [
+          `🚚 *PACKAGE IN TRANSIT — ${receipt.courierName.toUpperCase()}*`,
+          `Hello *${ord.customerName}*, your package for Order *#${ord.shortCode}* is currently in transit to *${receipt.shipTo.address}*.`,
+          `🔖 Waybill: \`${receipt.trackingCode}\``,
+          `🔗 Live Tracking: ${receipt.trackingUrl}`,
+        ].join("\n"),
+        headerText: "Shipment In Transit",
+      });
+    } else if (nextStatus === "completed") {
+      receipt.deliveredAt = receipt.deliveredAt ?? nowIso;
+      ord.status = "FULFILLED";
+      ord.splitSettlementStatus = "SETTLED";
+
+      // Increment vendor Trust Tier clean orders count & unlock escrow
+      if (this.vendor.trustTier) {
+        this.vendor.trustTier.completedCleanOrders += 1;
+      }
+
+      await this.dispatchWhatsAppAndRecordChat({
+        channel: "BUYER_SHOP_WA",
+        toPhone: ord.customerPhone,
+        text: [
+          `🎉 *PACKAGE DELIVERED — OFFICIAL COURIER RECEIPT (${receipt.receiptNumber})*`,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `Hello *${ord.customerName}*, *${receipt.courierName}* has confirmed delivery of your Order *#${ord.shortCode}*!`,
+          `🔖 Waybill ID: \`${receipt.trackingCode}\``,
+          `📍 Delivered To: ${receipt.shipTo.address}`,
+          `🕒 Delivered At: ${new Date(receipt.deliveredAt).toLocaleString()}`,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `Thank you for shopping with *${this.vendor.businessName}*!`,
+        ].join("\n"),
+        headerText: "Delivery Confirmed",
+      });
+
+      this.appendChat({
+        channel: "VENDOR_ADMIN_WA",
+        sender: "CATERLOG_BOT",
+        fromPhone: "CATERLOG",
+        text: [
+          `✅ *Shipbubble Delivery Confirmed (#${ord.shortCode})!*`,
+          `• Courier: *${receipt.courierName}* (\`${receipt.trackingCode}\`)`,
+          `• Escrow Settlement: *${formatNaira(ord.amountPaidKobo)}* released from Trust-Held to Liquid Withdrawable Cash!`,
+          `• Trust Score: Clean fulfilled orders increased to *${this.vendor.trustTier?.completedCleanOrders ?? 15}*.`,
+        ].join("\n"),
+      });
+    } else if (nextStatus === "cancelled") {
+      this.appendChat({
+        channel: "VENDOR_ADMIN_WA",
+        sender: "CATERLOG_BOT",
+        fromPhone: "CATERLOG",
+        text: `⚠️ *Shipbubble Shipment Cancelled (#${ord.shortCode}):* Waybill \`${receipt.trackingCode}\` was cancelled. You can book a new courier from the Orders view.`,
+      });
+    }
+
+    await this.persistNow("handleShipbubbleWebhook", () => this.persistence.saveOrder(ord));
+    this.recordAuditEvent(
+      "SHIPBUBBLE_STATUS_UPDATED",
+      "SYSTEM_TIMER",
+      "ORDER",
+      ord.shortCode,
+      {
+        status: nextStatus,
+        shipbubbleOrderId: receipt.shipbubbleOrderId,
+        receiptNumber: receipt.receiptNumber,
+        receipt,
+      }
+    );
+
+    await this.broadcastStateChange();
+    return { order: ord, receipt };
   }
 
   private appendChat(msg: Omit<ChatThreadMessage, "id" | "timestamp">) {

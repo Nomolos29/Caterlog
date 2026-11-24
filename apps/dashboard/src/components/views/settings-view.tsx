@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import type {
   VendorProfile,
+  VendorState,
   ShippingZoneItem,
   DiscountItem,
   ChatMessageItem,
@@ -31,6 +32,7 @@ export type SettingsTabId =
 interface SettingsViewProps {
   vendor: VendorProfile;
   workspaceRole?: PlatformRole;
+  onStateChange?: (state: VendorState) => void;
   shippingZones: ShippingZoneItem[];
   discounts: DiscountItem[];
   chatMessages?: ChatMessageItem[];
@@ -69,6 +71,7 @@ const INITIAL_MESSAGES: MessageItem[] = [];
 export function SettingsView({
   vendor,
   workspaceRole = "growth",
+  onStateChange,
   shippingZones,
   discounts,
   chatMessages = [],
@@ -91,7 +94,103 @@ export function SettingsView({
 }: SettingsViewProps) {
   const isVendor = isVendorRole(workspaceRole);
   const isReseller = isResellerRole(workspaceRole);
+  const isHighestTier =
+    workspaceRole === "pro" ||
+    vendor.role === "pro" ||
+    subscription?.planId === "PRO" ||
+    subscription?.planId === "SCALE";
   const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab);
+
+  // Shipbubble Logistics State
+  const sbCfg = vendor.shipbubbleConfig ?? {
+    pickupAddress: "14 Admiralty Way, Lekki Phase 1, Lagos, Nigeria",
+    pickupAddressCode: 871341691,
+    pickupFormattedAddress: "Road 14 Admiralty Wy, Lekki Phase I, Lagos 106104, Lagos, Nigeria",
+    defaultCategoryId: 74794423,
+    defaultWeightPreset: "SHOEBOX" as const,
+    customWeightKg: 1.5,
+    selectedCarriers: ["test_1_courier"],
+    autoBookOnPaid: false,
+    liveCheckoutRatesEnabled: true,
+  };
+  const [sbPickupAddress, setSbPickupAddress] = useState(sbCfg.pickupAddress);
+  const [sbAddressCode, setSbAddressCode] = useState<number | undefined>(sbCfg.pickupAddressCode);
+  const [sbFormattedAddress, setSbFormattedAddress] = useState(sbCfg.pickupFormattedAddress || "");
+  const [sbValidatingAddr, setSbValidatingAddr] = useState(false);
+  const [sbSelectedCarriers, setSbSelectedCarriers] = useState<string[]>(
+    sbCfg.selectedCarriers?.length ? sbCfg.selectedCarriers : ["test_1_courier"]
+  );
+  const [sbWeightPreset, setSbWeightPreset] = useState<"SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM">(
+    sbCfg.defaultWeightPreset
+  );
+  const [sbCustomWeightKg, setSbCustomWeightKg] = useState<string>(String(sbCfg.customWeightKg ?? 1.5));
+  const [sbAutoBookOnPaid, setSbAutoBookOnPaid] = useState<boolean>(
+    isHighestTier ? Boolean(sbCfg.autoBookOnPaid) : false
+  );
+  const [sbLiveCheckoutRates, setSbLiveCheckoutRates] = useState<boolean>(
+    sbCfg.liveCheckoutRatesEnabled ?? true
+  );
+  const [sbSavingConfig, setSbSavingConfig] = useState(false);
+
+  const handleValidatePickupAddress = async () => {
+    setSbValidatingAddr(true);
+    try {
+      const res = await api.validateShipbubblePickupAddress(sbPickupAddress);
+      setSbAddressCode(res.validated.address_code);
+      setSbFormattedAddress(res.validated.formatted_address);
+      if (onStateChange && res.state) {
+        onStateChange(res.state);
+      }
+      setShippingSavedToast(
+        `✓ Shipbubble Pickup Address Validated (Code: #${res.validated.address_code})`
+      );
+      setTimeout(() => setShippingSavedToast(null), 4000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to validate pickup address with Shipbubble.");
+    } finally {
+      setSbValidatingAddr(false);
+    }
+  };
+
+  const handleToggleShipbubbleCarrier = (serviceCode: string) => {
+    if (!isHighestTier) {
+      // Starter & Standard plans can only select 1 carrier
+      setSbSelectedCarriers([serviceCode]);
+      return;
+    }
+    // Highest tier can select multiple carriers
+    setSbSelectedCarriers((prev) => {
+      if (prev.includes(serviceCode)) {
+        return prev.length > 1 ? prev.filter((c) => c !== serviceCode) : prev;
+      }
+      return [...prev, serviceCode];
+    });
+  };
+
+  const handleSaveShipbubbleConfig = async () => {
+    setSbSavingConfig(true);
+    try {
+      const res = await api.updateShipbubbleConfig({
+        pickupAddress: sbPickupAddress,
+        pickupAddressCode: sbAddressCode,
+        pickupFormattedAddress: sbFormattedAddress,
+        selectedCarriers: isHighestTier ? sbSelectedCarriers : sbSelectedCarriers.slice(0, 1),
+        defaultWeightPreset: !isHighestTier && sbWeightPreset === "CUSTOM" ? "SHOEBOX" : sbWeightPreset,
+        customWeightKg: Number(sbCustomWeightKg) || 1.5,
+        autoBookOnPaid: isHighestTier ? sbAutoBookOnPaid : false,
+        liveCheckoutRatesEnabled: sbLiveCheckoutRates,
+      });
+      if (onStateChange && res.state) {
+        onStateChange(res.state);
+      }
+      setShippingSavedToast("✓ Shipbubble Courier & Receipt Settings Saved.");
+      setTimeout(() => setShippingSavedToast(null), 4000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save Shipbubble configuration.");
+    } finally {
+      setSbSavingConfig(false);
+    }
+  };
 
   useEffect(() => {
     if (initialTab) {
@@ -621,6 +720,254 @@ export function SettingsView({
           </div>
         )}
 
+        {/* Section 0: Shipbubble Multi-Courier & Official Courier Receipt Integration */}
+        <div className="bg-white rounded-2xl border-2 border-emerald-200 p-6 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-lg">🚚</span>
+                <h3 className="text-base font-bold text-gray-900">
+                  Shipbubble Multi-Courier &amp; Official Receipt Integration
+                </h3>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                  CONNECTED · SANDBOX API
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Book official couriers, issue carrier shipping receipts, and automatically release Monnify escrow funds on verified courier delivery.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={sbSavingConfig}
+              onClick={handleSaveShipbubbleConfig}
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer transition-all self-start sm:self-center"
+            >
+              {sbSavingConfig ? "Saving..." : "Save Shipbubble Config"}
+            </button>
+          </div>
+
+          {/* 1. Pickup Address Validation */}
+          <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-2.5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="font-bold text-gray-800">
+                1. Store Pickup Location (Validated via Shipbubble Address API)
+              </label>
+              {sbAddressCode && (
+                <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300">
+                  ✓ Verified Address Code: #{sbAddressCode}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={sbPickupAddress}
+                onChange={(e) => setSbPickupAddress(e.target.value)}
+                placeholder="e.g. 14 Admiralty Way, Lekki Phase 1, Lagos, Nigeria"
+                className="flex-1 px-3.5 py-2 border border-gray-200 rounded-lg bg-white text-xs text-gray-900 focus:outline-none focus:border-emerald-600"
+              />
+              <button
+                type="button"
+                disabled={sbValidatingAddr}
+                onClick={handleValidatePickupAddress}
+                className="px-4 py-2 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white text-xs font-semibold rounded-lg cursor-pointer shrink-0"
+              >
+                {sbValidatingAddr ? "Validating with Shipbubble..." : "Validate Pickup Address"}
+              </button>
+            </div>
+            {sbFormattedAddress && (
+              <div className="text-[11px] text-gray-500">
+                Geocoded Pickup:{" "}
+                <span className="font-semibold text-gray-800">{sbFormattedAddress}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 2. Carrier Selection (Single for Starter/Growth, Multiple for Highest Subscription) */}
+          <div className="space-y-2.5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="font-bold text-gray-800">
+                  2. Preferred Courier Partners ({isHighestTier ? "Multi-Carrier Enabled" : "Single Carrier Selection"})
+                </div>
+                <p className="text-[11px] text-gray-500">
+                  {isHighestTier
+                    ? "Your highest subscription unlocks simultaneous multi-carrier selection for dynamic rate comparison and auto-dispatch."
+                    : "Starter and standard vendor tiers can select 1 active carrier at a time. Upgrade to the highest subscription to select multiple carriers."}
+                </p>
+              </div>
+              <span
+                className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                  isHighestTier
+                    ? "bg-purple-50 text-purple-900 border-purple-200"
+                    : "bg-amber-50 text-amber-900 border-amber-200"
+                }`}
+              >
+                {isHighestTier
+                  ? `✓ ${sbSelectedCarriers.length} Carrier(s) Selected`
+                  : "1 Carrier Limit (Standard Tier)"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {[
+                { code: "test_1_courier", name: "Bubble Express", tag: "Same-Day Express · On-Demand" },
+                { code: "test_2_courier", name: "Richard Express (GIGL)", tag: "Nationwide & Waybill · 1-2 Days" },
+                { code: "test_3_courier", name: "Millie Express (Fez Fast)", tag: "Economy Next-Day · 12-36 Hours" },
+                { code: "kwik", name: "Kwik Delivery", tag: "Metro Bike Dispatch · 2-4 Hours" },
+                { code: "dhl", name: "DHL Express", tag: "Priority & Interstate · Tracked" },
+                { code: "red_star", name: "Red Star Express", tag: "Heavy Cargo & Waybill" },
+              ].map((carrier) => {
+                const isSelected = sbSelectedCarriers.includes(carrier.code);
+                return (
+                  <button
+                    key={carrier.code}
+                    type="button"
+                    onClick={() => handleToggleShipbubbleCarrier(carrier.code)}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start justify-between gap-2 ${
+                      isSelected
+                        ? "border-2 border-emerald-600 bg-emerald-50/50 shadow-2xs"
+                        : "border-gray-200 hover:border-gray-300 bg-white"
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-gray-900 text-xs">{carrier.name}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{carrier.tag}</div>
+                    </div>
+                    <span
+                      className={`w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                        isSelected
+                          ? "bg-emerald-600 text-white"
+                          : "border border-gray-300 bg-white text-transparent"
+                      }`}
+                    >
+                      ✓
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 3. Package Weight Handling & 4. Auto-Booking vs Manual Confirmation */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-gray-100 text-xs">
+            {/* Package Weight Handling */}
+            <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="font-bold text-gray-800">3. Default Package Weight</div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white border border-gray-200 text-gray-700">
+                  {isHighestTier ? "Manual kg Unlocked" : "Presets Only"}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: "SMALL_BAG" as const, label: "Small Bag", kg: "0.5 kg" },
+                  { id: "SHOEBOX" as const, label: "Shoebox", kg: "1.5 kg" },
+                  { id: "CARTON" as const, label: "Carton", kg: "5.0 kg" },
+                ].map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setSbWeightPreset(p.id)}
+                    className={`p-2 rounded-lg border text-left cursor-pointer ${
+                      sbWeightPreset === p.id
+                        ? "border-emerald-600 bg-emerald-50 text-emerald-950 font-bold"
+                        : "border-gray-200 bg-white text-gray-700"
+                    }`}
+                  >
+                    <div className="text-[11px] font-bold">{p.label}</div>
+                    <div className="text-[10px] text-gray-500">{p.kg}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <span className="text-[11px] text-gray-600">
+                  Manual Custom Weight (kg):
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    disabled={!isHighestTier}
+                    value={sbCustomWeightKg}
+                    onChange={(e) => {
+                      setSbCustomWeightKg(e.target.value);
+                      setSbWeightPreset("CUSTOM");
+                    }}
+                    className="w-20 px-2.5 py-1 border border-gray-200 rounded-lg bg-white text-xs font-mono font-bold text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                  />
+                  {!isHighestTier && (
+                    <span className="text-[10px] font-semibold text-amber-800">
+                      🔒 Premium Only
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Auto-Booking & Live Storefront Rate Shopping */}
+            <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold text-gray-800">
+                    4. Auto-Book Courier on PAID
+                  </div>
+                  <p className="text-[11px] text-gray-500">
+                    {isHighestTier
+                      ? "Automatically book your preferred courier and send the official courier receipt on WhatsApp as soon as an order is PAID."
+                      : "Manual confirmation required on your tier. Premium vendors receive automatic courier booking on PAID."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={!isHighestTier}
+                  onClick={() => isHighestTier && setSbAutoBookOnPaid(!sbAutoBookOnPaid)}
+                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors shrink-0 ${
+                    !isHighestTier
+                      ? "bg-gray-200 opacity-50 cursor-not-allowed"
+                      : sbAutoBookOnPaid
+                      ? "bg-emerald-600 cursor-pointer"
+                      : "bg-gray-300 cursor-pointer"
+                  }`}
+                >
+                  <div
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                      isHighestTier && sbAutoBookOnPaid ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-200">
+                <div>
+                  <div className="font-bold text-gray-800">
+                    5. Live Storefront Rate Shopping
+                  </div>
+                  <p className="text-[11px] text-gray-500">
+                    Let buyers select their preferred courier on the checkout link and pay that exact rate.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSbLiveCheckoutRates(!sbLiveCheckoutRates)}
+                  className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer shrink-0 ${
+                    sbLiveCheckoutRates ? "bg-emerald-600" : "bg-gray-300"
+                  }`}
+                >
+                  <div
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                      sbLiveCheckoutRates ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Section 1: Active Delivery Zones */}
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between">
@@ -993,42 +1340,42 @@ export function SettingsView({
 
         {/* 2 Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left 2 Cols: WhatsApp Conversation Thread */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs">
-              <div className="flex items-center justify-between pb-4 border-b border-gray-100 mb-4">
-                <div>
-                  <h3 className="text-sm font-bold text-gray-900">WhatsApp conversation</h3>
-                  <p className="text-[11px] text-gray-400">3 Nov 2026 · All times WAT · Replies sync to the native thread</p>
+          {/* Left 2 Cols: Omnichannel Conversation Thread */}
+          <div className="lg:col-span-2 space-y-4 min-w-0">
+            <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 shadow-xs">
+              <div className="flex items-center justify-between pb-4 border-b border-gray-100 mb-4 gap-2">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-gray-900">Omnichannel conversation</h3>
+                  <p className="text-[11px] text-gray-400 truncate">All times WAT · Replies sync to the native thread</p>
                 </div>
-                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px]">
-                  WA
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px] shrink-0">
+                  WA / IG / FB
                 </span>
               </div>
 
               {/* Message List */}
-              <div className="space-y-3.5 text-xs">
+              <div className="space-y-3.5 text-xs max-h-[60vh] sm:max-h-[540px] overflow-y-auto overflow-x-hidden pr-1">
                 {messages.map((m) => {
                   if (m.type === "system") {
                     const isPayment = m.sender.includes("Payment");
                     return (
                       <div
                         key={m.id}
-                        className={`rounded-xl p-3 text-[11px] border ${
+                        className={`rounded-xl p-3 text-[11px] border break-words [overflow-wrap:anywhere] ${
                           isPayment
                             ? "bg-[#ecfdf5] border-emerald-200 text-emerald-950"
                             : "bg-[#f0f4ff] border-blue-100 text-blue-900"
                         }`}
                       >
                         <div
-                          className={`flex justify-between items-center font-semibold mb-0.5 ${
+                          className={`flex justify-between items-center gap-2 font-semibold mb-0.5 ${
                             isPayment ? "text-emerald-800" : "text-blue-700"
                           }`}
                         >
-                          <span>{m.sender}</span>
-                          <span>{m.time}</span>
+                          <span className="truncate">{m.sender}</span>
+                          <span className="shrink-0">{m.time}</span>
                         </div>
-                        <p>{m.text}</p>
+                        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.text}</p>
                       </div>
                     );
                   }
@@ -1038,21 +1385,21 @@ export function SettingsView({
                     return (
                       <div
                         key={m.id}
-                        className={`border rounded-xl p-3 max-w-[85%] ${
+                        className={`border rounded-xl p-3 max-w-[90%] sm:max-w-[85%] min-w-0 ${
                           isUnresolved
                             ? "bg-amber-50/50 border-amber-200"
                             : "bg-gray-50 border-gray-100"
                         }`}
                       >
                         <div
-                          className={`flex justify-between items-center text-[11px] mb-1 ${
+                          className={`flex justify-between items-center gap-2 text-[11px] mb-1 ${
                             isUnresolved ? "text-amber-800 font-semibold" : "text-gray-400"
                           }`}
                         >
-                          <span className="font-semibold text-gray-900">{m.sender}</span>
-                          <span>{m.time}</span>
+                          <span className="font-semibold text-gray-900 truncate">{m.sender}</span>
+                          <span className="shrink-0">{m.time}</span>
                         </div>
-                        <p className={isUnresolved ? "text-gray-900 font-medium" : "text-gray-800"}>
+                        <p className={`whitespace-pre-wrap break-words [overflow-wrap:anywhere] ${isUnresolved ? "text-gray-900 font-medium" : "text-gray-800"}`}>
                           {m.text}
                         </p>
                       </div>
@@ -1063,13 +1410,13 @@ export function SettingsView({
                     return (
                       <div
                         key={m.id}
-                        className="ml-auto bg-[#0d5c3a] text-white border border-[#0d5c3a] rounded-xl p-3 max-w-[85%]"
+                        className="ml-auto bg-[#0d5c3a] text-white border border-[#0d5c3a] rounded-xl p-3 max-w-[90%] sm:max-w-[85%] min-w-0"
                       >
-                        <div className="flex justify-between items-center text-[11px] text-emerald-100 mb-1">
-                          <span className="font-semibold">{m.sender}</span>
-                          <span>{m.time}</span>
+                        <div className="flex justify-between items-center gap-2 text-[11px] text-emerald-100 mb-1">
+                          <span className="font-semibold truncate">{m.sender}</span>
+                          <span className="shrink-0">{m.time}</span>
                         </div>
-                        <p className="text-white">{m.text}</p>
+                        <p className="text-white whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.text}</p>
                       </div>
                     );
                   }
@@ -1078,13 +1425,13 @@ export function SettingsView({
                   return (
                     <div
                       key={m.id}
-                      className="ml-auto bg-emerald-50 border border-emerald-100 rounded-xl p-3 max-w-[85%]"
+                      className="ml-auto bg-emerald-50 border border-emerald-100 rounded-xl p-3 max-w-[90%] sm:max-w-[85%] min-w-0"
                     >
-                      <div className="flex justify-between items-center text-[11px] text-emerald-700 mb-1">
-                        <span className="font-semibold">{m.sender}</span>
-                        <span>{m.time}</span>
+                      <div className="flex justify-between items-center gap-2 text-[11px] text-emerald-700 mb-1">
+                        <span className="font-semibold truncate">{m.sender}</span>
+                        <span className="shrink-0">{m.time}</span>
                       </div>
-                      <p className="text-gray-800">{m.text}</p>
+                      <p className="text-gray-800 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.text}</p>
                     </div>
                   );
                 })}
@@ -1352,7 +1699,65 @@ export function SettingsView({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Responsive Card List (< md) */}
+          <div className="md:hidden divide-y divide-gray-100">
+            {filteredSessions.length === 0 ? (
+              <div className="py-10 px-4 text-center text-gray-400 text-xs">
+                No customer sessions match your filters.
+              </div>
+            ) : (
+              filteredSessions.map((sess) => (
+                <div key={`mob-${sess.id}`} className="p-4 space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-gray-900 truncate">{sess.customerName}</div>
+                      <div className="text-[11px] text-gray-400">{sess.threadCode} · {sess.time}</div>
+                    </div>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                        sess.channel === "Instagram"
+                          ? "bg-pink-50 text-pink-700 border border-pink-200"
+                          : sess.channel === "Facebook"
+                            ? "bg-blue-50 text-blue-700 border border-blue-200"
+                            : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                      }`}
+                    >
+                      <span>{sess.channel === "Instagram" ? "📸" : sess.channel === "Facebook" ? "🔵" : "🟢"}</span>
+                      <span>{sess.channel}</span>
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600 line-clamp-2 break-words [overflow-wrap:anywhere]">{sess.log}</p>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="text-[11px] font-semibold text-gray-800 truncate">
+                      {sess.outcome} {sess.amount ? `· ${sess.amount}` : ""}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => setActiveTab("detail")}
+                        className="px-2.5 py-1 bg-[#0d5c3a] text-white text-[11px] font-semibold rounded-lg cursor-pointer"
+                      >
+                        Open Thread
+                      </button>
+                      <button
+                        onClick={() =>
+                          setSessionModalContent({
+                            title: `${sess.customerName} (${sess.threadCode})`,
+                            body: sess.log,
+                          })
+                        }
+                        className="px-2.5 py-1 border border-gray-200 text-gray-700 text-[11px] rounded-lg cursor-pointer"
+                      >
+                        Summary
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table (md+) */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs min-w-[650px]">
               <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 <tr>
@@ -1374,7 +1779,7 @@ export function SettingsView({
                         </div>
                         <p className="text-sm font-bold text-gray-900">No customer sessions</p>
                         <p className="text-xs text-gray-400 mt-1 max-w-sm">
-                          WhatsApp inquiries handled by Sales Co-Pilot or awaiting merchant replies will appear here in real time.
+                          WhatsApp, Instagram, and Facebook inquiries handled by Sales Co-Pilot or awaiting merchant replies will appear here in real time.
                         </p>
                       </div>
                     </td>
@@ -1420,7 +1825,13 @@ export function SettingsView({
                         {sess.amount && <div className="text-[11px] text-gray-500">{sess.amount}</div>}
                       </td>
                       <td className="px-4 py-3.5 text-gray-500">{sess.time}</td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="px-5 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                        <button
+                          onClick={() => setActiveTab("detail")}
+                          className="px-2.5 py-1.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg cursor-pointer"
+                        >
+                          Open Thread
+                        </button>
                         <button
                           onClick={() =>
                             setSessionModalContent({
@@ -1428,9 +1839,9 @@ export function SettingsView({
                               body: sess.log,
                             })
                           }
-                          className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg cursor-pointer"
+                          className="px-2.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs rounded-lg cursor-pointer"
                         >
-                          Review
+                          Summary
                         </button>
                       </td>
                     </tr>

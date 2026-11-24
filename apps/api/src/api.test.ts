@@ -1814,5 +1814,151 @@ describe("Stage 1.4 — Caterlog API & End-to-End Synchronization Engine", () =>
     assert.equal(igChat?.sourceChannel, "INSTAGRAM");
     assert.equal(fbChat?.sourceChannel, "FACEBOOK");
   });
+
+  it("integrates Shipbubble multi-courier rate shopping, tier rules, official courier receipt, and delivery escrow unlock", async () => {
+    const engine = new CaterlogStage1Engine({ SHIPBUBBLE_MODE: "mock" });
+
+    // 1. Standard tier (growth) enforces 1 carrier limit, presets only, and manual booking
+    engine.vendor.role = "growth";
+    const standardCfg = engine.updateShipbubbleConfig({
+      selectedCarriers: ["test_1_courier", "test_2_courier", "test_3_courier"],
+      defaultWeightPreset: "CUSTOM",
+      customWeightKg: 4.2,
+      autoBookOnPaid: true,
+    });
+    assert.equal(standardCfg.selectedCarriers.length, 1);
+    assert.equal(standardCfg.defaultWeightPreset, "SHOEBOX");
+    assert.equal(standardCfg.autoBookOnPaid, false);
+
+    // 2. Highest tier (pro) unlocks multi-carrier selection, manual kg input, and auto-booking
+    engine.vendor.role = "pro";
+    const proCfg = engine.updateShipbubbleConfig({
+      selectedCarriers: ["test_1_courier", "test_2_courier"],
+      defaultWeightPreset: "CUSTOM",
+      customWeightKg: 3.5,
+      autoBookOnPaid: false,
+    });
+    assert.equal(proCfg.selectedCarriers.length, 2);
+    assert.equal(proCfg.defaultWeightPreset, "CUSTOM");
+    assert.equal(proCfg.customWeightKg, 3.5);
+
+    // 3. Create an order and fetch live Shipbubble courier quotes
+    const inquiry = await engine.handleBuyerWhatsAppInquiry({
+      buyerPhone: "+2348055551111",
+      buyerName: "Tunde Bakare",
+      text: "I want SHOE-01 delivered to Lekki",
+      simulateFastForwardIdleTimer: true,
+    });
+    const orderCode = inquiry.createdOrder!.shortCode;
+
+    const rates = await engine.fetchOrderShipbubbleRates(orderCode, {
+      deliveryAddress: "25 Allen Avenue, Ikeja, Lagos, Nigeria",
+      weightPreset: "CUSTOM",
+      customWeightKg: 2.5,
+    });
+    assert.ok(rates.requestToken);
+    assert.ok(rates.couriers.length >= 2);
+    assert.equal(rates.packageWeightKg, 2.5);
+
+    // 4. Book courier & verify Official Shipping Courier Receipt
+    const booked = await engine.bookOrderShipbubbleCourier(orderCode, {
+      requestToken: rates.requestToken,
+      courierId: rates.couriers[0]!.courier_id,
+      serviceCode: rates.couriers[0]!.service_code,
+      deliveryAddress: "25 Allen Avenue, Ikeja, Lagos, Nigeria",
+    });
+
+    assert.ok(booked.receipt.receiptNumber.startsWith("RCP-SB-"));
+    assert.ok(booked.receipt.shipbubbleOrderId.startsWith("SB-"));
+    assert.ok(booked.receipt.trackingUrl.includes("shipbubble.com"));
+    assert.ok(booked.receipt.shippingFeeNaira > 0);
+    assert.equal(booked.order.courierShipment?.receiptNumber, booked.receipt.receiptNumber);
+
+    // 5. Simulate Shipbubble webhook 'completed' -> fulfills order and unlocks escrow
+    const prevCleanOrders = engine.vendor.trustTier?.completedCleanOrders ?? 0;
+    const completed = await engine.handleShipbubbleWebhook({
+      order_id: booked.receipt.shipbubbleOrderId,
+      status: "completed",
+    });
+    assert.equal(completed.order.status, "FULFILLED");
+    assert.equal(completed.order.splitSettlementStatus, "SETTLED");
+    assert.equal(completed.receipt.status, "completed");
+    assert.ok(completed.receipt.deliveredAt);
+    assert.equal(engine.vendor.trustTier?.completedCleanOrders, prevCleanOrders + 1);
+  });
+
+  it("enforces Storefront vs. Full Brand Website tier rules, persists reusable section variants, and processes public storefront checkout", async () => {
+    const engine = new CaterlogStage1Engine();
+
+    // 1. Starter / Dropshipper tier enforces STOREFRONT_ONLY mode even if FULL_WEBSITE is requested
+    const starterCfg = engine.updateStorefrontConfig(
+      {
+        presetId: "constructor-kicks",
+        mode: "FULL_WEBSITE",
+        productCardVariant: "pastel-floating-cart",
+        shopBannerVariant: "curved-arch",
+      },
+      "STARTER"
+    );
+    assert.equal(starterCfg.mode, "STOREFRONT_ONLY");
+    assert.equal(starterCfg.presetId, "constructor-kicks");
+    assert.equal(starterCfg.productCardVariant, "pastel-floating-cart");
+    assert.equal(starterCfg.shopBannerVariant, "curved-arch");
+
+    // 2. Growth & Pro tiers unlock FULL_WEBSITE mode with custom Hero, Bento Mosaic & Theme Tokens
+    const growthCfg = engine.updateStorefrontConfig(
+      {
+        presetId: "jenahara-editorial",
+        mode: "FULL_WEBSITE",
+        heroVariant: "magazine-layered",
+        categoryBentoVariant: "4-tile-right-tall",
+        productCardVariant: "lookbook-gradient-overlay",
+        theme: {
+          ...starterCfg.theme,
+          fontPairing: "editorial-serif",
+          accentColor: "#5B2333",
+        },
+      },
+      "GROWTH"
+    );
+    assert.equal(growthCfg.mode, "FULL_WEBSITE");
+    assert.equal(growthCfg.heroVariant, "magazine-layered");
+    assert.equal(growthCfg.categoryBentoVariant, "4-tile-right-tall");
+    assert.equal(growthCfg.theme.accentColor, "#5B2333");
+
+    // 3. Public Storefront data payload returns presets, products, shipping zones & resolved config
+    const publicPayload = engine.getPublicStorefrontData("GROWTH");
+    assert.equal(publicPayload.canUseFullWebsite, true);
+    assert.equal(publicPayload.storefrontConfig.mode, "FULL_WEBSITE");
+    assert.ok(publicPayload.presets.length >= 10);
+    assert.ok(publicPayload.products.length > 0);
+
+    // 4. Public Storefront instant checkout reserves stock, generates a Monnify Virtual Account, and tags WEB_STOREFRONT
+    const targetProduct = engine.products[0]!;
+    const prevReserved = targetProduct.stockReserved;
+
+    const checkoutRes = await engine.createPublicStorefrontOrder({
+      buyerName: "Amara Nwosu",
+      buyerPhone: "+2348066778899",
+      shippingZoneName: engine.shippingZones[0]!.name,
+      deliveryAddress: "14 Admiralty Way, Lekki Phase 1, Lagos",
+      deliveryLandmark: "Opposite Daytona Supermarket",
+      items: [
+        {
+          productSku: targetProduct.skuCode,
+          quantity: 1,
+        },
+      ],
+    });
+
+    assert.ok(checkoutRes.orderShortCode.startsWith("ORD-"));
+    assert.ok(checkoutRes.receipt);
+    assert.equal(checkoutRes.receipt?.accountNumber.length, 10);
+    assert.equal(targetProduct.stockReserved, prevReserved + 1);
+
+    const createdOrder = engine.orders.find((o) => o.shortCode === checkoutRes.orderShortCode);
+    assert.equal(createdOrder?.salesChannel, "WEB_STOREFRONT");
+    assert.equal(createdOrder?.deliveryLandmark, "Opposite Daytona Supermarket");
+  });
 });
 

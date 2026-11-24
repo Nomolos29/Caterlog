@@ -210,6 +210,20 @@ export function ProductEditorModal({
   const [lowStockThreshold, setLowStockThreshold] = useState(5);
   const [isPublished, setIsPublished] = useState(true);
 
+  // Wholesale & Advance Booking Settings (Product-Level)
+  const [isBookable, setIsBookable] = useState(
+    product?.customFields?.isBookable === "true" || false
+  );
+  const [bookingMoq, setBookingMoq] = useState(
+    product?.customFields?.bookingMoq ? Number(product.customFields.bookingMoq) : 10
+  );
+  const [bookingDepositPercent, setBookingDepositPercent] = useState(
+    product?.customFields?.bookingDepositPercent ? Number(product.customFields.bookingDepositPercent) : 30
+  );
+  const [bookingLeadTimeDays, setBookingLeadTimeDays] = useState(
+    product?.customFields?.bookingLeadTimeDays ? Number(product.customFields.bookingLeadTimeDays) : 14
+  );
+
   // Images
   const [images, setImages] = useState<string[]>(
     product?.primaryImageUrl ? [product.primaryImageUrl] : []
@@ -286,14 +300,24 @@ export function ProductEditorModal({
       }
       if (product.customFields) {
         setCustomFields(
-          Object.entries(product.customFields).map(([name, value], i) => ({
-            id: `cf-${i}-${Date.now()}`,
-            name,
-            value,
-          }))
+          Object.entries(product.customFields)
+            .filter(([name]) => !["isBookable", "bookingMoq", "bookingDepositPercent", "bookingLeadTimeDays"].includes(name))
+            .map(([name, value], i) => ({
+              id: `cf-${i}-${Date.now()}`,
+              name,
+              value,
+            }))
         );
+        setIsBookable(product.customFields.isBookable === "true");
+        setBookingMoq(product.customFields.bookingMoq ? Number(product.customFields.bookingMoq) : 10);
+        setBookingDepositPercent(product.customFields.bookingDepositPercent ? Number(product.customFields.bookingDepositPercent) : 30);
+        setBookingLeadTimeDays(product.customFields.bookingLeadTimeDays ? Number(product.customFields.bookingLeadTimeDays) : 14);
       } else {
         setCustomFields([]);
+        setIsBookable(false);
+        setBookingMoq(10);
+        setBookingDepositPercent(30);
+        setBookingLeadTimeDays(14);
       }
     } else if (isOpen) {
       setName("");
@@ -310,6 +334,10 @@ export function ProductEditorModal({
       setVariants([]);
       setCustomFields([]);
       setImages([]);
+      setIsBookable(false);
+      setBookingMoq(10);
+      setBookingDepositPercent(30);
+      setBookingLeadTimeDays(14);
     }
   }, [product, isOpen]);
 
@@ -397,6 +425,15 @@ export function ProductEditorModal({
       if (cf.name.trim() && cf.value.trim()) {
         customFieldsRecord[cf.name.trim()] = cf.value.trim();
       }
+    }
+
+    if (isBookable) {
+      customFieldsRecord["isBookable"] = "true";
+      customFieldsRecord["bookingMoq"] = String(bookingMoq);
+      customFieldsRecord["bookingDepositPercent"] = String(bookingDepositPercent);
+      customFieldsRecord["bookingLeadTimeDays"] = String(bookingLeadTimeDays);
+    } else {
+      customFieldsRecord["isBookable"] = "false";
     }
 
     await onSave({
@@ -829,6 +866,85 @@ export function ProductEditorModal({
                 >
                   + Add Variant
                 </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Section 5: Wholesale & Advance Booking Rules (Product-Level) */}
+        <div className="bg-gray-50/70 border border-gray-200/80 rounded-2xl p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-gray-900 flex items-center gap-1.5">
+                <span>📦</span>
+                <span>Wholesale &amp; Advance Booking Rules</span>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-0.5 max-w-lg">
+                Allow bulk wholesale buyers and reseller networks to reserve inventory in advance with an upfront escrow deposit.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={isBookable}
+                onChange={(e) => setIsBookable(e.target.checked)}
+                className="rounded text-emerald-600 cursor-pointer"
+              />
+              <span className="text-xs font-bold text-gray-800">
+                {isBookable ? "✓ Bookable" : "Not Bookable"}
+              </span>
+            </label>
+          </div>
+
+          {isBookable && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-gray-200/60 animate-in fade-in">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                  Minimum Order Quantity (MOQ)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={1}
+                    value={bookingMoq}
+                    onChange={(e) => setBookingMoq(Number(e.target.value) || 1)}
+                    className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                  <span className="absolute right-3 top-2 text-[10px] text-gray-400">units min.</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                  Required Escrow Deposit %
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={10}
+                    max={100}
+                    value={bookingDepositPercent}
+                    onChange={(e) => setBookingDepositPercent(Number(e.target.value) || 30)}
+                    className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                  <span className="absolute right-3 top-2 text-[10px] text-gray-400">% escrow</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                  Lead Time (Days to Dispatch)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={1}
+                    value={bookingLeadTimeDays}
+                    onChange={(e) => setBookingLeadTimeDays(Number(e.target.value) || 14)}
+                    className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                  <span className="absolute right-3 top-2 text-[10px] text-gray-400">days</span>
+                </div>
               </div>
             </div>
           )}

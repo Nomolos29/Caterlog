@@ -78,6 +78,7 @@ export function ChatDrawer({
   const [inputText, setInputText] = useState("");
   const [attachedImage, setAttachedImage] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
   const [transferSuccess, setTransferSuccess] = useState<string | null>(null);
 
@@ -155,6 +156,7 @@ export function ChatDrawer({
     if (e) e.preventDefault();
     if (!inputText.trim() && !attachedImage.trim()) return;
     setSending(true);
+    setSendError(null);
     try {
       if (activeChannel === "VENDOR_ADMIN_WA") {
         await onSendVendorKeyword(inputText.trim(), attachedImage.trim() || undefined);
@@ -179,6 +181,8 @@ export function ChatDrawer({
       }
       setInputText("");
       setAttachedImage("");
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Failed to send message. Check API connection.");
     } finally {
       setSending(false);
     }
@@ -186,6 +190,7 @@ export function ChatDrawer({
 
   const sendQuickMessage = async (msg: string) => {
     setSending(true);
+    setSendError(null);
     try {
       if (activeChannel === "VENDOR_ADMIN_WA") {
         await onSendVendorKeyword(msg);
@@ -206,6 +211,8 @@ export function ChatDrawer({
           activeSocialChannel
         );
       }
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Failed to send quick message.");
     } finally {
       setSending(false);
     }
@@ -246,10 +253,10 @@ export function ChatDrawer({
 
   // Renders the entire simulator viewport content
   const simulatorContent = (
-    <div className="flex flex-col h-full bg-white select-none">
+    <div className="flex flex-col h-full min-h-0 w-full overflow-hidden bg-white">
       {/* 1. Header Toolbar */}
       <div
-        className={`px-4 py-3 text-white transition-colors duration-200 shrink-0 ${
+        className={`px-3 sm:px-4 py-2.5 sm:py-3 text-white transition-colors duration-200 shrink-0 ${
           isInstagram
             ? "bg-gradient-to-r from-[#262626] via-[#1a1a1a] to-[#000000] border-b border-gray-800"
             : isFacebook
@@ -304,10 +311,11 @@ export function ChatDrawer({
             {/* Device / Frame Mode Toggle */}
             <button
               onClick={() => setFrameMode((m) => (m === "drawer" ? "phone" : "drawer"))}
-              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/90 text-xs transition-colors cursor-pointer"
+              className="px-2 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/90 text-[11px] font-semibold transition-colors cursor-pointer"
               title={frameMode === "drawer" ? "Switch to Smartphone Device Frame" : "Switch to Slide-over Drawer"}
             >
-              {frameMode === "drawer" ? "📱 Phone Frame" : "📑 Drawer"}
+              <span className="sm:hidden">{frameMode === "drawer" ? "📱" : "📑"}</span>
+              <span className="hidden sm:inline">{frameMode === "drawer" ? "📱 Phone Frame" : "📑 Drawer"}</span>
             </button>
 
             {/* Close Button */}
@@ -458,27 +466,27 @@ export function ChatDrawer({
 
               {/* Custom Persona Editor */}
               {selectedBuyerIndex === BUYER_PRESETS.length && (
-                <div className="grid grid-cols-3 gap-1 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-1">
                   <input
                     type="text"
                     placeholder="Phone: +234..."
                     value={customPhone}
                     onChange={(e) => setCustomPhone(e.target.value)}
-                    className="bg-white border border-gray-200 rounded px-1.5 py-0.5 text-[10px] text-gray-900"
+                    className="bg-white border border-gray-200 rounded px-2 py-1 text-[11px] text-gray-900 min-w-0"
                   />
                   <input
                     type="text"
                     placeholder="Full Name"
                     value={customName}
                     onChange={(e) => setCustomName(e.target.value)}
-                    className="bg-white border border-gray-200 rounded px-1.5 py-0.5 text-[10px] text-gray-900"
+                    className="bg-white border border-gray-200 rounded px-2 py-1 text-[11px] text-gray-900 min-w-0"
                   />
                   <input
                     type="text"
                     placeholder="IG: @handle"
                     value={customIgHandle}
                     onChange={(e) => setCustomIgHandle(e.target.value)}
-                    className="bg-white border border-gray-200 rounded px-1.5 py-0.5 text-[10px] text-gray-900"
+                    className="bg-white border border-gray-200 rounded px-2 py-1 text-[11px] text-gray-900 min-w-0"
                   />
                 </div>
               )}
@@ -609,7 +617,7 @@ export function ChatDrawer({
       )}
 
       {/* 5. Channel-Specific Quick Action Scenarios */}
-      <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex flex-wrap gap-1 text-[11px] shrink-0">
+      <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex sm:flex-wrap items-center gap-1.5 overflow-x-auto text-[11px] shrink-0 [&>button]:shrink-0 [&>button]:whitespace-nowrap">
         {activeChannel === "BUYER_SHOP_WA" ? (
           <>
             {isInstagram ? (
@@ -784,7 +792,7 @@ export function ChatDrawer({
 
       {/* 6. Main Chat Message Viewport */}
       <div
-        className={`flex-1 overflow-y-auto p-4 space-y-3 transition-colors ${
+        className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-3 transition-colors ${
           isInstagram
             ? "bg-[#fafafa]"
             : isFacebook
@@ -840,9 +848,9 @@ export function ChatDrawer({
             return (
               <div
                 key={m.id}
-                className={`flex flex-col ${isRight ? "items-end ml-auto" : "items-start"} max-w-[85%]`}
+                className={`flex flex-col ${isRight ? "items-end ml-auto" : "items-start"} max-w-[88%] sm:max-w-[85%] min-w-0`}
               >
-                <div className={`p-3 text-xs leading-relaxed ${bubbleStyle}`}>
+                <div className={`p-3 text-xs leading-relaxed max-w-full min-w-0 ${bubbleStyle}`}>
                   {m.imageUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -856,7 +864,7 @@ export function ChatDrawer({
                     />
                   )}
 
-                  <div className="whitespace-pre-wrap">{m.text}</div>
+                  <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.text}</div>
 
                   {/* Interactive Quick Replies */}
                   {m.quickReplies && m.quickReplies.length > 0 && (
@@ -865,7 +873,7 @@ export function ChatDrawer({
                         <button
                           key={idx}
                           onClick={() => sendQuickMessage(qr.replyText)}
-                          className="w-full text-left bg-black/5 hover:bg-black/10 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] block transition-colors cursor-pointer"
+                          className="w-full text-left bg-black/5 hover:bg-black/10 font-semibold px-2.5 py-1.5 rounded-lg text-[11px] block transition-colors cursor-pointer whitespace-normal break-words"
                         >
                           {qr.label}
                         </button>
@@ -909,11 +917,25 @@ export function ChatDrawer({
             );
           })
         )}
+        {sending && (
+          <div className="flex items-start max-w-[80%]">
+            <div className="px-3 py-2 rounded-2xl bg-white border border-gray-200 text-xs text-gray-500 flex items-center gap-1.5 shadow-2xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
+              <span>Sales Co-Pilot is replying...</span>
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
       {/* 7. Input Form & Composer */}
-      <form onSubmit={handleSend} className="p-3 bg-white border-t border-gray-200 space-y-2 shrink-0">
+      <form onSubmit={handleSend} className="p-2.5 sm:p-3 bg-white border-t border-gray-200 space-y-2 shrink-0">
+        {sendError && (
+          <div className="px-2.5 py-1.5 bg-rose-50 border border-rose-200 rounded-lg text-[11px] text-rose-700 flex items-center justify-between gap-2">
+            <span className="truncate">{sendError}</span>
+            <button type="button" onClick={() => setSendError(null)} className="font-bold shrink-0 cursor-pointer">✕</button>
+          </div>
+        )}
         {/* Attached photo preview */}
         {attachedImage && (
           <div className="flex items-center gap-2 p-1.5 bg-emerald-50 border border-emerald-200 rounded-xl">
@@ -974,13 +996,13 @@ export function ChatDrawer({
             }
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500"
+            className="flex-1 min-w-0 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500"
           />
 
           <button
             type="submit"
             disabled={sending}
-            className={`font-bold text-xs px-4 py-2 rounded-xl text-white cursor-pointer active:scale-95 transition-all ${
+            className={`font-bold text-xs px-3.5 sm:px-4 py-2 rounded-xl text-white cursor-pointer active:scale-95 transition-all shrink-0 ${
               isInstagram
                 ? "bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90"
                 : isFacebook
@@ -1038,20 +1060,20 @@ export function ChatDrawer({
 
       {frameMode === "drawer" ? (
         /* Slide-over Drawer Mode */
-        <div className="fixed inset-y-0 right-0 w-full sm:max-w-md bg-white border-l border-gray-200 shadow-2xl z-50 flex flex-col justify-between animate-in slide-in-from-right duration-200">
+        <div className="fixed inset-y-0 right-0 h-[100dvh] w-full sm:max-w-md bg-white border-l border-gray-200 shadow-2xl z-50 flex flex-col justify-between overflow-hidden animate-in slide-in-from-right duration-200">
           {simulatorContent}
         </div>
       ) : (
         /* Realistic Smartphone Device Mockup Mode */
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-          <div className="pointer-events-auto relative w-full max-w-[390px] h-[780px] max-h-[92vh] bg-black rounded-[48px] p-3 shadow-2xl ring-12 ring-gray-900/40 border border-gray-700 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 pointer-events-none">
+          <div className="pointer-events-auto relative w-full max-w-[390px] h-[94dvh] sm:h-[780px] sm:max-h-[92vh] bg-black rounded-[32px] sm:rounded-[48px] p-2 sm:p-3 shadow-2xl ring-8 sm:ring-12 ring-gray-900/40 border border-gray-700 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             {/* Phone Notch / Dynamic Island */}
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 w-28 h-5 bg-black rounded-full z-20 flex items-center justify-center">
+            <div className="hidden sm:flex absolute top-4 left-1/2 -translate-x-1/2 w-28 h-5 bg-black rounded-full z-20 items-center justify-center">
               <span className="w-2.5 h-2.5 rounded-full bg-gray-950 border border-gray-800" />
             </div>
 
             {/* Status Bar */}
-            <div className="h-6 bg-black text-white text-[10px] font-semibold px-6 flex items-center justify-between shrink-0 select-none z-10">
+            <div className="h-6 bg-black text-white text-[10px] font-semibold px-5 sm:px-6 flex items-center justify-between shrink-0 select-none z-10">
               <span>9:41</span>
               <div className="flex items-center gap-1.5 text-[9px]">
                 <span>5G</span>
@@ -1061,13 +1083,13 @@ export function ChatDrawer({
             </div>
 
             {/* Viewport Frame */}
-            <div className="flex-1 rounded-[36px] overflow-hidden flex flex-col relative border border-gray-800">
+            <div className="flex-1 min-h-0 rounded-[24px] sm:rounded-[36px] overflow-hidden flex flex-col relative border border-gray-800">
               {simulatorContent}
             </div>
 
             {/* Home Indicator Bar */}
             <div className="h-4 flex items-center justify-center shrink-0">
-              <div className="w-32 h-1 bg-gray-500 rounded-full" />
+              <div className="w-28 sm:w-32 h-1 bg-gray-500 rounded-full" />
             </div>
           </div>
         </div>

@@ -2,13 +2,24 @@
 
 import React, { useState, useEffect } from "react";
 import { api } from "@/lib/api";
-import type { OrderItem, OrderWaybill } from "@/lib/types";
+import type {
+  CourierShipmentReceipt,
+  OrderItem,
+  OrderWaybill,
+  PlatformRole,
+  ShipbubbleCourierQuoteItem,
+  VendorProfile,
+  VendorState,
+} from "@/lib/types";
 import { FilterIcon, ExportIcon } from "../icons";
 import { EmptyState } from "../ui/empty-state";
 
 interface OrdersViewProps {
   orders: OrderItem[];
   selectedOrder: OrderItem | null;
+  vendor?: VendorProfile;
+  workspaceRole?: PlatformRole;
+  onStateChange?: (state: VendorState) => void;
   initialStatusFilter?: string;
   onSelectOrder: (order: OrderItem | null) => void;
   onSimulateTransfer?: (orderCode: string, amountNaira: number) => Promise<void>;
@@ -16,11 +27,15 @@ interface OrdersViewProps {
   onRefundOrder?: (orderCode: string, reason?: string) => Promise<void>;
   onNavigateToPayments?: (tab?: string, subId?: string) => void;
   onNavigateToSettings?: (tab?: string, subId?: string) => void;
+  onOpenTour?: () => void;
 }
 
 export function OrdersView({
   orders,
   selectedOrder,
+  vendor,
+  workspaceRole = "growth",
+  onStateChange,
   initialStatusFilter = "ALL",
   onSelectOrder,
   onSimulateTransfer,
@@ -28,6 +43,7 @@ export function OrdersView({
   onRefundOrder,
   onNavigateToPayments,
   onNavigateToSettings,
+  onOpenTour,
 }: OrdersViewProps) {
   const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
 
@@ -48,6 +64,123 @@ export function OrdersView({
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [refundReasonInput, setRefundReasonInput] = useState("");
   const [isRefunding, setIsRefunding] = useState(false);
+
+  // Shipbubble Multi-Courier Booking & Official Courier Receipt State
+  const isPremiumTier =
+    workspaceRole === "pro" ||
+    vendor?.role === "pro" ||
+    vendor?.subscription?.planId === "PRO" ||
+    vendor?.subscription?.planId === "SCALE";
+  const [showShipbubbleModal, setShowShipbubbleModal] = useState(false);
+  const [showCourierReceiptModal, setShowCourierReceiptModal] = useState(false);
+  const [activeCourierReceipt, setActiveCourierReceipt] = useState<CourierShipmentReceipt | null>(null);
+  const [sbDeliveryAddress, setSbDeliveryAddress] = useState("");
+  const [sbWeightPreset, setSbWeightPreset] = useState<"SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM">(
+    vendor?.shipbubbleConfig?.defaultWeightPreset ?? "SHOEBOX"
+  );
+  const [sbCustomWeightKg, setSbCustomWeightKg] = useState<string>(
+    String(vendor?.shipbubbleConfig?.customWeightKg ?? 1.5)
+  );
+  const [sbFetchingRates, setSbFetchingRates] = useState(false);
+  const [sbRatesError, setSbRatesError] = useState<string | null>(null);
+  const [sbRequestToken, setSbRequestToken] = useState<string>("");
+  const [sbCouriers, setSbCouriers] = useState<ShipbubbleCourierQuoteItem[]>([]);
+  const [sbCheapestId, setSbCheapestId] = useState<string | null>(null);
+  const [sbFastestId, setSbFastestId] = useState<string | null>(null);
+  const [sbSelectedCourier, setSbSelectedCourier] = useState<ShipbubbleCourierQuoteItem | null>(null);
+  const [sbBooking, setSbBooking] = useState(false);
+  const [sbUpdatingStatus, setSbUpdatingStatus] = useState(false);
+
+  const handleOpenShipbubbleModal = async (ord: OrderItem) => {
+    const initialAddr =
+      ord.deliveryAddress ||
+      (ord.shippingZoneName ? `${ord.shippingZoneName}, Lagos, Nigeria` : "25 Allen Avenue, Ikeja, Lagos, Nigeria");
+    setSbDeliveryAddress(initialAddr);
+    const defaultPreset = vendor?.shipbubbleConfig?.defaultWeightPreset ?? "SHOEBOX";
+    const effectivePreset = defaultPreset === "CUSTOM" && !isPremiumTier ? "SHOEBOX" : defaultPreset;
+    setSbWeightPreset(effectivePreset);
+    setSbCustomWeightKg(String(vendor?.shipbubbleConfig?.customWeightKg ?? 1.5));
+    setShowShipbubbleModal(true);
+    await fetchShipbubbleQuotes(ord.shortCode, initialAddr, effectivePreset, Number(vendor?.shipbubbleConfig?.customWeightKg ?? 1.5));
+  };
+
+  const fetchShipbubbleQuotes = async (
+    shortCode: string,
+    addressOverride?: string,
+    presetOverride?: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM",
+    customKgOverride?: number
+  ) => {
+    setSbFetchingRates(true);
+    setSbRatesError(null);
+    try {
+      const res = await api.fetchOrderShipbubbleRates(shortCode, {
+        deliveryAddress: addressOverride ?? sbDeliveryAddress,
+        weightPreset: presetOverride ?? sbWeightPreset,
+        customWeightKg: customKgOverride ?? (Number(sbCustomWeightKg) || 1.5),
+      });
+      setSbRequestToken(res.requestToken);
+      setSbCouriers(res.couriers);
+      setSbCheapestId(res.cheapestCourier?.courier_id ?? null);
+      setSbFastestId(res.fastestCourier?.courier_id ?? null);
+      const preferredList = vendor?.shipbubbleConfig?.selectedCarriers ?? [];
+      const defaultPick =
+        res.couriers.find(
+          (c) => preferredList.includes(c.courier_id) || preferredList.includes(c.service_code)
+        ) ??
+        res.cheapestCourier ??
+        res.couriers[0] ??
+        null;
+      setSbSelectedCourier(defaultPick);
+    } catch (err) {
+      setSbRatesError(err instanceof Error ? err.message : "Failed to fetch live courier quotes from Shipbubble.");
+    } finally {
+      setSbFetchingRates(false);
+    }
+  };
+
+  const handleBookShipbubbleCourier = async () => {
+    if (!selectedOrder || !sbSelectedCourier) return;
+    setSbBooking(true);
+    setSbRatesError(null);
+    try {
+      const res = await api.bookOrderShipbubbleCourier(selectedOrder.shortCode, {
+        requestToken: sbRequestToken,
+        courierId: sbSelectedCourier.courier_id,
+        serviceCode: sbSelectedCourier.service_code,
+        deliveryAddress: sbDeliveryAddress,
+        weightPreset: sbWeightPreset,
+        customWeightKg: Number(sbCustomWeightKg) || 1.5,
+      });
+      if (onStateChange && res.state) {
+        onStateChange(res.state);
+      }
+      setActiveCourierReceipt(res.receipt);
+      setShowShipbubbleModal(false);
+      setShowCourierReceiptModal(true);
+    } catch (err) {
+      setSbRatesError(err instanceof Error ? err.message : "Failed to book courier on Shipbubble.");
+    } finally {
+      setSbBooking(false);
+    }
+  };
+
+  const handleSimulateCourierStatus = async (
+    shortCode: string,
+    nextStatus: "confirmed" | "picked_up" | "in_transit" | "completed" | "cancelled"
+  ) => {
+    setSbUpdatingStatus(true);
+    try {
+      const res = await api.simulateOrderShipbubbleStatus(shortCode, nextStatus);
+      if (onStateChange && res.state) {
+        onStateChange(res.state);
+      }
+      setActiveCourierReceipt(res.receipt);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update courier status.");
+    } finally {
+      setSbUpdatingStatus(false);
+    }
+  };
 
   useEffect(() => {
     if (showPrintModal && selectedOrder) {
@@ -220,16 +353,43 @@ export function OrdersView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+            {selectedOrder.courierShipment ? (
+              <button
+                onClick={() => {
+                  setActiveCourierReceipt(selectedOrder.courierShipment!);
+                  setShowCourierReceiptModal(true);
+                }}
+                className="px-3.5 py-1.5 bg-indigo-950 hover:bg-indigo-900 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+              >
+                <span>🧾</span>
+                <span>Courier Receipt ({selectedOrder.courierShipment.receiptNumber})</span>
+              </button>
+            ) : null}
+            {(selectedOrder.status === "PAID" ||
+              selectedOrder.status === "PROCESSING" ||
+              selectedOrder.status === "OUT_FOR_DELIVERY") && (
+              <button
+                onClick={() => void handleOpenShipbubbleModal(selectedOrder)}
+                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+              >
+                <span>🚚</span>
+                <span>
+                  {selectedOrder.courierShipment
+                    ? "Change Courier (Shipbubble)"
+                    : "Ship with Courier (Shipbubble)"}
+                </span>
+              </button>
+            )}
             {(selectedOrder.status === "PAID" || selectedOrder.status === "PROCESSING") && (
               <button
                 onClick={() => {
                   setRiderPhoneInput(selectedOrder.riderPhone || "");
                   setShowDispatchModal(true);
                 }}
-                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                className="px-3.5 py-1.5 border border-emerald-700 hover:bg-emerald-50 text-emerald-900 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
               >
-                <span>🚚</span>
-                <span>Dispatch order</span>
+                <span>🛵</span>
+                <span>Manual Bike Rider</span>
               </button>
             )}
             {selectedOrder.status === "OUT_FOR_DELIVERY" && (
@@ -266,6 +426,124 @@ export function OrdersView({
               )}
           </div>
         </div>
+
+        {/* Official Shipping Courier Receipt & Live Tracking Card (when booked via Shipbubble) */}
+        {selectedOrder.courierShipment && (
+          <div className="bg-white rounded-2xl border-2 border-emerald-200 p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-lg">
+                  🚚
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold text-gray-900">
+                      {selectedOrder.courierShipment.courierName}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-900 border border-indigo-200">
+                      Receipt: {selectedOrder.courierShipment.receiptNumber}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+                        selectedOrder.courierShipment.status === "completed"
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                          : selectedOrder.courierShipment.status === "in_transit" ||
+                            selectedOrder.courierShipment.status === "picked_up"
+                          ? "bg-blue-50 text-blue-800 border-blue-200"
+                          : selectedOrder.courierShipment.status === "cancelled"
+                          ? "bg-rose-50 text-rose-800 border-rose-200"
+                          : "bg-amber-50 text-amber-800 border-amber-200"
+                      }`}
+                    >
+                      {selectedOrder.courierShipment.status.replace("_", " ")}
+                    </span>
+                    {selectedOrder.courierShipment.autoBooked && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-900">
+                        ⚡ Auto-Booked on Paid
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    Waybill ID:{" "}
+                    <span className="font-mono font-bold text-gray-800">
+                      {selectedOrder.courierShipment.trackingCode}
+                    </span>{" "}
+                    · Package: {selectedOrder.courierShipment.packageWeightKg} kg (
+                    {selectedOrder.courierShipment.boxName || "Small Box"}) · Fee Paid:{" "}
+                    <span className="font-bold text-emerald-800">
+                      ₦{selectedOrder.courierShipment.shippingFeeNaira.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => {
+                    setActiveCourierReceipt(selectedOrder.courierShipment!);
+                    setShowCourierReceiptModal(true);
+                  }}
+                  className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white text-xs font-semibold rounded-lg cursor-pointer transition-all flex items-center gap-1.5"
+                >
+                  <span>🧾</span>
+                  <span>View Official Courier Receipt</span>
+                </button>
+                <a
+                  href={selectedOrder.courierShipment.trackingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-xs font-semibold rounded-lg transition-all"
+                >
+                  Track on Shipbubble ↗
+                </a>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="text-gray-600">
+                <span className="font-semibold text-gray-800">Delivering To:</span>{" "}
+                {selectedOrder.courierShipment.shipTo.address}
+                {selectedOrder.courierShipment.deliveryEta
+                  ? ` · ETA: ${selectedOrder.courierShipment.deliveryEta}`
+                  : ""}
+              </div>
+
+              {/* Sandbox Courier Webhook Progression Simulator */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-gray-500 mr-1">
+                  Courier Webhook Test:
+                </span>
+                <button
+                  disabled={sbUpdatingStatus}
+                  onClick={() =>
+                    void handleSimulateCourierStatus(selectedOrder.shortCode, "picked_up")
+                  }
+                  className="px-2.5 py-1 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  📦 Picked Up
+                </button>
+                <button
+                  disabled={sbUpdatingStatus}
+                  onClick={() =>
+                    void handleSimulateCourierStatus(selectedOrder.shortCode, "in_transit")
+                  }
+                  className="px-2.5 py-1 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  🚚 In Transit
+                </button>
+                <button
+                  disabled={sbUpdatingStatus}
+                  onClick={() =>
+                    void handleSimulateCourierStatus(selectedOrder.shortCode, "completed")
+                  }
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  ✅ Delivered (Unlock Escrow)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 2 Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -938,6 +1216,438 @@ export function OrdersView({
             </div>
           </div>
         )}
+
+        {/* Shipbubble Multi-Courier Rate Shopping & Booking Modal */}
+        {showShipbubbleModal && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl my-8">
+              <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🚚</span>
+                    <h3 className="font-bold text-gray-900 text-base">
+                      Ship with Courier (Shipbubble) · Order #{selectedOrder.shortCode}
+                    </h3>
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      {isPremiumTier ? "Pro Multi-Carrier & Manual Weight" : "Standard Preset"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Compare live Shipbubble courier rates, book official pickup, and generate the courier shipping receipt.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowShipbubbleModal(false)}
+                  className="text-gray-400 hover:text-gray-700 p-1 cursor-pointer text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Delivery Address & Package Weight Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200 text-xs">
+                <div className="space-y-1.5">
+                  <label className="block font-bold text-gray-700">
+                    Customer Delivery Address
+                  </label>
+                  <input
+                    type="text"
+                    value={sbDeliveryAddress}
+                    onChange={(e) => setSbDeliveryAddress(e.target.value)}
+                    placeholder="e.g. 25 Allen Avenue, Ikeja, Lagos"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-xs text-gray-900 focus:outline-none focus:border-emerald-600"
+                  />
+                  <p className="text-[11px] text-gray-500">
+                    Pickup:{" "}
+                    <span className="font-semibold text-gray-700">
+                      {vendor?.shipbubbleConfig?.pickupAddress || "14 Admiralty Way, Lekki Phase 1, Lagos"}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-bold text-gray-700">
+                      Package Weight &amp; Box
+                    </label>
+                    {!isPremiumTier && (
+                      <span className="text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                        Manual kg: Premium Only
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: "SMALL_BAG" as const, label: "Small Bag", sub: "0.5 kg" },
+                      { id: "SHOEBOX" as const, label: "Shoebox", sub: "1.5 kg" },
+                      { id: "CARTON" as const, label: "Carton", sub: "5.0 kg" },
+                    ].map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setSbWeightPreset(preset.id);
+                          void fetchShipbubbleQuotes(selectedOrder.shortCode, sbDeliveryAddress, preset.id);
+                        }}
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                          sbWeightPreset === preset.id
+                            ? "border-emerald-600 bg-emerald-50/70 text-emerald-950 font-bold"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold">{preset.label}</div>
+                        <div className="text-[10px] text-gray-500">{preset.sub}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {isPremiumTier ? (
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setSbWeightPreset("CUSTOM")}
+                        className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold cursor-pointer ${
+                          sbWeightPreset === "CUSTOM"
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-900"
+                            : "border-gray-200 bg-white text-gray-700"
+                        }`}
+                      >
+                        Manual Weight (kg):
+                      </button>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        max="100"
+                        value={sbCustomWeightKg}
+                        onChange={(e) => {
+                          setSbCustomWeightKg(e.target.value);
+                          setSbWeightPreset("CUSTOM");
+                        }}
+                        className="w-24 px-2.5 py-1.5 border border-gray-200 rounded-lg bg-white text-xs font-mono font-bold text-gray-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void fetchShipbubbleQuotes(
+                            selectedOrder.shortCode,
+                            sbDeliveryAddress,
+                            sbWeightPreset,
+                            Number(sbCustomWeightKg) || 1.5
+                          )
+                        }
+                        className="px-2.5 py-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-[11px] font-semibold cursor-pointer"
+                      >
+                        Refresh Quotes
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="pt-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void fetchShipbubbleQuotes(
+                            selectedOrder.shortCode,
+                            sbDeliveryAddress,
+                            sbWeightPreset
+                          )
+                        }
+                        className="px-2.5 py-1 bg-gray-900 hover:bg-gray-800 text-white rounded-lg text-[11px] font-semibold cursor-pointer"
+                      >
+                        Refresh Quotes
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {sbRatesError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                  {sbRatesError}
+                </div>
+              )}
+
+              {/* Courier Rate Cards */}
+              <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                {sbFetchingRates ? (
+                  <div className="py-10 text-center space-y-2">
+                    <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                    <div className="text-xs font-semibold text-gray-700">
+                      Fetching live multi-courier quotes from Shipbubble...
+                    </div>
+                  </div>
+                ) : sbCouriers.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-gray-500">
+                    No courier quotes loaded yet. Click Refresh Quotes above.
+                  </div>
+                ) : (
+                  sbCouriers.map((c) => {
+                    const isSelected =
+                      sbSelectedCourier?.courier_id === c.courier_id &&
+                      sbSelectedCourier?.service_code === c.service_code;
+                    const isCheapest = sbCheapestId === c.courier_id;
+                    const isFastest = sbFastestId === c.courier_id;
+                    return (
+                      <div
+                        key={`${c.courier_id}-${c.service_code}`}
+                        onClick={() => setSbSelectedCourier(c)}
+                        className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                          isSelected
+                            ? "border-2 border-emerald-600 bg-emerald-50/40 shadow-2xs"
+                            : "border-gray-200 hover:border-gray-300 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-base font-bold text-gray-700">
+                            🚚
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs font-bold text-gray-900">
+                                {c.courier_name}
+                              </span>
+                              {isCheapest && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900">
+                                  Cheapest
+                                </span>
+                              )}
+                              {isFastest && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-900">
+                                  Fastest
+                                </span>
+                              )}
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 uppercase">
+                                {c.service_type}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-gray-500 mt-0.5">
+                              Pickup: {c.pickup_eta} · Delivery:{" "}
+                              <span className="font-semibold text-gray-700">{c.delivery_eta}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-sm font-black text-gray-900">
+                            ₦{Math.round(c.total).toLocaleString()}
+                          </div>
+                          <div className="text-[10px] text-gray-400">
+                            incl. ₦{Math.round(c.vat || 0)} VAT
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-3 border-t border-gray-100">
+                <div className="text-[11px] text-gray-500">
+                  {sbSelectedCourier ? (
+                    <>
+                      Selected:{" "}
+                      <span className="font-bold text-gray-900">
+                        {sbSelectedCourier.courier_name} (₦
+                        {Math.round(sbSelectedCourier.total).toLocaleString()})
+                      </span>
+                    </>
+                  ) : (
+                    "Select a courier above to generate shipment label & receipt"
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowShipbubbleModal(false)}
+                    className="px-4 py-2.5 border border-gray-300 hover:bg-gray-100 text-gray-700 text-xs font-semibold rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sbBooking || !sbSelectedCourier}
+                    onClick={handleBookShipbubbleCourier}
+                    className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>🧾</span>
+                    <span>
+                      {sbBooking
+                        ? "Booking & Generating Receipt..."
+                        : "Book Courier & Get Official Receipt"}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Official Shipping Courier Receipt Modal */}
+        {showCourierReceiptModal && activeCourierReceipt && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl my-8 border border-gray-200">
+              <div className="flex items-start justify-between border-b-2 border-dashed border-gray-200 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded bg-emerald-900 text-white">
+                      Official Courier Receipt
+                    </span>
+                    <span className="text-xs font-mono font-bold text-gray-700">
+                      {activeCourierReceipt.receiptNumber}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-gray-900 mt-1.5">
+                    {activeCourierReceipt.courierName}
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    Issued via Shipbubble Logistics ·{" "}
+                    {new Date(activeCourierReceipt.bookedAt).toLocaleString()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowCourierReceiptModal(false)}
+                  className="text-gray-400 hover:text-gray-700 p-1 cursor-pointer text-sm"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Waybill & Status Banner */}
+              <div className="p-3.5 rounded-xl bg-gray-900 text-white flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-gray-400">
+                    Carrier Waybill / Tracking Code
+                  </div>
+                  <div className="text-base font-mono font-black tracking-wide text-emerald-400">
+                    {activeCourierReceipt.trackingCode}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-400">
+                    Courier Payment Status
+                  </div>
+                  <div className="text-xs font-bold text-emerald-300 uppercase">
+                    ✓ PAID ({activeCourierReceipt.paymentType}) · ₦
+                    {activeCourierReceipt.shippingFeeNaira.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Sender & Receiver Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 space-y-1">
+                  <div className="text-[10px] font-bold uppercase text-gray-400">
+                    📤 Ship From (Sender)
+                  </div>
+                  <div className="font-bold text-gray-900">{activeCourierReceipt.shipFrom.name}</div>
+                  <div className="text-gray-600">{activeCourierReceipt.shipFrom.phone}</div>
+                  <div className="text-[11px] text-gray-500 leading-snug">
+                    {activeCourierReceipt.shipFrom.address}
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-emerald-50/50 border border-emerald-200 space-y-1">
+                  <div className="text-[10px] font-bold uppercase text-emerald-700">
+                    📥 Ship To (Receiver)
+                  </div>
+                  <div className="font-bold text-gray-900">{activeCourierReceipt.shipTo.name}</div>
+                  <div className="text-gray-600">{activeCourierReceipt.shipTo.phone}</div>
+                  <div className="text-[11px] text-gray-700 leading-snug">
+                    {activeCourierReceipt.shipTo.address}
+                  </div>
+                </div>
+              </div>
+
+              {/* Package Manifest & Financial Breakdown */}
+              <div className="border border-gray-200 rounded-xl overflow-hidden text-xs">
+                <div className="bg-gray-50 px-3.5 py-2 border-b border-gray-200 font-bold text-gray-800 flex justify-between">
+                  <span>Package Manifest (#{selectedOrder.shortCode})</span>
+                  <span>
+                    {activeCourierReceipt.packageWeightKg} kg ·{" "}
+                    {activeCourierReceipt.boxName || "Small Box"}
+                  </span>
+                </div>
+                <div className="p-3.5 space-y-2 divide-y divide-gray-100">
+                  {activeCourierReceipt.items.map((item, i) => (
+                    <div key={i} className="pt-1.5 first:pt-0 flex justify-between items-center">
+                      <div>
+                        <div className="font-semibold text-gray-900">
+                          {item.name} ×{item.quantity}
+                        </div>
+                        <div className="text-[11px] text-gray-500">
+                          Weight: {item.weight} kg · Declared Value: ₦{item.amount.toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="font-mono font-semibold text-gray-800">
+                        ₦{item.total.toLocaleString()}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-gray-50 px-3.5 py-2.5 border-t border-gray-200 space-y-1">
+                  <div className="flex justify-between text-[11px] text-gray-500">
+                    <span>Courier Service ({activeCourierReceipt.serviceType.toUpperCase()}):</span>
+                    <span>
+                      ₦
+                      {Math.max(
+                        0,
+                        activeCourierReceipt.shippingFeeNaira - (activeCourierReceipt.vatNaira || 0)
+                      ).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-gray-500">
+                    <span>VAT:</span>
+                    <span>₦{(activeCourierReceipt.vatNaira || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs font-black text-gray-900 pt-1 border-t border-gray-200">
+                    <span>Total Courier Shipping Fee Paid:</span>
+                    <span className="text-emerald-700">
+                      ₦{activeCourierReceipt.shippingFeeNaira.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-gray-500 flex items-center justify-between bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+                <span>
+                  Delivery ETA:{" "}
+                  <strong className="text-gray-800">
+                    {activeCourierReceipt.deliveryEta || "Within 24 - 48 hrs"}
+                  </strong>
+                </span>
+                <a
+                  href={activeCourierReceipt.trackingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-emerald-700 font-bold hover:underline"
+                >
+                  Open Live Shipbubble Tracker ↗
+                </a>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-3.5 py-2 border border-gray-300 hover:bg-gray-100 text-gray-800 text-xs font-semibold rounded-xl cursor-pointer flex items-center gap-1.5"
+                >
+                  <span>🖨️</span>
+                  <span>Print Courier Receipt</span>
+                </button>
+                <a
+                  href={`https://wa.me/${selectedOrder.customerPhone.replace(/\+/g, "")}?text=${encodeURIComponent(
+                    `🧾 OFFICIAL COURIER RECEIPT (${activeCourierReceipt.receiptNumber})\nCourier: ${activeCourierReceipt.courierName}\nWaybill ID: ${activeCourierReceipt.trackingCode}\nOrder: #${selectedOrder.shortCode}\nFee Paid: ₦${activeCourierReceipt.shippingFeeNaira.toLocaleString()}\nTrack Live: ${activeCourierReceipt.trackingUrl}`
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl cursor-pointer flex items-center gap-1.5"
+                >
+                  <span>💬</span>
+                  <span>Share Receipt on WhatsApp ↗</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -953,7 +1663,18 @@ export function OrdersView({
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Orders</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage and track your business sales and fulfillment.</p>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-center">
+        <div data-tour="orders-header-actions" className="flex items-center gap-2 self-start sm:self-center">
+          {onOpenTour && (
+            <button
+              onClick={onOpenTour}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-emerald-950 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+              title="Learn how Orders, Waybills &amp; Monnify Escrow work"
+            >
+              <span>🧭</span>
+              <span className="hidden sm:inline">Orders Guide</span>
+              <span className="sm:hidden">Guide</span>
+            </button>
+          )}
           <button
             onClick={() => setShowFilterModal(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
@@ -972,7 +1693,7 @@ export function OrdersView({
       </div>
 
       {/* Status Tabs */}
-      <div className="border-b border-gray-200 flex gap-6 text-sm font-semibold text-gray-500 overflow-x-auto scrollbar-none">
+      <div data-tour="orders-status-tabs" className="border-b border-gray-200 flex gap-6 text-sm font-semibold text-gray-500 overflow-x-auto scrollbar-none">
         {[
           { id: "ALL", label: `All (${counts.ALL})` },
           { id: "PENDING_PAYMENT", label: `Pending (${counts.PENDING_PAYMENT})` },
@@ -1052,7 +1773,7 @@ export function OrdersView({
           </div>
         </EmptyState>
       ) : (
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
+        <div data-tour="orders-table-wrapper" className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs min-w-[680px]">
               <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">

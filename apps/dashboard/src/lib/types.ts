@@ -84,7 +84,8 @@ export type SalesChannel =
   | "INSTAGRAM"
   | "FACEBOOK"
   | "PAYMENT_LINK"
-  | "RESELLER_NETWORK";
+  | "RESELLER_NETWORK"
+  | "WEB_STOREFRONT";
 
 export interface QuickReplyOption {
   label: string;
@@ -182,6 +183,109 @@ export interface Vendor {
   subscription?: SubscriptionInfo;
   trustTier?: TrustTierInfo;
   platformInvoices?: PlatformInvoiceItem[];
+  shipbubbleConfig?: ShipbubbleVendorConfig;
+  storefrontConfig?: import("./storefront-presets").StorefrontConfig;
+}
+
+export interface ShipbubbleVendorConfig {
+  pickupAddress: string;
+  pickupAddressCode?: number;
+  pickupFormattedAddress?: string;
+  pickupCity?: string;
+  pickupState?: string;
+  pickupPostalCode?: string;
+  defaultCategoryId: number;
+  defaultWeightPreset: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+  customWeightKg: number;
+  selectedCarriers: string[];
+  autoBookOnPaid: boolean;
+  liveCheckoutRatesEnabled: boolean;
+}
+
+export interface ShipbubbleCourierQuoteItem {
+  courier_id: string;
+  courier_name: string;
+  courier_image: string;
+  service_code: string;
+  service_type: string;
+  waybill: boolean;
+  on_demand: boolean;
+  is_cod_available: boolean;
+  ratings: number;
+  votes: number;
+  pickup_eta: string;
+  delivery_eta: string;
+  currency: string;
+  vat: number;
+  total: number;
+  discount?: {
+    percentage: number;
+    symbol: string;
+    discounted: number;
+  };
+  tracking?: {
+    bars: number;
+    label: string;
+  };
+}
+
+export interface CourierShipmentReceipt {
+  provider: "shipbubble";
+  receiptNumber: string;
+  shipbubbleOrderId: string;
+  requestToken?: string;
+  courierId: string;
+  courierName: string;
+  courierEmail: string;
+  courierPhone: string;
+  courierImage?: string;
+  serviceCode: string;
+  serviceType: string;
+  status: "pending" | "confirmed" | "picked_up" | "in_transit" | "completed" | "cancelled";
+  trackingCode: string;
+  trackingUrl: string;
+  waybillDocumentUrl?: string;
+  shippingFeeNaira: number;
+  vatNaira: number;
+  paymentType: string;
+  paymentStatus: string;
+  currency: string;
+  packageWeightKg: number;
+  packageAmountNaira: number;
+  weightPreset?: "SMALL_BAG" | "SHOEBOX" | "CARTON" | "CUSTOM";
+  boxName?: string;
+  pickupEta?: string;
+  deliveryEta?: string;
+  shipFrom: {
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  shipTo: {
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  items: Array<{
+    name: string;
+    description: string;
+    weight: number;
+    amount: number;
+    quantity: number;
+    total: number;
+  }>;
+  autoBooked?: boolean;
+  bookedAt: string;
+  pickedUpAt?: string;
+  inTransitAt?: string;
+  deliveredAt?: string;
+  message?: string;
 }
 
 export interface PendingBankUpdateInfo {
@@ -333,6 +437,7 @@ export interface Order {
   platformFeeNaira?: number;
   splitSettlementStatus?: "PENDING" | "SETTLED" | "NOT_APPLICABLE";
   salesChannel?: SalesChannel;
+  courierShipment?: CourierShipmentReceipt;
 }
 
 export interface PublicOrderReceipt {
@@ -378,6 +483,8 @@ export interface PublicOrderReceipt {
   dispatchedAt?: string;
   paymentExpiresAt: string;
   trackUrl: string;
+  courierShipment?: CourierShipmentReceipt;
+  liveCheckoutRatesEnabled?: boolean;
   vendor: {
     businessName: string;
     slug: string;
@@ -680,6 +787,7 @@ export interface VendorState {
   subscription?: SubscriptionInfo;
   trustTier?: TrustTierInfo;
   platformInvoices?: PlatformInvoiceItem[];
+  storefrontConfig?: import("./storefront-presets").StorefrontConfig;
 }
 
 export interface WhatsAppSimulationResult {
