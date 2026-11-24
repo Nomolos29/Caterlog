@@ -596,12 +596,24 @@ export interface PaymentReconciliationResult {
   applied: boolean;
 }
 
+export interface RuntimeCustomer {
+  id: string;
+  whatsappPhone: string;
+  name: string;
+  defaultAddress?: string;
+  totalOrdersCount: number;
+  lifetimeSpendKobo: bigint;
+  firstSeenAt: Date;
+  lastOrderAt?: Date;
+}
+
 export interface RuntimeSnapshot {
   vendor: RuntimeVendor;
   products: RuntimeProduct[];
   shippingZones: RuntimeShippingZone[];
   discounts: RuntimeDiscount[];
   orders: RuntimeOrder[];
+  customers?: RuntimeCustomer[];
   /** Provider transaction references already applied (durable idempotency). */
   processedTransactionRefs: string[];
   chatMessages?: ChatThreadMessage[];

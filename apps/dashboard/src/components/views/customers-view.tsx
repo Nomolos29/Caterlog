@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from "react";
-import type { OrderItem } from "@/lib/types";
+import { useState, useMemo } from "react";
+import type { CustomerRecordItem, OrderItem } from "@/lib/types";
 import { EmptyState } from "../ui/empty-state";
 
 interface CustomerProfile {
@@ -23,12 +23,14 @@ interface CustomerProfile {
 
 interface CustomersViewProps {
   orders: OrderItem[];
+  dbCustomers?: CustomerRecordItem[];
   onSelectOrder?: (order: OrderItem) => void;
   onNavigateToPaymentLinks?: (customerName: string) => void;
 }
 
 export function CustomersView({
   orders,
+  dbCustomers = [],
   onSelectOrder,
   onNavigateToPaymentLinks,
 }: CustomersViewProps) {
@@ -98,10 +100,58 @@ export function CustomersView({
       }
     }
 
+    // Merge any persisted PostgreSQL Customer records that aren't already represented
+    for (const dbc of dbCustomers) {
+      const phone = dbc.whatsappPhone?.trim();
+      if (!phone) continue;
+      const cleanName = (dbc.name || phone).trim();
+      const customerKey = `${phone}::${cleanName.toLowerCase()}`;
+      const alreadyByKey = customerMap.get(customerKey);
+      const alreadyByPhone = Array.from(customerMap.values()).find((c) => c.phone === phone);
+      if (alreadyByKey || alreadyByPhone) {
+        const target = alreadyByKey ?? alreadyByPhone!;
+        if (dbc.defaultAddress && (!target.location || target.location === "Nigeria")) {
+          target.location = dbc.defaultAddress;
+        }
+        continue;
+      }
+      const ts = new Date(dbc.lastOrderAt || dbc.firstSeenAt).getTime() || Date.now();
+      const firstDateLabel = new Date(dbc.firstSeenAt).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+      const lastDateLabel = new Date(dbc.lastOrderAt || dbc.firstSeenAt).toLocaleDateString(
+        "en-GB",
+        {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }
+      );
+      customerMap.set(customerKey, {
+        id: dbc.id,
+        key: customerKey,
+        name: cleanName,
+        phone,
+        email: `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@buyer.caterlog.shop`,
+        location: dbc.defaultAddress || "Nigeria",
+        tag: dbc.totalOrdersCount > 3 ? "VIP" : dbc.totalOrdersCount > 1 ? "Repeat" : "New",
+        firstOrderDate: firstDateLabel,
+        lastOrderDate: lastDateLabel,
+        lastOrderTimestamp: ts,
+        orderCount: dbc.totalOrdersCount,
+        totalSpentNaira: dbc.lifetimeSpendNaira,
+        totalSpentFormatted: dbc.lifetimeSpendFormatted,
+        hasWebsiteOrders: false,
+        orders: [],
+      });
+    }
+
     return Array.from(customerMap.values()).sort(
       (a, b) => b.lastOrderTimestamp - a.lastOrderTimestamp
     );
-  }, [orders]);
+  }, [orders, dbCustomers]);
 
   // Dynamically derive selectedCustomer so updates to orders/totals instantly reflect
   const selectedCustomer = selectedCustomerPhone

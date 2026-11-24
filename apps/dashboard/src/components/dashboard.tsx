@@ -1163,6 +1163,7 @@ export function Dashboard() {
           {currentView === "customers" && (
             <CustomersView
               orders={state.orders}
+              dbCustomers={state.customers}
               onSelectOrder={(ord) => {
                 handleSelectOrder(ord);
                 setCurrentView("orders");

@@ -49,6 +49,7 @@ import type {
   RuntimeCartItem,
   RuntimeCommerceEvent,
   RuntimeCourierShipmentReceipt,
+  RuntimeCustomer,
   RuntimeDiscount,
   RuntimeKycSubmission,
   RuntimeMarketBoostListing,
@@ -1053,6 +1054,7 @@ export class CaterlogStage1Engine {
       teamMembers: this.teamMembers.map((t) => ({ ...t })),
       notifications: this.notifications.map((n) => ({ ...n })),
       commerceEvents: this.commerceEvents.map((e) => ({ ...e })),
+      customers: this.customers.map((c) => ({ ...c })),
     };
   }
 
@@ -1076,8 +1078,14 @@ export class CaterlogStage1Engine {
     await this.persistence.close();
   }
 
+  public customers: RuntimeCustomer[] = [];
+
   private applySnapshot(snapshot: RuntimeSnapshot): void {
     const existingShipbubbleConfig = this.vendor.shipbubbleConfig;
+    const existingSubscription = this.vendor.subscription;
+    const existingTrustTier = this.vendor.trustTier;
+    const existingInvoices = this.vendor.invoices;
+    const existingStorefrontConfig = this.vendor.storefrontConfig;
     const existingCourierMap = new Map<string, RuntimeCourierShipmentReceipt>();
     for (const o of this.orders) {
       if (o.courierShipment) {
@@ -1087,6 +1095,10 @@ export class CaterlogStage1Engine {
 
     this.vendor = {
       ...snapshot.vendor,
+      subscription: snapshot.vendor.subscription ?? existingSubscription,
+      trustTier: snapshot.vendor.trustTier ?? existingTrustTier,
+      invoices: snapshot.vendor.invoices ?? existingInvoices,
+      storefrontConfig: snapshot.vendor.storefrontConfig ?? existingStorefrontConfig,
       shipbubbleConfig: snapshot.vendor.shipbubbleConfig ?? existingShipbubbleConfig ?? {
         pickupAddress: "14 Admiralty Way, Lekki Phase 1, Lagos, Nigeria",
         pickupAddressCode: 871341691,
@@ -1207,6 +1219,9 @@ export class CaterlogStage1Engine {
     }
     if (snapshot.notifications) {
       this.notifications = snapshot.notifications.map((n) => ({ ...n }));
+    }
+    if (snapshot.customers) {
+      this.customers = snapshot.customers.map((c) => ({ ...c }));
     }
     if (snapshot.commerceEvents) {
       this.commerceEvents = snapshot.commerceEvents.map((e) => ({ ...e }));
@@ -4271,6 +4286,25 @@ export class CaterlogStage1Engine {
     await this.persistNow("applyPayment", async () => {
       await this.persistence.recordPayment(order, verified);
       await this.persistence.saveOrder(order);
+      if (decision.nextStatus === "PAID" && this.persistence.saveNotification) {
+        const paidNotif: RuntimeVendorNotification = {
+          id: `notif-paid-${order.shortCode}-${Date.now()}`,
+          notificationKey: `notif-paid-${order.shortCode}`,
+          title: `Payment Confirmed — #${order.shortCode}`,
+          message: `Verified ${formatNaira(order.amountPaidKobo)} from ${order.customerName} (${order.customerPhone}). Ready for dispatch.`,
+          category: "PAYOUTS",
+          isRead: false,
+          isDismissed: false,
+          linkText: "View Order",
+          targetView: "orders",
+          targetRef: order.shortCode,
+          createdAt: new Date(),
+        };
+        if (!this.notifications.some((n) => n.notificationKey === paidNotif.notificationKey)) {
+          this.notifications.unshift(paidNotif);
+        }
+        await this.persistence.saveNotification(paidNotif);
+      }
     });
 
     await this.broadcastStateChange();
@@ -6894,18 +6928,27 @@ export class CaterlogStage1Engine {
     dismissedKeys?: string[];
     markAllRead?: boolean;
   }): RuntimeVendorNotification[] {
+    const resolvedReadKeys: string[] = [];
+    const resolvedDismissedKeys: string[] = [];
+
     for (const n of this.notifications) {
       if (input.markAllRead || input.readKeys?.includes(n.notificationKey) || input.readKeys?.includes(n.id)) {
         n.isRead = true;
         n.readAt = new Date();
+        resolvedReadKeys.push(n.notificationKey);
       }
       if (input.dismissedKeys?.includes(n.notificationKey) || input.dismissedKeys?.includes(n.id)) {
         n.isDismissed = true;
+        resolvedDismissedKeys.push(n.notificationKey);
       }
     }
     if (this.persistence.syncNotifications) {
       this.persistInBackground("syncNotifications", () =>
-        this.persistence.syncNotifications!(input)
+        this.persistence.syncNotifications!({
+          markAllRead: input.markAllRead,
+          readKeys: resolvedReadKeys.length > 0 ? resolvedReadKeys : input.readKeys,
+          dismissedKeys: resolvedDismissedKeys.length > 0 ? resolvedDismissedKeys : input.dismissedKeys,
+        })
       );
     }
     void this.broadcastStateChange();
@@ -7064,6 +7107,11 @@ export class CaterlogStage1Engine {
       kycSubmissions: this.kycSubmissions,
       teamMembers: this.teamMembers,
       notifications: this.notifications.filter((n) => !n.isDismissed),
+      customers: this.customers.map((c) => ({
+        ...c,
+        lifetimeSpendNaira: koboToNaira(c.lifetimeSpendKobo),
+        lifetimeSpendFormatted: formatNaira(c.lifetimeSpendKobo),
+      })),
       commerceEvents: this.commerceEvents.slice(0, 50),
       integrations: this.getIntegrationStatus(),
       catalogSync: {
@@ -7269,7 +7317,7 @@ export class CaterlogStage1Engine {
       throw new Error("Could not reserve stock for one or more items in your bag. Please check available stock.");
     }
 
-    this.notifications.unshift({
+    const webNotif: RuntimeVendorNotification = {
       id: `notif-web-${order.shortCode}-${Date.now()}`,
       notificationKey: `notif-web-order-${order.shortCode}`,
       title: `New Website Order #${order.shortCode}`,
@@ -7281,7 +7329,13 @@ export class CaterlogStage1Engine {
       targetView: "customers",
       targetRef: order.shortCode,
       createdAt: new Date(),
-    });
+    };
+    this.notifications.unshift(webNotif);
+    if (this.persistence.saveNotification) {
+      await this.persistNow("saveWebOrderNotification", () =>
+        this.persistence.saveNotification!(webNotif)
+      );
+    }
 
     this.recordAuditEvent(
       "WEB_STOREFRONT_ORDER_CREATED",
@@ -7458,6 +7512,9 @@ export class CaterlogStage1Engine {
     cfg.pickupState = validated.state;
     cfg.pickupPostalCode = validated.postal_code;
 
+    this.persistInBackground("saveShipbubbleValidatedAddress", () =>
+      this.persistence.saveVendor(this.vendor)
+    );
     this.recordAuditEvent(
       "SHIPBUBBLE_CONFIG_UPDATED",
       "VENDOR_WEB_DASHBOARD",
@@ -7516,6 +7573,9 @@ export class CaterlogStage1Engine {
       cfg.liveCheckoutRatesEnabled = Boolean(input.liveCheckoutRatesEnabled);
     }
 
+    this.persistInBackground("saveShipbubbleConfig", () =>
+      this.persistence.saveVendor(this.vendor)
+    );
     this.recordAuditEvent(
       "SHIPBUBBLE_CONFIG_UPDATED",
       "VENDOR_WEB_DASHBOARD",

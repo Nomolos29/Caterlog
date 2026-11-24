@@ -1325,6 +1325,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           bankName: body.bankName,
           accountNumber: body.accountNumber,
         });
+        await engine.flushPersistence();
         const withdrawAmountKobo = nairaToKobo(body.amountNaira || 0);
         await engine.whatsapp.sendTextMessage({
           toPhone: engine.vendor.whatsappPhone,
@@ -1362,6 +1363,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           businessName: body.businessName,
           notifyPhone: body.notifyPhone,
         });
+        await engine.flushPersistence();
 
         return sendJson(res, 200, {
           status: "updated",
@@ -1394,6 +1396,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         }
 
         const result = await engine.linkVendorBankAccount(body);
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           status: "linked",
           subAccountCode: result.subAccount.subAccountCode,
@@ -1425,6 +1428,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           otpCode: body.otpCode,
           requestorIp: req.socket.remoteAddress,
         });
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           status: result.status,
           bankName: result.bankName,
@@ -1439,6 +1443,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       // 8d-3. Dashboard REST API: Apply Elapsed Bank Change (`POST /api/v1/vendor/bank/apply-pending`)
       if (req.method === "POST" && path === "/api/v1/vendor/bank/apply-pending") {
         const applied = await engine.applyPendingBankUpdate();
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           applied,
           state: engine.serializeState(),
@@ -1530,6 +1535,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           amountNaira: number | string;
         };
         const link = engine.createPaymentLink(body);
+        await engine.flushPersistence();
         return sendJson(res, 201, {
           status: "created",
           link: {
@@ -1545,6 +1551,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       if (req.method === "DELETE" && path.startsWith("/api/v1/vendor/payment-links/")) {
         const slug = decodeURIComponent(path.replace("/api/v1/vendor/payment-links/", ""));
         engine.deletePaymentLink(slug);
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -1558,6 +1565,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           platformFeeBps?: number;
         };
         const rule = engine.saveSplitRule(body);
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           status: "updated",
           rule,
@@ -1586,6 +1594,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           throw new HttpError(400, "CAC number and 10-digit account number are required.");
         }
         const submission = engine.submitKyc(body);
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           status: "submitted",
           submission,
@@ -1608,6 +1617,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           canOverrideCopilot?: boolean;
         };
         const member = engine.saveTeamMember(body);
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           status: "saved",
           member,
@@ -1619,6 +1629,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       if (req.method === "DELETE" && path.startsWith("/api/v1/vendor/team/")) {
         const idOrEmail = decodeURIComponent(path.replace("/api/v1/vendor/team/", ""));
         engine.deleteTeamMember(idOrEmail);
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -1630,6 +1641,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           markAllRead?: boolean;
         };
         engine.syncNotifications(body);
+        await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
       }
 
@@ -1643,6 +1655,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           throw new HttpError(400, "planId is required.");
         }
         const subscription = engine.updateSubscription(body.planId, body.billingCycle || "MONTHLY");
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           status: "upgraded",
           subscription,
@@ -1656,6 +1669,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           cacNumber?: string;
         };
         const trustTier = engine.fastTrackTrustTier(body.cacNumber);
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           status: "fast_tracked",
           trustTier,
@@ -2060,6 +2074,14 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         (path === "/api/v1/public/storefront" ||
           (path.startsWith("/api/v1/public/storefront/") && !path.endsWith("/checkout")))
       ) {
+        if (
+          url.searchParams.get("refresh") === "true" ||
+          url.searchParams.get("sync") === "true"
+        ) {
+          await engine.syncFromDatabase();
+        } else {
+          await engine.flushPersistence();
+        }
         const tierOverride = url.searchParams.get("tier") ?? undefined;
         return sendJson(res, 200, engine.getPublicStorefrontData(tierOverride));
       }
@@ -2074,6 +2096,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           typeof engine.createPublicStorefrontOrder
         >[0];
         const created = await engine.createPublicStorefrontOrder(body);
+        await engine.flushPersistence();
         return sendJson(res, 201, {
           status: "created",
           orderShortCode: created.orderShortCode,
@@ -2145,6 +2168,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           address?: string;
         };
         const result = await engine.validateVendorPickupAddress(body.address ?? "");
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           ...result,
           state: engine.serializeState(),
@@ -2158,6 +2182,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
       ) {
         const body = JSON.parse((await readRawBody(req)) || "{}") as Record<string, unknown>;
         const config = engine.updateShipbubbleConfig(body);
+        await engine.flushPersistence();
         return sendJson(res, 200, {
           config,
           state: engine.serializeState(),
@@ -2417,6 +2442,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           signatureHeader: signature,
           providerTransactionRef: txRef,
         });
+        await engine.flushPersistence();
 
         return sendJson(res, 200, {
           reconciliationStatus: rec.status,

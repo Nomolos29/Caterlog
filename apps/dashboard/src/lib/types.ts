@@ -765,6 +765,19 @@ export interface CommerceEventItem {
   createdAt: string;
 }
 
+export interface CustomerRecordItem {
+  id: string;
+  whatsappPhone: string;
+  name: string;
+  defaultAddress?: string;
+  totalOrdersCount: number;
+  lifetimeSpendKobo: string;
+  lifetimeSpendNaira: number;
+  lifetimeSpendFormatted: string;
+  firstSeenAt: string;
+  lastOrderAt?: string;
+}
+
 export interface VendorState {
   vendor: Vendor;
   activeBuyerSession: BuyerSession | null;
@@ -773,6 +786,7 @@ export interface VendorState {
   shippingZones: ShippingZone[];
   discounts: Discount[];
   orders: Order[];
+  customers?: CustomerRecordItem[];
   chatMessages: ChatMessage[];
   marketBoostListing?: MarketBoostListing | null;
   suppliers?: SupplierProfile[];

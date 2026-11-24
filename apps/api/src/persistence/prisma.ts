@@ -189,9 +189,13 @@ export class PrismaPersistenceStore implements PersistenceStore {
           orderBy: { createdAt: "desc" },
           take: 100,
         },
+        customers: {
+          orderBy: { firstSeenAt: "desc" },
+          take: 300,
+        },
         commerceEvents: {
           orderBy: { createdAt: "desc" },
-          take: 50,
+          take: 200,
         },
       },
     });
@@ -216,6 +220,9 @@ export class PrismaPersistenceStore implements PersistenceStore {
       `UPDATE "Order" SET "isDropship" = COALESCE("isDropship", false), "supplierShareKobo" = COALESCE("supplierShareKobo", 0), "resellerShareKobo" = COALESCE("resellerShareKobo", 0), "platformFeeKobo" = COALESCE("platformFeeKobo", 0), "splitSettlementStatus" = COALESCE("splitSettlementStatus", 'NOT_APPLICABLE') WHERE "platformFeeKobo" IS NULL OR "supplierShareKobo" IS NULL OR "resellerShareKobo" IS NULL OR "isDropship" IS NULL OR "splitSettlementStatus" IS NULL`,
       `ALTER TABLE "MarketBoostListing" ADD COLUMN IF NOT EXISTS "coveredLgas" JSONB DEFAULT '[]'::jsonb`,
       `ALTER TABLE "SupplierProfile" ADD COLUMN IF NOT EXISTS "coveredLgas" JSONB DEFAULT '[]'::jsonb`,
+      `UPDATE "Product" SET "stockReserved" = GREATEST(0, "stockReserved"), "stockTotal" = GREATEST(0, "stockTotal") WHERE "stockReserved" < 0 OR "stockTotal" < 0`,
+      `UPDATE "ProductVariant" SET "stockReserved" = GREATEST(0, "stockReserved"), "stockTotal" = GREATEST(0, "stockTotal") WHERE "stockReserved" < 0 OR "stockTotal" < 0`,
+      `UPDATE "Customer" c SET "totalOrdersCount" = sub.cnt, "lifetimeSpendKobo" = sub.spend, "lastOrderAt" = COALESCE(sub.last_at, c."lastOrderAt"), "defaultAddress" = COALESCE(sub.latest_addr, c."defaultAddress") FROM (SELECT "customerId", COUNT(*)::int AS cnt, COALESCE(SUM(CASE WHEN "status" IN ('PAID', 'PROCESSING', 'OUT_FOR_DELIVERY', 'FULFILLED') THEN "totalAmountKobo" ELSE 0 END), 0)::bigint AS spend, MAX("createdAt") AS last_at, (ARRAY_REMOVE(ARRAY_AGG("deliveryAddress" ORDER BY "createdAt" DESC), NULL))[1] AS latest_addr FROM "Order" GROUP BY "customerId") sub WHERE c.id = sub."customerId"`,
     ];
     for (const sql of schemaFixes) {
       try {
@@ -262,12 +269,50 @@ export class PrismaPersistenceStore implements PersistenceStore {
     if (!vendor) return null;
     this.vendorId = vendor.id;
 
+    const rawStorefrontObj =
+      vendor.storefrontConfig &&
+      typeof vendor.storefrontConfig === "object" &&
+      !Array.isArray(vendor.storefrontConfig)
+        ? { ...(vendor.storefrontConfig as Record<string, unknown>) }
+        : undefined;
+
+    const extMeta =
+      rawStorefrontObj &&
+      typeof rawStorefrontObj.__vendorExtendedState === "object" &&
+      rawStorefrontObj.__vendorExtendedState !== null &&
+      !Array.isArray(rawStorefrontObj.__vendorExtendedState)
+        ? (rawStorefrontObj.__vendorExtendedState as Record<string, unknown>)
+        : undefined;
+
+    if (rawStorefrontObj) {
+      delete rawStorefrontObj.__vendorExtendedState;
+    }
+
+    const cleanStorefrontConfig =
+      rawStorefrontObj && Object.keys(rawStorefrontObj).length > 0
+        ? rawStorefrontObj
+        : undefined;
+
+    const validRoles = new Set(["reseller", "starter", "growth", "pro", "vendor", "supplier"]);
+    const hydratedRole = (
+      typeof extMeta?.role === "string" && validRoles.has(extMeta.role)
+        ? extMeta.role
+        : validRoles.has(vendor.role)
+          ? vendor.role
+          : "growth"
+    ) as RuntimeVendor["role"];
+
+    const rawPendingBank = extMeta?.pendingBankUpdate as
+      | Record<string, unknown>
+      | null
+      | undefined;
+
     return {
       vendor: {
         id: vendor.id,
         slug: vendor.slug,
         businessName: vendor.businessName,
-        role: (vendor.role === "supplier" ? "supplier" : "reseller") as "reseller" | "supplier",
+        role: hydratedRole,
         whatsappPhone: vendor.whatsappPhone,
         whatsappPhoneId: vendor.whatsappPhoneId ?? "",
         verificationStatus: mapVerificationStatus(vendor.verificationStatus),
@@ -282,14 +327,82 @@ export class PrismaPersistenceStore implements PersistenceStore {
         cacNumber: vendor.cacNumber ?? undefined,
         tinNumber: vendor.tinNumber ?? undefined,
         instagramHandle: vendor.instagramHandle ?? undefined,
+        instagramConnected:
+          typeof extMeta?.instagramConnected === "boolean"
+            ? extMeta.instagramConnected
+            : undefined,
+        instagramBusinessId:
+          typeof extMeta?.instagramBusinessId === "string"
+            ? extMeta.instagramBusinessId
+            : undefined,
+        facebookPageName:
+          typeof extMeta?.facebookPageName === "string"
+            ? extMeta.facebookPageName
+            : undefined,
+        facebookPageId:
+          typeof extMeta?.facebookPageId === "string"
+            ? extMeta.facebookPageId
+            : undefined,
+        facebookConnected:
+          typeof extMeta?.facebookConnected === "boolean"
+            ? extMeta.facebookConnected
+            : undefined,
         baseState: vendor.baseState ?? "Lagos",
         baseCity: vendor.baseCity ?? "Ikeja",
-        storefrontConfig:
-          vendor.storefrontConfig &&
-          typeof vendor.storefrontConfig === "object" &&
-          !Array.isArray(vendor.storefrontConfig)
-            ? (vendor.storefrontConfig as Record<string, unknown>)
+        transactionPinHash:
+          typeof extMeta?.transactionPinHash === "string"
+            ? extMeta.transactionPinHash
             : undefined,
+        pinFailedAttempts:
+          typeof extMeta?.pinFailedAttempts === "number"
+            ? extMeta.pinFailedAttempts
+            : undefined,
+        pinLockedUntil:
+          typeof extMeta?.pinLockedUntil === "string"
+            ? new Date(extMeta.pinLockedUntil)
+            : undefined,
+        pinSetAt:
+          typeof extMeta?.pinSetAt === "string"
+            ? new Date(extMeta.pinSetAt)
+            : undefined,
+        verifiedLegalName:
+          typeof extMeta?.verifiedLegalName === "string"
+            ? extMeta.verifiedLegalName
+            : undefined,
+        verifiedBvnHash:
+          typeof extMeta?.verifiedBvnHash === "string"
+            ? extMeta.verifiedBvnHash
+            : undefined,
+        isPayoutFrozen:
+          typeof extMeta?.isPayoutFrozen === "boolean"
+            ? extMeta.isPayoutFrozen
+            : undefined,
+        payoutFrozenUntil:
+          typeof extMeta?.payoutFrozenUntil === "string"
+            ? new Date(extMeta.payoutFrozenUntil)
+            : undefined,
+        pendingBankUpdate: rawPendingBank
+          ? {
+              bankCode: String(rawPendingBank.bankCode ?? ""),
+              bankName: String(rawPendingBank.bankName ?? ""),
+              accountNumber: String(rawPendingBank.accountNumber ?? ""),
+              accountName: String(rawPendingBank.accountName ?? ""),
+              requestedAt: new Date(String(rawPendingBank.requestedAt ?? new Date().toISOString())),
+              effectiveAt: new Date(String(rawPendingBank.effectiveAt ?? new Date().toISOString())),
+              cancelTokenHash: String(rawPendingBank.cancelTokenHash ?? ""),
+              requestorIp:
+                typeof rawPendingBank.requestorIp === "string"
+                  ? rawPendingBank.requestorIp
+                  : undefined,
+            }
+          : undefined,
+        subscription: extMeta?.subscription as RuntimeVendor["subscription"],
+        trustTier: extMeta?.trustTier as RuntimeVendor["trustTier"],
+        invoices: Array.isArray(extMeta?.invoices)
+          ? (extMeta.invoices as RuntimeVendor["invoices"])
+          : undefined,
+        shipbubbleConfig: extMeta?.shipbubbleConfig as RuntimeVendor["shipbubbleConfig"],
+        storefrontConfig: cleanStorefrontConfig,
       },
       products: vendor.products.map((product) => ({
         id: product.id,
@@ -334,6 +447,16 @@ export class PrismaPersistenceStore implements PersistenceStore {
         isActive: discount.isActive,
       })),
       orders: vendor.orders.map((order) => this.mapOrder(order)),
+      customers: vendor.customers.map((c) => ({
+        id: c.id,
+        whatsappPhone: c.whatsappPhone,
+        name: c.name ?? c.whatsappPhone,
+        defaultAddress: c.defaultAddress ?? undefined,
+        totalOrdersCount: c.totalOrdersCount,
+        lifetimeSpendKobo: c.lifetimeSpendKobo,
+        firstSeenAt: c.firstSeenAt,
+        lastOrderAt: c.lastOrderAt ?? undefined,
+      })),
       processedTransactionRefs: processed.map((row) => row.providerTransactionRef),
       chatMessages: vendor.chatMessages.map((msg) => ({
         id: msg.id,
@@ -547,11 +670,52 @@ export class PrismaPersistenceStore implements PersistenceStore {
   public async saveVendor(vendor: RuntimeVendor): Promise<void> {
     await this.withRetry("saveVendor", async () => {
       const vendorId = await this.requireVendorId();
+      const baseStorefront =
+        vendor.storefrontConfig &&
+        typeof vendor.storefrontConfig === "object" &&
+        !Array.isArray(vendor.storefrontConfig)
+          ? { ...vendor.storefrontConfig }
+          : {};
+      delete (baseStorefront as Record<string, unknown>).__vendorExtendedState;
+
+      const combinedStorefrontAndMeta: Record<string, unknown> = {
+        ...baseStorefront,
+        __vendorExtendedState: {
+          role: vendor.role ?? "growth",
+          instagramConnected: vendor.instagramConnected,
+          instagramBusinessId: vendor.instagramBusinessId,
+          facebookPageName: vendor.facebookPageName,
+          facebookPageId: vendor.facebookPageId,
+          facebookConnected: vendor.facebookConnected,
+          transactionPinHash: vendor.transactionPinHash,
+          pinFailedAttempts: vendor.pinFailedAttempts,
+          pinLockedUntil: vendor.pinLockedUntil ? vendor.pinLockedUntil.toISOString() : undefined,
+          pinSetAt: vendor.pinSetAt ? vendor.pinSetAt.toISOString() : undefined,
+          verifiedLegalName: vendor.verifiedLegalName,
+          verifiedBvnHash: vendor.verifiedBvnHash,
+          isPayoutFrozen: vendor.isPayoutFrozen,
+          payoutFrozenUntil: vendor.payoutFrozenUntil
+            ? vendor.payoutFrozenUntil.toISOString()
+            : undefined,
+          pendingBankUpdate: vendor.pendingBankUpdate
+            ? {
+                ...vendor.pendingBankUpdate,
+                requestedAt: vendor.pendingBankUpdate.requestedAt.toISOString(),
+                effectiveAt: vendor.pendingBankUpdate.effectiveAt.toISOString(),
+              }
+            : null,
+          subscription: vendor.subscription,
+          trustTier: vendor.trustTier,
+          invoices: vendor.invoices,
+          shipbubbleConfig: vendor.shipbubbleConfig,
+        },
+      };
+
       await prisma.vendor.update({
         where: { id: vendorId },
         data: {
           businessName: vendor.businessName,
-          role: vendor.role === "supplier" ? "supplier" : "reseller",
+          role: vendor.role || "growth",
           whatsappPhone: vendor.whatsappPhone,
           whatsappPhoneId: vendor.whatsappPhoneId || null,
           copilotMode: vendor.copilotMode as CopilotMode,
@@ -568,9 +732,7 @@ export class PrismaPersistenceStore implements PersistenceStore {
           instagramHandle: vendor.instagramHandle || null,
           baseState: vendor.baseState || "Lagos",
           baseCity: vendor.baseCity || "Ikeja",
-          storefrontConfig: vendor.storefrontConfig
-            ? toJson(vendor.storefrontConfig)
-            : Prisma.JsonNull,
+          storefrontConfig: toJson(combinedStorefrontAndMeta),
         },
       });
     });
@@ -1019,6 +1181,8 @@ export class PrismaPersistenceStore implements PersistenceStore {
             where: { id: existing.id },
             data: {
               status: order.status as PrismaOrderStatus,
+              shippingFeeKobo: order.shippingFeeKobo,
+              totalAmountKobo: order.totalAmountKobo,
               amountPaidKobo: order.amountPaidKobo,
               overpaidAmountKobo: order.overpaidAmountKobo ?? 0n,
               riderPhone: order.riderPhone ?? null,
@@ -1033,6 +1197,10 @@ export class PrismaPersistenceStore implements PersistenceStore {
               paymentExpiresAt: order.paymentExpiresAt,
               paidAt: order.paidAt ?? null,
               dispatchedAt: order.dispatchedAt ?? null,
+              fulfilledAt:
+                order.status === "FULFILLED"
+                  ? existing.fulfilledAt ?? new Date()
+                  : existing.fulfilledAt,
               reservationReleased: order.reservationReleased ?? false,
               isDropship: order.isDropship ?? false,
               supplierSubAccountCode: order.supplierSubAccountCode ?? null,
@@ -1043,6 +1211,13 @@ export class PrismaPersistenceStore implements PersistenceStore {
               splitSettlementStatus: order.splitSettlementStatus ?? "NOT_APPLICABLE",
             },
           });
+
+          if (order.deliveryAddress) {
+            await tx.customer.update({
+              where: { id: existing.customerId },
+              data: { defaultAddress: order.deliveryAddress },
+            });
+          }
 
           await tx.paymentInvoice.updateMany({
             where: { orderId: existing.id },
@@ -1061,31 +1236,17 @@ export class PrismaPersistenceStore implements PersistenceStore {
           );
 
           if (!wasPaid && order.status === "PAID") {
-            for (const item of existing.items) {
-              const hasActiveRes = activeReservations.some(
-                (r) => r.productId === item.productId
-              );
-              await tx.product.update({
-                where: { id: item.productId },
-                data: {
-                  stockTotal: { decrement: item.quantity },
-                  ...(hasActiveRes
-                    ? { stockReserved: { decrement: item.quantity } }
-                    : {}),
-                },
-              });
-              if (item.variantId) {
-                await tx.productVariant.update({
-                  where: { id: item.variantId },
-                  data: {
-                    stockTotal: { decrement: item.quantity },
-                    ...(hasActiveRes
-                      ? { stockReserved: { decrement: item.quantity } }
-                      : {}),
-                  },
-                });
-              }
-            }
+            const paidIncrement =
+              order.amountPaidKobo > 0n ? order.amountPaidKobo : order.totalAmountKobo;
+            await tx.customer.update({
+              where: { id: existing.customerId },
+              data: {
+                lifetimeSpendKobo: { increment: paidIncrement },
+                lastOrderAt: order.paidAt ?? new Date(),
+                ...(order.deliveryAddress ? { defaultAddress: order.deliveryAddress } : {}),
+              },
+            });
+
             if (activeReservations.length > 0) {
               await tx.stockReservation.updateMany({
                 where: { id: { in: activeReservations.map((r) => r.id) } },
@@ -1093,18 +1254,6 @@ export class PrismaPersistenceStore implements PersistenceStore {
               });
             }
           } else if (!wasExpired && order.status === "EXPIRED") {
-            for (const item of existing.items) {
-              await tx.product.update({
-                where: { id: item.productId },
-                data: { stockReserved: { decrement: item.quantity } },
-              });
-              if (item.variantId) {
-                await tx.productVariant.update({
-                  where: { id: item.variantId },
-                  data: { stockReserved: { decrement: item.quantity } },
-                });
-              }
-            }
             if (activeReservations.length > 0) {
               await tx.stockReservation.updateMany({
                 where: { id: { in: activeReservations.map((r) => r.id) } },
