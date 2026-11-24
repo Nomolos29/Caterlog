@@ -2078,6 +2078,7 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           status: "created",
           orderShortCode: created.orderShortCode,
           receipt: created.receipt,
+          state: created.state,
         });
       }
 

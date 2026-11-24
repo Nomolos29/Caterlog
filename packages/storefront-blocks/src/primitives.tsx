@@ -1,18 +1,25 @@
 "use client";
 
 import React from "react";
-import type { Product } from "@/lib/types";
+import type { StorefrontProduct } from "./types";
 import {
   resolveHeadingFontStyle,
   resolveRadiusClass,
   resolveSurfacePalette,
   type SectionHeadingStyleId,
   type StorefrontThemeTokens,
-} from "@/lib/storefront-presets";
+} from "./presets";
 
-// ---------------------------------------------------------------------------
-// 1. REUSABLE PRODUCT METADATA EXTRACTORS (Colors, Sizes, Compare-At Price)
-// ---------------------------------------------------------------------------
+export function resolveStorefrontImageUrl(url?: string): string {
+  if (!url) return "";
+  if (url.startsWith("/api/v1/media/")) {
+    if (typeof window !== "undefined") {
+      return url;
+    }
+    return `http://127.0.0.1:4000${url}`;
+  }
+  return url;
+}
 
 const NAMED_COLOR_MAP: Record<string, { label: string; hex: string }> = {
   black: { label: "Black", hex: "#18181B" },
@@ -66,7 +73,7 @@ const FALLBACK_SWATCH_SETS: Array<Array<{ label: string; hex: string }>> = [
 ];
 
 export function extractProductSwatches(
-  product: Product,
+  product: StorefrontProduct,
   fallbackIndex = 0
 ): Array<{ label: string; hex: string }> {
   const found = new Map<string, { label: string; hex: string }>();
@@ -91,7 +98,7 @@ export function extractProductSwatches(
   return FALLBACK_SWATCH_SETS[fallbackIndex % FALLBACK_SWATCH_SETS.length]!;
 }
 
-export function extractProductSizes(product: Product): string[] {
+export function extractProductSizes(product: StorefrontProduct): string[] {
   const sizes = new Set<string>();
   for (const v of product.variants ?? []) {
     const match = v.name.match(/\b(XXS|XS|S|M|L|XL|XXL|2XL|3XL|\d{2}(?:\.\d)?)\b/i);
@@ -108,7 +115,7 @@ export function extractProductSizes(product: Product): string[] {
   return Array.from(sizes);
 }
 
-export function computeSyntheticRating(product: Product, index = 0): {
+export function computeSyntheticRating(product: StorefrontProduct, index = 0): {
   rating: string;
   reviewsCount: string;
 } {
@@ -120,15 +127,6 @@ export function computeSyntheticRating(product: Product, index = 0): {
     reviewsCount: counts[seed]!,
   };
 }
-
-// ---------------------------------------------------------------------------
-// 2. REUSABLE SECTION HEADING PRIMITIVE
-//    Supports all 4 heading styles from the 18 mockups:
-//    - clean-centered (Minim, Glowing, Bagkin)
-//    - flanking-lines (Nyture Storefront-08: ─── OUR MUST HAVE ───)
-//    - framed-box (Orgamic Storefront-13: [ BEST SELLERS ])
-//    - left-with-link (Stuffsus Shoppage-01 & Illuminate Storefront-11)
-// ---------------------------------------------------------------------------
 
 export interface StorefrontSectionHeadingProps {
   title: string;
@@ -257,7 +255,6 @@ export function StorefrontSectionHeading({
     );
   }
 
-  // Default: clean-centered (Minim, Glowing, Bagkin)
   return (
     <div className="mb-9 text-center max-w-2xl mx-auto">
       {overline && (
@@ -283,10 +280,6 @@ export function StorefrontSectionHeading({
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// 3. REUSABLE THEME-AWARE BUTTON PRIMITIVE
-// ---------------------------------------------------------------------------
 
 export interface StorefrontButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   theme: StorefrontThemeTokens;
@@ -375,10 +368,6 @@ export function StorefrontButton({
   );
 }
 
-// ---------------------------------------------------------------------------
-// 4. REUSABLE STAR RATING PRIMITIVE
-// ---------------------------------------------------------------------------
-
 export function StorefrontStarRating({
   rating = "4.9",
   reviewsCount,
@@ -417,10 +406,6 @@ export function StorefrontStarRating({
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// 5. REUSABLE COLOR SWATCH DOTS PRIMITIVE
-// ---------------------------------------------------------------------------
 
 export function StorefrontColorSwatches({
   swatches,
@@ -462,10 +447,6 @@ export function StorefrontColorSwatches({
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// 6. REUSABLE PRICE DISPLAY PRIMITIVE
-// ---------------------------------------------------------------------------
 
 export function StorefrontPrice({
   priceFormatted,

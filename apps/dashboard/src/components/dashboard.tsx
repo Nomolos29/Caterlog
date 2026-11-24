@@ -319,14 +319,22 @@ export function Dashboard() {
       };
     }
 
+    let channel: BroadcastChannel | null = null;
+    if ("BroadcastChannel" in window) {
+      channel = new BroadcastChannel("caterlog_realtime_sync");
+      channel.onmessage = () => {
+        void loadState();
+      };
+    }
+
     const syncInterval = window.setInterval(() => {
-      if (document.visibilityState === "visible" && getStoredSessionToken()) {
+      if (document.visibilityState === "visible") {
         void loadState();
       }
     }, 3000);
 
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === "visible" && getStoredSessionToken()) {
+      if (document.visibilityState === "visible") {
         void loadState();
       }
     };
@@ -335,6 +343,7 @@ export function Dashboard() {
 
     return () => {
       if (source) source.close();
+      if (channel) channel.close();
       window.clearInterval(syncInterval);
       window.removeEventListener("focus", handleVisibilityOrFocus);
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
@@ -909,6 +918,7 @@ export function Dashboard() {
           if (v === "settings") {
             setSettingsTab("setup");
           }
+          void loadState();
         }}
         pendingCount={state.analytics.pendingOrdersCount}
         onOpenNewOrder={() => setCurrentView("payment-links")}

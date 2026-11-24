@@ -1,8 +1,6 @@
 "use client";
 
-import React from "react";
-import type { Product } from "@/lib/types";
-import { resolveImageUrl } from "@/lib/api";
+import type { StorefrontProduct } from "./types";
 import {
   resolveCardImageBackdrop,
   resolveHeadingFontStyle,
@@ -11,8 +9,8 @@ import {
   type CategoryBentoVariantId,
   type SectionHeadingStyleId,
   type StorefrontThemeTokens,
-} from "@/lib/storefront-presets";
-import { StorefrontSectionHeading } from "./primitives";
+} from "./presets";
+import { resolveStorefrontImageUrl, StorefrontSectionHeading } from "./primitives";
 
 export interface CategoryTileItem {
   id: string;
@@ -68,7 +66,7 @@ const FALLBACK_CATEGORY_TILES: CategoryTileItem[] = [
   },
 ];
 
-export function deriveCategoryTiles(products: Product[]): CategoryTileItem[] {
+export function deriveCategoryTiles(products: StorefrontProduct[]): CategoryTileItem[] {
   const byCategory = new Map<
     string,
     { count: number; imageUrl: string; lowestPriceFormatted: string; lowestPriceNaira: number }
@@ -77,7 +75,7 @@ export function deriveCategoryTiles(products: Product[]): CategoryTileItem[] {
   for (const p of products) {
     const cat = (p.category || "Signature Collection").trim();
     const img =
-      resolveImageUrl(p.primaryImageUrl) ||
+      resolveStorefrontImageUrl(p.primaryImageUrl) ||
       "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80";
     const existing = byCategory.get(cat);
     if (!existing) {
@@ -105,7 +103,6 @@ export function deriveCategoryTiles(products: Product[]): CategoryTileItem[] {
     priceFromFormatted: info.lowestPriceFormatted,
   }));
 
-  // Ensure we always have at least 6 tiles for the 6-tile mosaic layout
   let i = 0;
   while (derived.length < 6) {
     const fb = FALLBACK_CATEGORY_TILES[i % FALLBACK_CATEGORY_TILES.length]!;
@@ -115,7 +112,7 @@ export function deriveCategoryTiles(products: Product[]): CategoryTileItem[] {
       name: p ? p.name.split(" ").slice(0, 2).join(" ") : fb.name,
       subtitle: fb.subtitle,
       count: p ? Math.max(1, p.availableStock) : fb.count,
-      imageUrl: (p && resolveImageUrl(p.primaryImageUrl)) || fb.imageUrl,
+      imageUrl: (p && resolveStorefrontImageUrl(p.primaryImageUrl)) || fb.imageUrl,
       priceFromFormatted: p?.basePriceFormatted,
     });
     i++;
@@ -128,7 +125,7 @@ export interface StorefrontCategoryBentoProps {
   variant: CategoryBentoVariantId;
   headingStyle: SectionHeadingStyleId;
   theme: StorefrontThemeTokens;
-  products: Product[];
+  products: StorefrontProduct[];
   onSelectCategory: (category: string) => void;
 }
 
@@ -144,7 +141,6 @@ export function StorefrontCategoryBentoSection({
   const cardRadius = resolveRadiusClass(theme.borderRadius, "card");
   const tiles = deriveCategoryTiles(products);
 
-  // Reusable inner Tile component used across all bento variants
   const BentoTile = ({
     tile,
     className = "",
@@ -159,7 +155,6 @@ export function StorefrontCategoryBentoSection({
     const bg = resolveCardImageBackdrop(theme.cardTone, index, palette.isDark);
 
     if (overlayStyle === "centered-lookbook") {
-      // Nyture Storefront-08 "ESSENTIALS OF SEASON" centered white uppercase text overlay
       return (
         <div
           onClick={() => onSelectCategory(tile.id)}
@@ -171,14 +166,14 @@ export function StorefrontCategoryBentoSection({
             alt={tile.name}
             className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           />
-          <div className="absolute inset-0 bg-black/25 group-hover:bg-black/35 transition-colors flex flex-col items-center justify-center p-4 text-center">
+          <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-colors flex flex-col items-center justify-center p-4 text-center">
             <span
-              className="text-sm sm:text-lg font-extrabold uppercase tracking-[0.22em] text-white drop-shadow-xs"
+              className="text-sm @sm:text-base @lg:text-lg font-extrabold uppercase tracking-[0.2em] text-white drop-shadow-xs break-words"
               style={headingFont}
             >
               {tile.name}
             </span>
-            <span className="mt-1.5 text-[10px] font-semibold uppercase tracking-widest text-white/85 underline underline-offset-4 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="mt-1.5 text-[10px] font-semibold uppercase tracking-widest text-white/90 underline underline-offset-4 opacity-100 @lg:opacity-0 @lg:group-hover:opacity-100 transition-opacity">
               Shop Now →
             </span>
           </div>
@@ -187,29 +182,28 @@ export function StorefrontCategoryBentoSection({
     }
 
     if (overlayStyle === "split-pastel") {
-      // Kylie Storefront-04 / Storefront-10 horizontal split card
       const pastel = resolveCardImageBackdrop("pastel-tint", index, palette.isDark);
       return (
         <div
           onClick={() => onSelectCategory(tile.id)}
-          className={`group relative overflow-hidden ${cardRadius} cursor-pointer grid grid-cols-12 items-center p-5 sm:p-6 transition-shadow hover:shadow-md ${className}`}
+          className={`group relative overflow-hidden ${cardRadius} cursor-pointer grid grid-cols-12 items-center p-4 @sm:p-6 gap-2 transition-shadow hover:shadow-md ${className}`}
           style={{ backgroundColor: pastel }}
         >
-          <div className="col-span-7 z-10 pr-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-600 mb-1">
+          <div className="col-span-7 z-10 pr-1 min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-600 mb-1 truncate">
               {tile.subtitle}
             </p>
             <h3
-              className="text-lg sm:text-2xl font-extrabold text-gray-900 leading-tight mb-2"
+              className="text-base @sm:text-xl @lg:text-2xl font-extrabold text-gray-900 leading-tight mb-2 break-words"
               style={headingFont}
             >
               {tile.name}
             </h3>
-            <span className="inline-flex items-center gap-1 text-xs font-bold text-gray-900 border-b border-gray-900 pb-0.5">
+            <span className="inline-flex items-center gap-1 text-[11px] @sm:text-xs font-bold text-gray-900 border-b border-gray-900 pb-0.5">
               {tile.priceFromFormatted ? `From ${tile.priceFromFormatted}` : "Explore"} →
             </span>
           </div>
-          <div className="col-span-5 h-32 sm:h-40 rounded-lg overflow-hidden shadow-sm">
+          <div className="col-span-5 h-28 @sm:h-36 @lg:h-40 rounded-lg overflow-hidden shadow-sm">
             <img
               src={tile.imageUrl}
               alt={tile.name}
@@ -220,7 +214,6 @@ export function StorefrontCategoryBentoSection({
       );
     }
 
-    // Default: corner-studio (Bagkin Storefront-02 & Illuminate Storefront-11)
     return (
       <div
         onClick={() => onSelectCategory(tile.id)}
@@ -232,18 +225,18 @@ export function StorefrontCategoryBentoSection({
           alt={tile.name}
           className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-transparent" />
-        <div className="absolute bottom-4 left-4 right-4 text-white">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-white/80 mb-0.5">
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+        <div className="absolute bottom-3.5 left-3.5 right-3.5 @sm:bottom-4 @sm:left-4 @sm:right-4 text-white">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-white/80 mb-0.5 truncate">
             {tile.subtitle}
           </p>
           <h3
-            className="text-base sm:text-xl font-extrabold uppercase tracking-wider"
+            className="text-sm @sm:text-lg @lg:text-xl font-extrabold uppercase tracking-wider truncate"
             style={headingFont}
           >
             {tile.name}
           </h3>
-          <span className="inline-block mt-1 text-[11px] font-bold uppercase tracking-wider border-b border-white pb-0.5">
+          <span className="inline-block mt-1 text-[10px] @sm:text-[11px] font-bold uppercase tracking-wider border-b border-white pb-0.5">
             Shop Now
           </span>
         </div>
@@ -252,43 +245,23 @@ export function StorefrontCategoryBentoSection({
   };
 
   return (
-    <section className="max-w-7xl mx-auto px-4 sm:px-8 py-12">
-      {/* VARIANT 1: 4-tile-left-tall (Bagkin Storefront-02.jpg)
-          1 tall left tile spanning 2 rows + 1 wide top-right tile + 2 square bottom-right tiles */}
+    <section className="max-w-7xl mx-auto px-3.5 @sm:px-6 @lg:px-8 py-8 @sm:py-12">
       {variant === "4-tile-left-tall" && (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-          <BentoTile
-            tile={tiles[0]!}
-            index={0}
-            className="md:col-span-6 h-80 md:h-[460px]"
-          />
-          <div className="md:col-span-6 grid grid-cols-2 gap-5">
-            <BentoTile
-              tile={tiles[1]!}
-              index={1}
-              className="col-span-2 h-52"
-            />
-            <BentoTile
-              tile={tiles[2]!}
-              index={2}
-              className="col-span-1 h-52"
-            />
-            <BentoTile
-              tile={tiles[3]!}
-              index={3}
-              className="col-span-1 h-52"
-            />
+        <div className="grid grid-cols-1 @md:grid-cols-12 gap-4 @sm:gap-5">
+          <BentoTile tile={tiles[0]!} index={0} className="@md:col-span-6 h-72 @sm:h-80 @md:h-[440px]" />
+          <div className="@md:col-span-6 grid grid-cols-1 @sm:grid-cols-2 gap-4 @sm:gap-5">
+            <BentoTile tile={tiles[1]!} index={1} className="@sm:col-span-2 h-48 @sm:h-52" />
+            <BentoTile tile={tiles[2]!} index={2} className="col-span-1 h-48 @sm:h-52" />
+            <BentoTile tile={tiles[3]!} index={3} className="col-span-1 h-48 @sm:h-52" />
           </div>
         </div>
       )}
 
-      {/* VARIANT 2: 4-tile-right-tall (Nyture Storefront-08 "ESSENTIALS OF SEASON" & Illuminate Storefront-11)
-          Left column has editorial title block + 3 portrait tiles; Right column has 1 large tall lookbook tile */}
       {variant === "4-tile-right-tall" && (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-          <div className="md:col-span-6 grid grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 @md:grid-cols-12 gap-4 @sm:gap-5">
+          <div className="@md:col-span-6 grid grid-cols-1 @sm:grid-cols-2 gap-4 @sm:gap-5">
             <div
-              className={`col-span-1 p-6 flex flex-col justify-center ${cardRadius} border`}
+              className={`col-span-1 p-5 @sm:p-6 flex flex-col justify-center ${cardRadius} border min-h-[180px]`}
               style={{
                 backgroundColor: palette.sectionAltBg,
                 borderColor: palette.borderSubtle,
@@ -301,7 +274,7 @@ export function StorefrontCategoryBentoSection({
                 Curated Edit
               </p>
               <h2
-                className="text-xl sm:text-2xl font-bold uppercase leading-snug mb-3"
+                className="text-lg @sm:text-xl @lg:text-2xl font-bold uppercase leading-snug mb-3"
                 style={{ ...headingFont, color: palette.textPrimary }}
               >
                 Essentials Of Season
@@ -320,19 +293,19 @@ export function StorefrontCategoryBentoSection({
               tile={tiles[0]!}
               index={0}
               overlayStyle="centered-lookbook"
-              className="col-span-1 h-56"
+              className="col-span-1 h-52 @sm:h-56"
             />
             <BentoTile
               tile={tiles[1]!}
               index={1}
               overlayStyle="centered-lookbook"
-              className="col-span-1 h-56"
+              className="col-span-1 h-52 @sm:h-56"
             />
             <BentoTile
               tile={tiles[2]!}
               index={2}
               overlayStyle="centered-lookbook"
-              className="col-span-1 h-56"
+              className="col-span-1 h-52 @sm:h-56"
             />
           </div>
 
@@ -340,78 +313,55 @@ export function StorefrontCategoryBentoSection({
             tile={tiles[3]!}
             index={3}
             overlayStyle="centered-lookbook"
-            className="md:col-span-6 h-80 md:h-[468px]"
+            className="@md:col-span-6 h-72 @sm:h-80 @md:h-[468px]"
           />
         </div>
       )}
 
-      {/* VARIANT 3: 6-tile-editorial-mosaic (Kylie Storefront-04.jpg)
-          Top: 2 stacked pastel horizontal banners left + 1 large square sneaker/feature tile right
-          Bottom: 3 asymmetric cards (1/4 + 2/4 + 1/4) */}
       {variant === "6-tile-editorial-mosaic" && (
-        <div className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-            <div className="md:col-span-6 flex flex-col gap-5">
-              <BentoTile
-                tile={tiles[0]!}
-                index={0}
-                overlayStyle="split-pastel"
-                className="flex-1"
-              />
-              <BentoTile
-                tile={tiles[1]!}
-                index={1}
-                overlayStyle="split-pastel"
-                className="flex-1"
-              />
+        <div className="space-y-4 @sm:space-y-5">
+          <div className="grid grid-cols-1 @md:grid-cols-12 gap-4 @sm:gap-5">
+            <div className="@md:col-span-6 flex flex-col gap-4 @sm:gap-5">
+              <BentoTile tile={tiles[0]!} index={0} overlayStyle="split-pastel" className="flex-1" />
+              <BentoTile tile={tiles[1]!} index={1} overlayStyle="split-pastel" className="flex-1" />
             </div>
             <BentoTile
               tile={tiles[2]!}
               index={2}
-              className="md:col-span-6 h-80 md:h-auto min-h-[340px]"
+              className="@md:col-span-6 h-72 @md:h-auto min-h-[300px] @md:min-h-[340px]"
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-            <BentoTile
-              tile={tiles[3]!}
-              index={3}
-              className="md:col-span-3 h-56"
-            />
+          <div className="grid grid-cols-1 @sm:grid-cols-2 @md:grid-cols-12 gap-4 @sm:gap-5">
+            <BentoTile tile={tiles[3]!} index={3} className="@sm:col-span-1 @md:col-span-3 h-52 @sm:h-56" />
             <BentoTile
               tile={tiles[4]!}
               index={4}
               overlayStyle="split-pastel"
-              className="md:col-span-6 h-56"
+              className="@sm:col-span-2 @md:col-span-6 min-h-[190px] @sm:h-56"
             />
-            <BentoTile
-              tile={tiles[5]!}
-              index={5}
-              className="md:col-span-3 h-56"
-            />
+            <BentoTile tile={tiles[5]!} index={5} className="@sm:col-span-1 @md:col-span-3 h-52 @sm:h-56" />
           </div>
         </div>
       )}
 
-      {/* VARIANT 4: 2-col-split-banners (Funio Storefront-09, Glowing Storefront-12, Orgamic Storefront-13) */}
       {variant === "2-col-split-banners" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 @md:grid-cols-2 gap-4 @sm:gap-6">
           <BentoTile
             tile={tiles[0]!}
             index={0}
             overlayStyle="split-pastel"
-            className="min-h-[220px]"
+            className="min-h-[200px] @sm:min-h-[220px]"
           />
           <BentoTile
             tile={tiles[1]!}
             index={1}
             overlayStyle="split-pastel"
-            className="min-h-[220px]"
+            className="min-h-[200px] @sm:min-h-[220px]"
           />
         </div>
       )}
 
-      {/* VARIANT 5: thumbnail-strip (Funio "Top Categories" Storefront-09 & Storefront-10) */}
       {variant === "thumbnail-strip" && (
         <div>
           <StorefrontSectionHeading
@@ -419,16 +369,16 @@ export function StorefrontCategoryBentoSection({
             styleVariant={headingStyle}
             theme={theme}
           />
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-5 gap-3.5 @sm:gap-4">
             {tiles.slice(0, 5).map((t, idx) => (
               <button
                 key={`${t.id}-${idx}`}
                 type="button"
                 onClick={() => onSelectCategory(t.id)}
-                className="group text-center flex flex-col items-center cursor-pointer"
+                className="group text-center flex flex-col items-center cursor-pointer min-w-0"
               >
                 <div
-                  className={`w-full aspect-square overflow-hidden ${cardRadius} mb-2.5 p-3 flex items-center justify-center`}
+                  className={`w-full aspect-square overflow-hidden ${cardRadius} mb-2 p-2.5 @sm:p-3 flex items-center justify-center`}
                   style={{
                     backgroundColor: resolveCardImageBackdrop(theme.cardTone, idx, palette.isDark),
                   }}
@@ -440,7 +390,7 @@ export function StorefrontCategoryBentoSection({
                   />
                 </div>
                 <span
-                  className="text-xs font-bold uppercase tracking-wider"
+                  className="text-xs font-bold uppercase tracking-wider truncate max-w-full"
                   style={{ color: palette.textPrimary }}
                 >
                   {t.name}

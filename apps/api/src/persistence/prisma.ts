@@ -782,12 +782,15 @@ export class PrismaPersistenceStore implements PersistenceStore {
                 vendorId,
                 whatsappPhone: order.customerPhone,
                 name: order.customerName,
+                defaultAddress: order.deliveryAddress ?? null,
                 totalOrdersCount: 1,
                 lifetimeSpendKobo: 0n,
                 lastOrderAt: order.createdAt,
               },
               update: {
                 name: order.customerName,
+                ...(order.deliveryAddress ? { defaultAddress: order.deliveryAddress } : {}),
+                totalOrdersCount: { increment: 1 },
                 lastOrderAt: order.createdAt,
               },
             }),
@@ -897,7 +900,10 @@ export class PrismaPersistenceStore implements PersistenceStore {
               vendorId,
               customerId: customer.id,
               shortCode: order.shortCode,
-              channel: SalesChannel.WHATSAPP_CHAT,
+              channel:
+                order.salesChannel === "WEB_STOREFRONT"
+                  ? SalesChannel.WEB_STOREFRONT
+                  : SalesChannel.WHATSAPP_CHAT,
               status,
               subtotalKobo: order.subtotalKobo,
               shippingZoneId: zone?.id ?? null,
@@ -1758,6 +1764,10 @@ export class PrismaPersistenceStore implements PersistenceStore {
       resellerShareKobo: (order as any).resellerShareKobo ?? undefined,
       platformFeeKobo: (order as any).platformFeeKobo ?? undefined,
       splitSettlementStatus: (order as any).splitSettlementStatus ?? "NOT_APPLICABLE",
+      salesChannel:
+        (order as any).channel === "WEB_STOREFRONT"
+          ? "WEB_STOREFRONT"
+          : undefined,
     };
   }
 

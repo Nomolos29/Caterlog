@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { PlatformRole, VendorState } from "@/lib/types";
 import {
@@ -8,25 +8,16 @@ import {
   getStorefrontPresetById,
   resolveVendorStorefrontConfig,
   STOREFRONT_PRESETS,
+  StorefrontRenderer,
   type BorderRadiusToken,
   type CardToneToken,
-  type CategoryBentoVariantId,
-  type FilterLayoutVariantId,
   type FontPairingId,
-  type FooterVariantId,
-  type HeaderVariantId,
-  type HeroVariantId,
-  type ProductCardVariantId,
-  type PromoDealVariantId,
   type SectionHeadingStyleId,
-  type ShopBannerVariantId,
-  type SocialNewsletterVariantId,
+  type StorefrontActivePage,
   type StorefrontConfig,
+  type StudioSectionId,
   type SurfaceModeId,
-  type TestimonialsVariantId,
-  type TrustStripVariantId,
-} from "@/lib/storefront-presets";
-import { StorefrontRenderer } from "@/components/storefront/storefront-renderer";
+} from "@caterlog/storefront-blocks";
 
 interface StorefrontViewProps {
   state: VendorState;
@@ -35,7 +26,7 @@ interface StorefrontViewProps {
   onNavigateToPlans?: () => void;
 }
 
-type CustomizerTab = "presets" | "sections" | "theme" | "copy";
+type StudioTab = "sections" | "presets" | "theme";
 
 const ACCENT_COLOR_SWATCHES = [
   { label: "Obsidian", hex: "#111827" },
@@ -64,24 +55,43 @@ export function StorefrontView({
     )
   );
 
-  // Sync when workspace role toggles in the top bar (e.g. reseller -> starter -> growth -> pro)
+  const [studioTab, setStudioTab] = useState<StudioTab>("sections");
+  const [activeSection, setActiveSection] = useState<StudioSectionId>("hero");
+  const [activePreviewPage, setActivePreviewPage] = useState<StorefrontActivePage>(
+    isFullWebsiteEligible ? "home" : "shop"
+  );
+  const [viewport, setViewport] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [previewFullWebsiteAsStarter, setPreviewFullWebsiteAsStarter] = useState(false);
+
+  const [syncState, setSyncState] = useState<"synced" | "syncing" | "saved">("synced");
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const isInitialMount = useRef(true);
+
   useEffect(() => {
     setDraftConfig((prev) => {
       const nextEligible = canUseFullWebsiteMode(activeWorkspace);
       const currentPreset = getStorefrontPresetById(prev.presetId);
       if (!nextEligible && prev.mode === "FULL_WEBSITE") {
-        // Switch to default storefront preset when previewing as Starter/Reseller unless preview override is on
         const starterPreset =
           currentPreset.recommendedTier === "STARTER_RESELLER"
             ? currentPreset.config
             : getStorefrontPresetById("stuffsus-shop").config;
+        setActivePreviewPage("shop");
+        setActiveSection("shop-banner");
         return {
           ...starterPreset,
           mode: "STOREFRONT_ONLY",
         };
       }
-      if (nextEligible && prev.mode === "STOREFRONT_ONLY" && currentPreset.recommendedTier === "STARTER_RESELLER") {
+      if (
+        nextEligible &&
+        prev.mode === "STOREFRONT_ONLY" &&
+        currentPreset.recommendedTier === "STARTER_RESELLER"
+      ) {
         const growthPreset = getStorefrontPresetById("jenahara-editorial").config;
+        setActivePreviewPage("home");
+        setActiveSection("hero");
         return {
           ...growthPreset,
           mode: "FULL_WEBSITE",
@@ -91,24 +101,51 @@ export function StorefrontView({
     });
   }, [activeWorkspace]);
 
-  const [activeTab, setActiveTab] = useState<CustomizerTab>("presets");
-  const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
-  const [previewFullWebsiteAsStarter, setPreviewFullWebsiteAsStarter] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [copiedUrl, setCopiedUrl] = useState(false);
-
-  const publicStoreUrl = `/store/${encodeURIComponent(state.vendor.slug || "store")}`;
-
   const effectivePreviewConfig: StorefrontConfig = {
     ...draftConfig,
-    mode:
-      isFullWebsiteEligible
-        ? draftConfig.mode
-        : previewFullWebsiteAsStarter
-          ? "FULL_WEBSITE"
-          : "STOREFRONT_ONLY",
+    mode: isFullWebsiteEligible
+      ? draftConfig.mode
+      : previewFullWebsiteAsStarter
+        ? "FULL_WEBSITE"
+        : "STOREFRONT_ONLY",
   };
+
+  // Real-time BroadcastChannel + Debounced Backend Auto-Save so the Storefront App updates without reloading
+  useEffect(() => {
+    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+      const bc = new BroadcastChannel("caterlog_realtime_sync");
+      bc.postMessage({
+        type: "STOREFRONT_CONFIG_DRAFT",
+        config: effectivePreviewConfig,
+      });
+      bc.close();
+    }
+
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    setSyncState("syncing");
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.saveStorefrontConfig(draftConfig, activeWorkspace);
+        onStateChange(res.state);
+        setSyncState("saved");
+      } catch {
+        setSyncState("synced");
+      }
+    }, 550);
+
+    return () => clearTimeout(timer);
+  }, [draftConfig, activeWorkspace]);
+
+  const slug = encodeURIComponent(state.vendor.slug || "store");
+  const tierParam = effectivePreviewConfig.mode === "FULL_WEBSITE" ? "GROWTH" : "STARTER";
+  const standaloneStorefrontUrl =
+    typeof window !== "undefined"
+      ? `http://${window.location.hostname}:3001/${slug}?tier=${tierParam}`
+      : `http://localhost:3001/${slug}?tier=${tierParam}`;
 
   const handleApplyPreset = (presetId: string) => {
     const preset = getStorefrontPresetById(presetId);
@@ -117,41 +154,41 @@ export function StorefrontView({
     if (shouldPreviewFull) {
       setPreviewFullWebsiteAsStarter(true);
     }
+    const nextMode = isFullWebsiteEligible
+      ? preset.config.mode
+      : shouldPreviewFull
+        ? "FULL_WEBSITE"
+        : "STOREFRONT_ONLY";
     setDraftConfig({
       ...preset.config,
-      mode:
-        isFullWebsiteEligible
-          ? preset.config.mode
-          : shouldPreviewFull
-            ? "FULL_WEBSITE"
-            : "STOREFRONT_ONLY",
+      mode: nextMode,
     });
+    setActivePreviewPage(nextMode === "FULL_WEBSITE" ? "home" : "shop");
   };
 
-  const handleSavePublish = async () => {
-    setSaving(true);
-    setStatusMessage(null);
+  const handleManualPublish = async () => {
+    setSyncState("syncing");
     try {
       const res = await api.saveStorefrontConfig(draftConfig, activeWorkspace);
       onStateChange(res.state);
-      setStatusMessage("✓ Storefront & Website design published live!");
-      setTimeout(() => setStatusMessage(null), 4000);
-    } catch (err) {
-      setStatusMessage(
-        err instanceof Error ? `Error: ${err.message}` : "Failed to save storefront."
-      );
-    } finally {
-      setSaving(false);
+      setSyncState("saved");
+    } catch {
+      setSyncState("synced");
     }
   };
 
   const handleCopyLink = () => {
     if (typeof window !== "undefined" && navigator.clipboard) {
-      const fullUrl = `${window.location.origin}${publicStoreUrl}`;
-      void navigator.clipboard.writeText(fullUrl);
+      void navigator.clipboard.writeText(standaloneStorefrontUrl);
       setCopiedUrl(true);
       setTimeout(() => setCopiedUrl(false), 2500);
     }
+  };
+
+  const handleSelectSectionFromCanvas = (secId: StudioSectionId) => {
+    setStudioTab("sections");
+    setActiveSection(secId);
+    if (inspectorCollapsed) setInspectorCollapsed(false);
   };
 
   const starterPresets = STOREFRONT_PRESETS.filter(
@@ -161,1039 +198,1549 @@ export function StorefrontView({
     (p) => p.recommendedTier === "GROWTH_PRO"
   );
 
+  // Reusable Visual Variant Option Card for the Inspector
+  const VariantOptionCard = ({
+    selected,
+    title,
+    subtitle,
+    badge,
+    onClick,
+  }: {
+    selected: boolean;
+    title: string;
+    subtitle: string;
+    badge?: string;
+    onClick: () => void;
+  }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
+        selected
+          ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600"
+          : "border-gray-200 hover:border-gray-300 bg-white"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold text-gray-900">{title}</span>
+        {badge && (
+          <span
+            className={`px-2 py-0.5 rounded-xs text-[10px] font-semibold ${
+              selected ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {badge}
+          </span>
+        )}
+      </div>
+      <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">{subtitle}</p>
+    </button>
+  );
+
+  const sectionTree: Array<{
+    id: StudioSectionId;
+    title: string;
+    badge: string;
+    visibilityKey?: keyof StorefrontConfig["visibility"];
+    fullWebsiteOnly?: boolean;
+  }> = [
+    {
+      id: "header",
+      title: "Navigation Header",
+      badge: draftConfig.headerVariant,
+    },
+    ...(effectivePreviewConfig.mode === "FULL_WEBSITE"
+      ? [
+          {
+            id: "hero" as StudioSectionId,
+            title: "Brand Hero Header",
+            badge: draftConfig.heroVariant,
+          },
+        ]
+      : []),
+    {
+      id: "shop-banner",
+      title: "Catalog / Shop Banner",
+      badge: draftConfig.shopBannerVariant,
+    },
+    {
+      id: "catalog",
+      title: "Product Cards & Filters",
+      badge: draftConfig.productCardVariant,
+    },
+    {
+      id: "trust-strip",
+      title: "Trust & Value Strip",
+      badge: draftConfig.trustStripVariant,
+      visibilityKey: "showTrustStrip",
+    },
+    ...(effectivePreviewConfig.mode === "FULL_WEBSITE"
+      ? [
+          {
+            id: "category-bento" as StudioSectionId,
+            title: "Category Bento Mosaic",
+            badge: draftConfig.categoryBentoVariant,
+            visibilityKey: "showCategoryBento" as const,
+            fullWebsiteOnly: true,
+          },
+          {
+            id: "promo-deal" as StudioSectionId,
+            title: "Flash Deal & Countdown",
+            badge: draftConfig.promoDealVariant,
+            visibilityKey: "showPromoDeal" as const,
+            fullWebsiteOnly: true,
+          },
+          {
+            id: "brand-story" as StudioSectionId,
+            title: "Brand Story & Stats",
+            badge: "split-story",
+            visibilityKey: "showBrandStory" as const,
+            fullWebsiteOnly: true,
+          },
+          {
+            id: "testimonials" as StudioSectionId,
+            title: "Reviews & Press Quotes",
+            badge: draftConfig.testimonialsVariant,
+            visibilityKey: "showTestimonials" as const,
+            fullWebsiteOnly: true,
+          },
+        ]
+      : []),
+    {
+      id: "newsletter",
+      title: "Instagram & Newsletter",
+      badge: draftConfig.socialNewsletterVariant,
+      visibilityKey: "showSocialNewsletter",
+    },
+    {
+      id: "footer",
+      title: "Website Footer",
+      badge: draftConfig.footerVariant,
+    },
+  ];
+
   return (
-    <div className="space-y-5">
-      {/* TOP BAR: Title, Tier Badge, Viewport Toggle, Share Link & Publish Button */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-2xs">
-        <div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-lg sm:text-xl font-extrabold text-gray-900">
-              Storefront & Website Studio
-            </h1>
-            {isFullWebsiteEligible ? (
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
-                ★ {activeWorkspace.toUpperCase()} TIER · Full Brand Website Unlocked
+    <div className="space-y-4">
+      {/* 1. STUDIO TOP COMMAND BAR */}
+      <div className="bg-white border border-gray-200 rounded-2xl p-3.5 sm:px-5 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setInspectorCollapsed((prev) => !prev)}
+            className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50 cursor-pointer"
+            title="Toggle Left Inspector"
+          >
+            {inspectorCollapsed ? "▸ Show Studio Panel" : "◂ Full Canvas"}
+          </button>
+
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm sm:text-base font-extrabold text-gray-900">
+                Website & Storefront Studio
+              </h1>
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  syncState === "syncing"
+                    ? "bg-amber-50 text-amber-700"
+                    : "bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    syncState === "syncing" ? "bg-amber-500 animate-ping" : "bg-emerald-500"
+                  }`}
+                />
+                {syncState === "syncing" ? "Syncing Live..." : "Realtime Sync Active"}
               </span>
-            ) : (
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
-                {activeWorkspace === "reseller" ? "DROPSHIPPER" : "STARTER"} TIER · Catalog Storefront Mode
-              </span>
-            )}
+            </div>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
-            {isFullWebsiteEligible
-              ? "Mix and match reusable headers, heroes, category bentos, product cards, and theme tokens so your brand website looks 100% unique."
-              : "Customize your high-converting catalog storefront below, or test-drive Growth/Pro Full Brand Website templates in the live preview."}
-          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Desktop / Mobile Viewport Toggle */}
+        {/* Center Page Preview Switcher */}
+        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl overflow-x-auto">
+          {(effectivePreviewConfig.mode === "FULL_WEBSITE"
+            ? ([
+                { id: "home", label: "Home" },
+                { id: "shop", label: "Shop" },
+                { id: "collections", label: "Lookbook" },
+                { id: "about", label: "Story" },
+                { id: "checkout", label: "Checkout" },
+                { id: "track", label: "Tracker" },
+              ] as const)
+            : ([
+                { id: "shop", label: "Catalog" },
+                { id: "checkout", label: "Checkout" },
+                { id: "track", label: "Tracker" },
+              ] as const)
+          ).map((pg) => (
+            <button
+              key={pg.id}
+              type="button"
+              onClick={() => setActivePreviewPage(pg.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activePreviewPage === pg.id
+                  ? "bg-white text-gray-900 shadow-2xs"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              {pg.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Right Actions: Device Viewport + Copy Link + Open Standalone Storefront App */}
+        <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex items-center bg-gray-100 p-1 rounded-xl text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => setViewport("desktop")}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
-                viewport === "desktop"
-                  ? "bg-white text-gray-900 shadow-2xs"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              💻 Desktop
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewport("mobile")}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
-                viewport === "mobile"
-                  ? "bg-white text-gray-900 shadow-2xs"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              📱 Mobile
-            </button>
+            {(
+              [
+                { id: "desktop", icon: "💻", label: "Desktop" },
+                { id: "tablet", icon: "📟", label: "Tablet" },
+                { id: "mobile", icon: "📱", label: "Mobile" },
+              ] as const
+            ).map((vp) => (
+              <button
+                key={vp.id}
+                type="button"
+                onClick={() => setViewport(vp.id)}
+                className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                  viewport === vp.id
+                    ? "bg-white text-gray-900 shadow-2xs font-bold"
+                    : "text-gray-600 opacity-75 hover:opacity-100"
+                }`}
+                title={`${vp.label} view`}
+              >
+                <span>{vp.icon}</span>
+                <span className="hidden md:inline text-[11px]">{vp.label}</span>
+              </button>
+            ))}
           </div>
 
           <button
             type="button"
             onClick={handleCopyLink}
-            className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+            className="px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
           >
-            {copiedUrl ? "✓ Link Copied!" : "🔗 Copy Store Link"}
+            {copiedUrl ? "✓ Copied" : "🔗 Copy URL"}
           </button>
 
           <a
-            href={`${publicStoreUrl}?tier=${encodeURIComponent(
-              effectivePreviewConfig.mode === "FULL_WEBSITE" ? "GROWTH" : "STARTER"
-            )}`}
+            href={standaloneStorefrontUrl}
             target="_blank"
             rel="noreferrer"
-            className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-900 hover:bg-gray-50 transition-colors"
+            className="px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-bold transition-colors"
           >
-            ↗ Open Live Site
+            ↗ Open Storefront (:3001)
           </a>
 
           <button
             type="button"
-            disabled={saving}
-            onClick={handleSavePublish}
-            className="px-5 py-2 rounded-xl text-xs font-bold bg-gray-900 hover:bg-black text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            onClick={handleManualPublish}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-gray-900 hover:bg-black text-white shadow-xs cursor-pointer"
           >
-            {saving ? "Publishing..." : "Publish Design"}
+            Publish
           </button>
         </div>
       </div>
 
-      {statusMessage && (
-        <div className="px-4 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
-          {statusMessage}
-        </div>
-      )}
-
-      {/* TIER UPSELL BANNER FOR DROPSHIPPERS & STARTERS WHEN PREVIEWING FULL WEBSITE */}
+      {/* TIER BANNER FOR STARTER / DROPSHIPPER */}
       {!isFullWebsiteEligible && (
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <span className="inline-block px-2 py-0.5 rounded-xs bg-amber-400 text-slate-950 text-[10px] font-extrabold uppercase tracking-wider mb-1">
-              Tier Architecture
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs">
+            <span className="inline-block px-2 py-0.5 rounded-xs bg-amber-400 text-slate-950 text-[10px] font-extrabold uppercase mr-2">
+              {activeWorkspace === "reseller" ? "Dropshipper Plan" : "Starter Plan"}
             </span>
-            <h3 className="text-sm font-bold">
+            <span className="font-semibold">
               {previewFullWebsiteAsStarter
-                ? "Previewing Growth/Pro Full Brand Website Mode"
-                : "You are on Catalog Storefront Mode (Starter & Dropshipper)"}
-            </h3>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Starter & Dropshipper plans include the 5 Catalog Storefront layouts. Upgrade to Growth or Pro to unlock multi-page Full Brand Websites, Editorial Bento Mosaics, Deal Countdowns & Custom Domains.
-            </p>
+                ? "Previewing Growth/Pro Full Brand Website Mode."
+                : "Active in Catalog Storefront Mode. Upgrade to Growth or Pro to publish multi-page Full Brand Websites."}
+            </span>
           </div>
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => setPreviewFullWebsiteAsStarter((prev) => !prev)}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white/15 hover:bg-white/25 text-white transition-colors cursor-pointer"
+              onClick={() => {
+                setPreviewFullWebsiteAsStarter((prev) => {
+                  const next = !prev;
+                  setActivePreviewPage(next ? "home" : "shop");
+                  return next;
+                });
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/15 hover:bg-white/25 text-white cursor-pointer"
             >
               {previewFullWebsiteAsStarter
-                ? "Switch Back to Storefront Mode"
-                : "✨ Preview Full Website Mode"}
+                ? "Back to Storefront Mode"
+                : "✨ Preview Full Website"}
             </button>
             {onNavigateToPlans && (
               <button
                 type="button"
                 onClick={onNavigateToPlans}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 transition-colors cursor-pointer"
+                className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 cursor-pointer"
               >
-                Upgrade to Growth →
+                Upgrade →
               </button>
             )}
           </div>
         </div>
       )}
 
-      {/* MAIN STUDIO WORKBENCH: Left Customizer Panel (4 cols) + Right Live Canvas (8 cols) */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-        {/* LEFT CUSTOMIZER SIDEBAR */}
-        <div className="xl:col-span-4 bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-2xs">
-          {/* Customizer Tabs */}
-          <div className="grid grid-cols-4 border-b border-gray-200 bg-gray-50 text-xs font-bold">
-            {(
-              [
-                { id: "presets", label: "Presets" },
-                { id: "sections", label: "Sections" },
-                { id: "theme", label: "Theme" },
-                { id: "copy", label: "Copy" },
-              ] as const
-            ).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`py-3 text-center border-b-2 transition-colors cursor-pointer ${
-                  activeTab === tab.id
-                    ? "bg-white text-gray-900 border-gray-900"
-                    : "text-gray-500 border-transparent hover:text-gray-800"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+      {/* 2. STUDIO WORKSPACE: Left Visual Inspector + Right Interactive Canvas */}
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
+        {/* LEFT VISUAL INSPECTOR */}
+        {!inspectorCollapsed && (
+          <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+            {/* 3 Clean Studio Tabs */}
+            <div className="grid grid-cols-3 border-b border-gray-200 bg-gray-50/80 text-xs font-extrabold">
+              {(
+                [
+                  { id: "sections", label: "🧩 Sections" },
+                  { id: "presets", label: "🎨 Presets" },
+                  { id: "theme", label: "✨ Theme" },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setStudioTab(t.id)}
+                  className={`py-3.5 text-center border-b-2 transition-all cursor-pointer ${
+                    studioTab === t.id
+                      ? "bg-white text-indigo-600 border-indigo-600"
+                      : "text-gray-500 border-transparent hover:text-gray-800"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-          <div className="p-4 sm:p-5 max-h-[780px] overflow-y-auto space-y-5">
-            {/* ===============================================================
-                TAB 1: 10 MOCKUP-INSPIRED BRAND PRESETS
-               =============================================================== */}
-            {activeTab === "presets" && (
-              <div className="space-y-6">
-                {/* Mode Switcher for Growth & Pro Vendors */}
-                {isFullWebsiteEligible && (
-                  <div className="p-3.5 rounded-xl bg-gray-50 border border-gray-200">
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2">
-                      Experience Mode
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDraftConfig((prev) => ({ ...prev, mode: "FULL_WEBSITE" }))
-                        }
-                        className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                          draftConfig.mode === "FULL_WEBSITE"
-                            ? "bg-gray-900 text-white border-gray-900"
-                            : "bg-white text-gray-700 border-gray-200"
+            <div className="p-4 max-h-[820px] overflow-y-auto space-y-3">
+              {/* =============================================================
+                  TAB 1: VISUAL PAGE SECTIONS & INLINE EDITOR
+                 ============================================================= */}
+              {studioTab === "sections" && (
+                <div className="space-y-2.5">
+                  <p className="text-[11px] text-gray-500 px-1">
+                    Click any section below (or click directly on the live website preview) to switch its layout and edit its content.
+                  </p>
+
+                  {sectionTree.map((sec) => {
+                    const isOpen = activeSection === sec.id;
+                    const isVisible = sec.visibilityKey
+                      ? draftConfig.visibility[sec.visibilityKey]
+                      : true;
+
+                    return (
+                      <div
+                        key={sec.id}
+                        className={`rounded-xl border transition-all overflow-hidden ${
+                          isOpen
+                            ? "border-indigo-600 shadow-xs bg-white"
+                            : "border-gray-200 bg-gray-50/60 hover:bg-white"
                         }`}
                       >
-                        🌐 Full Brand Website
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDraftConfig((prev) => ({ ...prev, mode: "STOREFRONT_ONLY" }))
-                        }
-                        className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                          draftConfig.mode === "STOREFRONT_ONLY"
-                            ? "bg-gray-900 text-white border-gray-900"
-                            : "bg-white text-gray-700 border-gray-200"
-                        }`}
-                      >
-                        🛍️ Compact Storefront
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Group A: Starter & Dropshipper Storefront Presets */}
-                <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-gray-900">
-                      Catalog Storefront Presets (Starter & Dropshipper)
-                    </h3>
-                    <span className="text-[10px] font-semibold text-gray-500">5 Layouts</span>
-                  </div>
-                  <div className="space-y-2.5">
-                    {starterPresets.map((preset) => {
-                      const isSelected = draftConfig.presetId === preset.id;
-                      return (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => handleApplyPreset(preset.id)}
-                          className={`w-full text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
-                            isSelected
-                              ? "border-gray-900 ring-2 ring-gray-900/10 bg-gray-50"
-                              : "border-gray-200 hover:border-gray-300"
-                          }`}
+                        {/* Section Accordion Header */}
+                        <div
+                          onClick={() => setActiveSection(sec.id)}
+                          className="px-3.5 py-3 flex items-center justify-between gap-2 cursor-pointer select-none"
                         >
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className="inline-flex items-center gap-2 text-xs font-extrabold text-gray-900">
-                              <span
-                                className="w-3 h-3 rounded-full shrink-0"
-                                style={{ backgroundColor: preset.previewBadgeColor }}
-                              />
-                              {preset.name}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-xs bg-gray-100 text-gray-600 text-[10px] font-mono">
-                              {preset.mockupReference}
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                !isVisible
+                                  ? "bg-gray-300"
+                                  : isOpen
+                                    ? "bg-indigo-600"
+                                    : "bg-emerald-500"
+                              }`}
+                            />
+                            <span className="text-xs font-extrabold text-gray-900 truncate">
+                              {sec.title}
                             </span>
                           </div>
-                          <p className="text-[11px] text-gray-500 leading-snug">
-                            {preset.tagline}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
 
-                {/* Group B: Growth & Pro Full Brand Website Presets */}
-                <div>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-gray-900">
+                          <div className="flex items-center gap-2 shrink-0">
+                            {sec.visibilityKey && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const key = sec.visibilityKey!;
+                                  setDraftConfig((prev) => ({
+                                    ...prev,
+                                    visibility: {
+                                      ...prev.visibility,
+                                      [key]: !prev.visibility[key],
+                                    },
+                                  }));
+                                }}
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer ${
+                                  isVisible
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-gray-200 text-gray-600"
+                                }`}
+                              >
+                                {isVisible ? "Visible" : "Hidden"}
+                              </button>
+                            )}
+                            <span className="text-xs text-gray-400">
+                              {isOpen ? "▾" : "▸"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Section Expanded Visual Picker + Inline Copy Fields */}
+                        {isOpen && (
+                          <div className="p-3.5 pt-2 border-t border-gray-100 space-y-3 bg-white text-xs">
+                            {/* 1. HEADER SECTION OPTIONS */}
+                            {sec.id === "header" && (
+                              <>
+                                <div className="space-y-2">
+                                  <VariantOptionCard
+                                    selected={draftConfig.headerVariant === "minimal-inline"}
+                                    title="Minimal Inline"
+                                    subtitle="Brand left, navigation links center, search & bag right (Guza / Stuffsus)"
+                                    badge="Clean"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({ ...p, headerVariant: "minimal-inline" }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.headerVariant === "centered-editorial"}
+                                    title="Centered Editorial Wordmark"
+                                    subtitle="Navigation left, centered brand wordmark, utility icons right (Glowing / Bagkin)"
+                                    badge="Editorial"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        headerVariant: "centered-editorial",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.headerVariant === "bordered-editorial"}
+                                    title="Bordered Magazine Grid"
+                                    subtitle="Architectural hairline grid dividing Brand, Navigation & Bag (Jenahara)"
+                                    badge="Couture"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        headerVariant: "bordered-editorial",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.headerVariant === "stacked-boutique"}
+                                    title="Stacked 2-Row Boutique"
+                                    subtitle="Top row with search, framed logo & bag; second row with navigation links (SA)"
+                                    badge="Boutique"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        headerVariant: "stacked-boutique",
+                                      }))
+                                    }
+                                  />
+                                </div>
+
+                                <div className="pt-2 border-t border-gray-100 space-y-2">
+                                  <label className="flex items-center justify-between font-bold text-gray-700">
+                                    <span>Top Announcement Bar</span>
+                                    <input
+                                      type="checkbox"
+                                      checked={draftConfig.visibility.showAnnouncementBar}
+                                      onChange={(e) =>
+                                        setDraftConfig((p) => ({
+                                          ...p,
+                                          visibility: {
+                                            ...p.visibility,
+                                            showAnnouncementBar: e.target.checked,
+                                          },
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={draftConfig.copy.announcementText}
+                                    onChange={(e) =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        copy: { ...p.copy, announcementText: e.target.value },
+                                      }))
+                                    }
+                                    placeholder="Announcement text..."
+                                    className="w-full px-3 py-2 rounded-lg border border-gray-200"
+                                  />
+                                </div>
+                              </>
+                            )}
+
+                            {/* 2. BRAND HERO HEADER OPTIONS */}
+                            {sec.id === "hero" && (
+                              <>
+                                <div className="space-y-2">
+                                  <VariantOptionCard
+                                    selected={draftConfig.heroVariant === "split-studio"}
+                                    title="50/50 Editorial Studio Split"
+                                    subtitle="Badge pill, bold headline & dual CTAs left; framed lookbook portrait with floating product card right"
+                                    badge="Nyture / Glowing"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({ ...p, heroVariant: "split-studio" }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.heroVariant === "magazine-layered"}
+                                    title="Magazine Cover Masthead"
+                                    subtitle="Oversized serif masthead above 3-column editorial stage & central arched model frame"
+                                    badge="Jenahara"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        heroVariant: "magazine-layered",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.heroVariant === "product-spotlight"}
+                                    title="Product Spotlight + Stat Callouts"
+                                    subtitle="Watermark 01 numeral, dual CTAs, feature columns & floating stat badges"
+                                    badge="Homepage-01"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        heroVariant: "product-spotlight",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.heroVariant === "editorial-center-overlay"}
+                                    title="Full-Bleed Cinema Center Overlay"
+                                    subtitle="Full-width photography with vignette overlay, frosted badge & centered typography"
+                                    badge="Bagkin / Kylie"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        heroVariant: "editorial-center-overlay",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.heroVariant === "dark-luxury"}
+                                    title="Obsidian Dark Luxury Showcase"
+                                    subtitle="High-contrast dark radial-lit hero with gold price badge & spotlight card"
+                                    badge="Illuminate"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({ ...p, heroVariant: "dark-luxury" }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.heroVariant === "script-overlap"}
+                                    title="Script Accent Split"
+                                    subtitle="Framed portrait left; decorative italic script accent above bold display title right"
+                                    badge="Orgamic"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        heroVariant: "script-overlap",
+                                      }))
+                                    }
+                                  />
+                                </div>
+
+                                <div className="pt-2 border-t border-gray-100 space-y-2.5">
+                                  <div>
+                                    <label className="block font-bold text-gray-700 mb-1">
+                                      Eyebrow / Subtitle
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={draftConfig.copy.heroSubtitle}
+                                      onChange={(e) =>
+                                        setDraftConfig((p) => ({
+                                          ...p,
+                                          copy: { ...p.copy, heroSubtitle: e.target.value },
+                                        }))
+                                      }
+                                      className="w-full px-3 py-1.5 rounded-lg border border-gray-200"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block font-bold text-gray-700 mb-1">
+                                      Main Hero Headline
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={draftConfig.copy.heroTitle}
+                                      onChange={(e) =>
+                                        setDraftConfig((p) => ({
+                                          ...p,
+                                          copy: { ...p.copy, heroTitle: e.target.value },
+                                        }))
+                                      }
+                                      className="w-full px-3 py-1.5 rounded-lg border border-gray-200 font-bold"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block font-bold text-gray-700 mb-1">
+                                      Hero Subcopy
+                                    </label>
+                                    <textarea
+                                      rows={2}
+                                      value={draftConfig.copy.heroDescription}
+                                      onChange={(e) =>
+                                        setDraftConfig((p) => ({
+                                          ...p,
+                                          copy: { ...p.copy, heroDescription: e.target.value },
+                                        }))
+                                      }
+                                      className="w-full px-3 py-1.5 rounded-lg border border-gray-200"
+                                    />
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="block font-bold text-gray-700 mb-1">
+                                        Primary Button
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={draftConfig.copy.heroPrimaryCta}
+                                        onChange={(e) =>
+                                          setDraftConfig((p) => ({
+                                            ...p,
+                                            copy: { ...p.copy, heroPrimaryCta: e.target.value },
+                                          }))
+                                        }
+                                        className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block font-bold text-gray-700 mb-1">
+                                        Secondary Button
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={draftConfig.copy.heroSecondaryCta}
+                                        onChange={(e) =>
+                                          setDraftConfig((p) => ({
+                                            ...p,
+                                            copy: { ...p.copy, heroSecondaryCta: e.target.value },
+                                          }))
+                                        }
+                                        className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="block font-bold text-gray-700 mb-1">
+                                      Hero Banner Image URL
+                                    </label>
+                                    <input
+                                      type="url"
+                                      value={draftConfig.copy.heroImageUrl ?? ""}
+                                      onChange={(e) =>
+                                        setDraftConfig((p) => ({
+                                          ...p,
+                                          copy: { ...p.copy, heroImageUrl: e.target.value },
+                                        }))
+                                      }
+                                      placeholder="https://images.unsplash.com/..."
+                                      className="w-full px-3 py-1.5 rounded-lg border border-gray-200"
+                                    />
+                                  </div>
+                                </div>
+                              </>
+                            )}
+
+                            {/* 3. SHOP BANNER OPTIONS */}
+                            {sec.id === "shop-banner" && (
+                              <div className="space-y-2">
+                                <VariantOptionCard
+                                  selected={draftConfig.shopBannerVariant === "overlap-typographic"}
+                                  title="Typographic Overlap + Docked Search"
+                                  subtitle="Oversized display title over photo with floating search card docked at bottom"
+                                  badge="Shoppage-01"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      shopBannerVariant: "overlap-typographic",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.shopBannerVariant === "curved-arch"}
+                                  title="Curved Arch + Straddling Pill CTA"
+                                  subtitle="Curved bottom-edge banner with floating white pill button straddling the seam"
+                                  badge="Shoppage-03"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      shopBannerVariant: "curved-arch",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.shopBannerVariant === "split-breadcrumb"}
+                                  title="Split Breadcrumb + Product Cards"
+                                  subtitle="Page title & breadcrumb left; interactive product showcase cards right"
+                                  badge="Guza"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      shopBannerVariant: "split-breadcrumb",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.shopBannerVariant === "minimal-rack"}
+                                  title="Full-Bleed Studio Rack"
+                                  subtitle="Warm full-width product photography with bottom-left caption"
+                                  badge="Ugmonk"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      shopBannerVariant: "minimal-rack",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.shopBannerVariant === "promo-box"}
+                                  title="Architectural Muted Promo Box"
+                                  subtitle="Clean bordered promo header box above catalog grid"
+                                  badge="Drexel"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      shopBannerVariant: "promo-box",
+                                    }))
+                                  }
+                                />
+                              </div>
+                            )}
+
+                            {/* 4. PRODUCT CARDS & CATALOG FILTER OPTIONS */}
+                            {sec.id === "catalog" && (
+                              <div className="space-y-3">
+                                <p className="font-bold text-gray-700">Product Card Design</p>
+                                <div className="space-y-2">
+                                  <VariantOptionCard
+                                    selected={
+                                      draftConfig.productCardVariant === "dual-action-rounded"
+                                    }
+                                    title="Dual Action Pills: [Add to Bag] + [Buy Now]"
+                                    subtitle="Rounded studio frame, category pill, star reviews & dual bottom CTA pills"
+                                    badge="Stuffsus"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        productCardVariant: "dual-action-rounded",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={
+                                      draftConfig.productCardVariant === "pastel-floating-cart"
+                                    }
+                                    title="Pastel Backdrop + Floating Circle Bag Button"
+                                    subtitle="Soft pastel tinted card top with floating circular cart button on seam"
+                                    badge="Constructor"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        productCardVariant: "pastel-floating-cart",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={
+                                      draftConfig.productCardVariant ===
+                                      "lookbook-gradient-overlay"
+                                    }
+                                    title="Tall 3:4 Lookbook Gradient Overlay"
+                                    subtitle="Full-bleed portrait photo with title, price & bag icon inside bottom fade"
+                                    badge="Jenahara"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        productCardVariant: "lookbook-gradient-overlay",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={
+                                      draftConfig.productCardVariant === "minimal-swatch-studio"
+                                    }
+                                    title="Minimal Studio + Interactive Color Swatches"
+                                    subtitle="Clean 4:5 studio portrait, hover quick-add & clickable color dots below"
+                                    badge="Guza / Bagkin"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        productCardVariant: "minimal-swatch-studio",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={draftConfig.productCardVariant === "boutique-badged"}
+                                    title="Boutique Badged (HOT / -15% / NEW)"
+                                    subtitle="Corner promo tags, star rating, compare-at price & centered CTA"
+                                    badge="Drexel / Glowing"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        productCardVariant: "boutique-badged",
+                                      }))
+                                    }
+                                  />
+                                </div>
+
+                                <div className="pt-2 border-t border-gray-100 space-y-2">
+                                  <p className="font-bold text-gray-700">Filter & Toolbar Layout</p>
+                                  <VariantOptionCard
+                                    selected={draftConfig.filterLayoutVariant === "sidebar-full"}
+                                    title="Left Sidebar Filters"
+                                    subtitle="Categories with counts, Price tiers, Color circles & Size matrix grid"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        filterLayoutVariant: "sidebar-full",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={
+                                      draftConfig.filterLayoutVariant === "horizontal-popover-bar"
+                                    }
+                                    title="Top Popover Bar + 2/3/4 Column Switcher"
+                                    subtitle="Horizontal filter dropdowns + sort + grid column density toggle"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        filterLayoutVariant: "horizontal-popover-bar",
+                                      }))
+                                    }
+                                  />
+                                  <VariantOptionCard
+                                    selected={
+                                      draftConfig.filterLayoutVariant === "centered-category-tabs"
+                                    }
+                                    title="Centered Category Tabs"
+                                    subtitle="Minimal pill/underline category tabs above product grid"
+                                    onClick={() =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        filterLayoutVariant: "centered-category-tabs",
+                                      }))
+                                    }
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 5. TRUST STRIP OPTIONS */}
+                            {sec.id === "trust-strip" && (
+                              <div className="space-y-2">
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.trustStripVariant === "4-col-horizontal-icons"
+                                  }
+                                  title="4-Column Horizontal Value Strip"
+                                  subtitle="Compact icon + title + subtitle row (Dispatch, CAC Verified, Stock Lock, Escrow)"
+                                  badge="Luxora"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      trustStripVariant: "4-col-horizontal-icons",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.trustStripVariant === "3-col-feature-cards"
+                                  }
+                                  title="3-Column 'Why Choose Us?' Feature Grid"
+                                  subtitle="Large centered circular icons with editorial value pillars"
+                                  badge="Homepage-01"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      trustStripVariant: "3-col-feature-cards",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.trustStripVariant === "authentic-stamp-strip"
+                                  }
+                                  title="Authenticity Stamp Strip"
+                                  subtitle="Bordered vintage authenticity badges row"
+                                  badge="Kylie"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      trustStripVariant: "authentic-stamp-strip",
+                                    }))
+                                  }
+                                />
+                              </div>
+                            )}
+
+                            {/* 6. CATEGORY BENTO MOSAIC OPTIONS */}
+                            {sec.id === "category-bento" && (
+                              <div className="space-y-2">
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.categoryBentoVariant === "4-tile-left-tall"
+                                  }
+                                  title="4-Tile Left Tall Showcase"
+                                  subtitle="1 tall vertical feature left + 1 wide top-right + 2 square bottom-right"
+                                  badge="Bagkin"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      categoryBentoVariant: "4-tile-left-tall",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.categoryBentoVariant === "4-tile-right-tall"
+                                  }
+                                  title="4-Tile Right Tall Lookbook Edit"
+                                  subtitle="Editorial title card & 3 portrait tiles left + 1 tall lookbook tile right"
+                                  badge="Nyture"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      categoryBentoVariant: "4-tile-right-tall",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.categoryBentoVariant === "6-tile-editorial-mosaic"
+                                  }
+                                  title="6-Tile Pastel Editorial Mosaic"
+                                  subtitle="2 stacked pastel banners + 1 large square + 3 asymmetric bottom cards"
+                                  badge="Kylie"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      categoryBentoVariant: "6-tile-editorial-mosaic",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.categoryBentoVariant === "2-col-split-banners"
+                                  }
+                                  title="2-Column Split Collection Cards"
+                                  subtitle="Two wide side-by-side landscape collection banners"
+                                  badge="Funio / Glowing"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      categoryBentoVariant: "2-col-split-banners",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.categoryBentoVariant === "thumbnail-strip"}
+                                  title="5-Column Category Thumbnail Strip"
+                                  subtitle="Clean row of 5 square category thumbnails with item counts"
+                                  badge="Top Categories"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      categoryBentoVariant: "thumbnail-strip",
+                                    }))
+                                  }
+                                />
+                              </div>
+                            )}
+
+                            {/* 7. PROMO DEAL & COUNTDOWN OPTIONS */}
+                            {sec.id === "promo-deal" && (
+                              <div className="space-y-2.5">
+                                <VariantOptionCard
+                                  selected={draftConfig.promoDealVariant === "countdown-banner"}
+                                  title="Full-Width Flash Deal Countdown"
+                                  subtitle="Frosted glass Days : Hours : Mins : Sec timer tied to active discounts"
+                                  badge="Bagkin"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      promoDealVariant: "countdown-banner",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.promoDealVariant === "split-story-stats"}
+                                  title="Split Editorial Promo + Stat Card"
+                                  subtitle="Image with floating stat badge left + story headline & CTA right"
+                                  badge="Homepage-01"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      promoDealVariant: "split-story-stats",
+                                    }))
+                                  }
+                                />
+                                <div>
+                                  <label className="block font-bold text-gray-700 mb-1">
+                                    Promo / Deal Headline
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={draftConfig.copy.dealHeadline}
+                                    onChange={(e) =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        copy: { ...p.copy, dealHeadline: e.target.value },
+                                      }))
+                                    }
+                                    className="w-full px-3 py-1.5 rounded-lg border border-gray-200"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 8. BRAND STORY OPTIONS */}
+                            {sec.id === "brand-story" && (
+                              <div className="space-y-2.5">
+                                <div>
+                                  <label className="block font-bold text-gray-700 mb-1">
+                                    Story Headline
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={draftConfig.copy.storyHeadline}
+                                    onChange={(e) =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        copy: { ...p.copy, storyHeadline: e.target.value },
+                                      }))
+                                    }
+                                    className="w-full px-3 py-1.5 rounded-lg border border-gray-200"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block font-bold text-gray-700 mb-1">
+                                    Story Description
+                                  </label>
+                                  <textarea
+                                    rows={2}
+                                    value={draftConfig.copy.storyDescription}
+                                    onChange={(e) =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        copy: { ...p.copy, storyDescription: e.target.value },
+                                      }))
+                                    }
+                                    className="w-full px-3 py-1.5 rounded-lg border border-gray-200"
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="block font-bold text-gray-700 mb-1">
+                                      Stat Highlight
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={draftConfig.copy.storyStatNumber}
+                                      onChange={(e) =>
+                                        setDraftConfig((p) => ({
+                                          ...p,
+                                          copy: { ...p.copy, storyStatNumber: e.target.value },
+                                        }))
+                                      }
+                                      className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block font-bold text-gray-700 mb-1">
+                                      Stat Label
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={draftConfig.copy.storyStatLabel}
+                                      onChange={(e) =>
+                                        setDraftConfig((p) => ({
+                                          ...p,
+                                          copy: { ...p.copy, storyStatLabel: e.target.value },
+                                        }))
+                                      }
+                                      className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 9. TESTIMONIALS OPTIONS */}
+                            {sec.id === "testimonials" && (
+                              <div className="space-y-2">
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.testimonialsVariant === "single-pull-quote"
+                                  }
+                                  title="5-Star Editorial Pull Quote"
+                                  subtitle="Large centered serif pull quote with 5-star badge"
+                                  badge="Luxora"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      testimonialsVariant: "single-pull-quote",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.testimonialsVariant === "numbered-3col"}
+                                  title="3-Column Numbered Review Cards"
+                                  subtitle="Three bordered customer review cards numbered 1, 2, 3"
+                                  badge="Minim"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      testimonialsVariant: "numbered-3col",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.testimonialsVariant === "press-quote-grid"}
+                                  title="'As Seen In' Press & Review Grid"
+                                  subtitle="Publication/brand headers with verified customer quotes below"
+                                  badge="Glowing"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      testimonialsVariant: "press-quote-grid",
+                                    }))
+                                  }
+                                />
+                              </div>
+                            )}
+
+                            {/* 10. NEWSLETTER & INSTAGRAM OPTIONS */}
+                            {sec.id === "newsletter" && (
+                              <div className="space-y-2.5">
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.socialNewsletterVariant === "dark-rounded-card"
+                                  }
+                                  title="Dark Rounded Floating CTA Banner"
+                                  subtitle="High-contrast dark rounded container with pill email subscribe bar"
+                                  badge="Stuffsus"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      socialNewsletterVariant: "dark-rounded-card",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.socialNewsletterVariant ===
+                                    "instagram-strip-plus-minimal"
+                                  }
+                                  title="6-Tile Shoppable Instagram Strip + Newsletter"
+                                  subtitle="Edge-to-edge 6-photo shoppable strip with minimal underline newsletter bar"
+                                  badge="Bagkin"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      socialNewsletterVariant: "instagram-strip-plus-minimal",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={
+                                    draftConfig.socialNewsletterVariant === "inline-fomo-bar"
+                                  }
+                                  title="Compact Horizontal FOMO Bar"
+                                  subtitle="Single-line horizontal email capture strip"
+                                  badge="Kylie"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      socialNewsletterVariant: "inline-fomo-bar",
+                                    }))
+                                  }
+                                />
+                                <div>
+                                  <label className="block font-bold text-gray-700 mb-1">
+                                    Newsletter Headline
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={draftConfig.copy.newsletterHeadline}
+                                    onChange={(e) =>
+                                      setDraftConfig((p) => ({
+                                        ...p,
+                                        copy: { ...p.copy, newsletterHeadline: e.target.value },
+                                      }))
+                                    }
+                                    className="w-full px-3 py-1.5 rounded-lg border border-gray-200"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 11. FOOTER OPTIONS */}
+                            {sec.id === "footer" && (
+                              <div className="space-y-2">
+                                <VariantOptionCard
+                                  selected={draftConfig.footerVariant === "clean-4col"}
+                                  title="Clean 4-Column Brand Footer"
+                                  subtitle="Brand info, Navigation, Orders & Delivery, and Payment badges"
+                                  badge="Drexel / Bagkin"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({ ...p, footerVariant: "clean-4col" }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.footerVariant === "dark-instagram-grid"}
+                                  title="Dark Charcoal Footer + 6-Tile Gallery"
+                                  subtitle="Rich dark footer with a 6-photo shoppable gallery in column 4"
+                                  badge="Storefront-01"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      footerVariant: "dark-instagram-grid",
+                                    }))
+                                  }
+                                />
+                                <VariantOptionCard
+                                  selected={draftConfig.footerVariant === "minimal-single-row"}
+                                  title="Minimal Single-Row Footer"
+                                  subtitle="Ultra-clean horizontal row with wordmark, links & payment pills"
+                                  badge="Minim"
+                                  onClick={() =>
+                                    setDraftConfig((p) => ({
+                                      ...p,
+                                      footerVariant: "minimal-single-row",
+                                    }))
+                                  }
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* =============================================================
+                  TAB 2: 10 MOCKUP-INSPIRED BRAND PRESETS
+                 ============================================================= */}
+              {studioTab === "presets" && (
+                <div className="space-y-5">
+                  {isFullWebsiteEligible && (
+                    <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                      <label className="block text-[10px] font-extrabold uppercase tracking-wider text-gray-500 mb-2">
+                        Active Experience Mode
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftConfig((p) => ({ ...p, mode: "FULL_WEBSITE" }));
+                            setActivePreviewPage("home");
+                          }}
+                          className={`py-2 px-3 rounded-lg text-xs font-bold border cursor-pointer ${
+                            draftConfig.mode === "FULL_WEBSITE"
+                              ? "bg-indigo-600 text-white border-indigo-600"
+                              : "bg-white text-gray-700 border-gray-200"
+                          }`}
+                        >
+                          🌐 Full Website
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftConfig((p) => ({ ...p, mode: "STOREFRONT_ONLY" }));
+                            setActivePreviewPage("shop");
+                          }}
+                          className={`py-2 px-3 rounded-lg text-xs font-bold border cursor-pointer ${
+                            draftConfig.mode === "STOREFRONT_ONLY"
+                              ? "bg-indigo-600 text-white border-indigo-600"
+                              : "bg-white text-gray-700 border-gray-200"
+                          }`}
+                        >
+                          🛍️ Storefront Only
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-gray-900 mb-2">
                       Full Brand Website Presets (Growth & Pro)
                     </h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700">
-                      Multi-Page
-                    </span>
-                  </div>
-                  <div className="space-y-2.5">
-                    {growthProPresets.map((preset) => {
-                      const isSelected = draftConfig.presetId === preset.id;
-                      return (
-                        <button
+                    <div className="space-y-2">
+                      {growthProPresets.map((preset) => (
+                        <VariantOptionCard
                           key={preset.id}
-                          type="button"
+                          selected={draftConfig.presetId === preset.id}
+                          title={preset.name}
+                          subtitle={preset.tagline}
+                          badge={preset.mockupReference}
                           onClick={() => handleApplyPreset(preset.id)}
-                          className={`w-full text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
-                            isSelected
-                              ? "border-gray-900 ring-2 ring-gray-900/10 bg-gray-50"
-                              : "border-gray-200 hover:border-gray-300"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className="inline-flex items-center gap-2 text-xs font-extrabold text-gray-900">
-                              <span
-                                className="w-3 h-3 rounded-full shrink-0"
-                                style={{ backgroundColor: preset.previewBadgeColor }}
-                              />
-                              {preset.name}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-xs bg-indigo-50 text-indigo-700 text-[10px] font-semibold">
-                              {isFullWebsiteEligible ? "Growth/Pro" : "Preview"}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-gray-500 leading-snug">
-                            {preset.tagline}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ===============================================================
-                TAB 2: REUSABLE SECTION VARIANTS & VISIBILITY
-               =============================================================== */}
-            {activeTab === "sections" && (
-              <div className="space-y-4 text-xs">
-                {/* 1. Header Variant */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-1">
-                    1. Navigation Header Style
-                  </label>
-                  <select
-                    value={draftConfig.headerVariant}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        headerVariant: e.target.value as HeaderVariantId,
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                  >
-                    <option value="minimal-inline">Minimal Inline (Guza / Minim / Stuffsus)</option>
-                    <option value="centered-editorial">Centered Editorial Wordmark (Drexel / Glowing / Bagkin)</option>
-                    <option value="stacked-boutique">Stacked 2-Row Boutique (Storefront-01 SA)</option>
-                    <option value="bordered-editorial">Bordered Magazine Grid (Jenahara Storefront-05)</option>
-                  </select>
-                </div>
-
-                {/* 2. Shop Banner Variant (Used on Storefronts & /shop page) */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-1">
-                    2. Shop / Storefront Banner Style
-                  </label>
-                  <select
-                    value={draftConfig.shopBannerVariant}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        shopBannerVariant: e.target.value as ShopBannerVariantId,
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                  >
-                    <option value="overlap-typographic">Giant Overlap &quot;Shop&quot; + Docked Search (Shoppage-01 Stuffsus)</option>
-                    <option value="curved-arch">Curved Arch Hero + Straddling Pill CTA (Shoppage-03 Constructor)</option>
-                    <option value="split-breadcrumb">Warm Split Banner + Product Lineup (Storefront-06 Guza)</option>
-                    <option value="minimal-rack">Full-Bleed Studio Rack Banner (Storefront-07 Ugmonk)</option>
-                    <option value="promo-box">Architectural Muted Promo Box (Shoppage-02 Drexel)</option>
-                  </select>
-                </div>
-
-                {/* 3. Full Website Hero Variant (Growth & Pro) */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-bold text-gray-800">
-                      3. Homepage Brand Hero (Growth/Pro)
-                    </label>
-                    {!isFullWebsiteEligible && (
-                      <span className="text-[10px] font-bold text-indigo-600">Growth/Pro</span>
-                    )}
-                  </div>
-                  <select
-                    value={draftConfig.heroVariant}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        heroVariant: e.target.value as HeroVariantId,
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                  >
-                    <option value="split-studio">50/50 Studio Split with Price Tag (Nyture / Glowing / Luxora)</option>
-                    <option value="magazine-layered">Magazine Cover Layered Title + Ribbon (Jenahara Storefront-05)</option>
-                    <option value="product-spotlight">Watermark 01 + Stat Bubbles + Dual CTAs (Palo Santo Homepage-01)</option>
-                    <option value="editorial-center-overlay">Full-Bleed Editorial Center Overlay (Bagkin / Kylie)</option>
-                    <option value="dark-luxury">High-Contrast Obsidian Dark Luxury (Illuminate / Funio)</option>
-                    <option value="script-overlap">Script Accent Overlapping Display Headline (Orgamic Storefront-13)</option>
-                  </select>
-                </div>
-
-                {/* 4. Product Card Style */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-1">
-                    4. Product Card Component Variant
-                  </label>
-                  <select
-                    value={draftConfig.productCardVariant}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        productCardVariant: e.target.value as ProductCardVariantId,
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                  >
-                    <option value="dual-action-rounded">Dual Action Pills: [Add to Cart] + [Buy Now] (Shoppage-01 Stuffsus)</option>
-                    <option value="pastel-floating-cart">Pastel Backdrop + Floating Circle Cart Icon (Shoppage-03 Constructor)</option>
-                    <option value="lookbook-gradient-overlay">Tall 3:4 Portrait + Bottom Gradient Overlay (Storefront-05 Jenahara)</option>
-                    <option value="minimal-swatch-studio">Minimal Studio + Interactive Color Swatches (Storefront-06 Guza)</option>
-                    <option value="boutique-badged">Corner Badges (HOT/-15%) + Stars + Compare Price (Drexel / Glowing)</option>
-                  </select>
-                </div>
-
-                {/* 5. Catalog Filter & Toolbar Layout */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="col-span-2">
-                    <label className="block font-bold text-gray-800 mb-1">
-                      5. Catalog Filter Layout
-                    </label>
-                    <select
-                      value={draftConfig.filterLayoutVariant}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          filterLayoutVariant: e.target.value as FilterLayoutVariantId,
-                        }))
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                    >
-                      <option value="sidebar-full">Left Sidebar (Categories, Price, Colors, Sizes)</option>
-                      <option value="horizontal-popover-bar">Top Popover Bar + 2/3/4 Column Switcher (Guza)</option>
-                      <option value="centered-category-tabs">Centered Category Tabs (Ugmonk / SA)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-bold text-gray-800 mb-1">
-                      Default Columns
-                    </label>
-                    <select
-                      value={draftConfig.gridColumns}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          gridColumns: Number(e.target.value) as 3 | 4,
-                        }))
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                    >
-                      <option value={3}>3 Columns</option>
-                      <option value={4}>4 Columns</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* 6. Category Bento Mosaic Variant (Growth & Pro) */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-1">
-                    6. Category & Lookbook Bento Mosaic (Growth/Pro)
-                  </label>
-                  <select
-                    value={draftConfig.categoryBentoVariant}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        categoryBentoVariant: e.target.value as CategoryBentoVariantId,
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                  >
-                    <option value="4-tile-left-tall">4-Tile Left Tall Feature (Bagkin Storefront-02)</option>
-                    <option value="4-tile-right-tall">4-Tile Right Tall Lookbook Edit (Nyture Storefront-08)</option>
-                    <option value="6-tile-editorial-mosaic">6-Tile Pastel Editorial Mosaic (Kylie Storefront-04)</option>
-                    <option value="2-col-split-banners">2-Column Split Landscape Banners (Funio / Glowing)</option>
-                    <option value="thumbnail-strip">5-Column Category Thumbnail Row (Funio Top Categories)</option>
-                  </select>
-                </div>
-
-                {/* 7. Section Heading Style */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-1">
-                    7. Section Heading Decoration
-                  </label>
-                  <select
-                    value={draftConfig.sectionHeadingStyle}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        sectionHeadingStyle: e.target.value as SectionHeadingStyleId,
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                  >
-                    <option value="clean-centered">Clean Centered Heading (Glowing / Bagkin)</option>
-                    <option value="flanking-lines">Flanking Horizontal Lines ─── TITLE ─── (Nyture)</option>
-                    <option value="framed-box">Framed Rectangular Box [ BEST SELLERS ] (Orgamic)</option>
-                    <option value="left-with-link">Left Bold Title + Right Action Link (Stuffsus / Illuminate)</option>
-                  </select>
-                </div>
-
-                {/* 8. Trust Strip, Promo Countdown, Testimonials & Footer */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-bold text-gray-800 mb-1">
-                      8. Trust Strip
-                    </label>
-                    <select
-                      value={draftConfig.trustStripVariant}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          trustStripVariant: e.target.value as TrustStripVariantId,
-                        }))
-                      }
-                      className="w-full px-2.5 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                    >
-                      <option value="4-col-horizontal-icons">4-Col Icon Row (Luxora)</option>
-                      <option value="3-col-feature-cards">3-Col &quot;Why Choose Us&quot; (Homepage-01)</option>
-                      <option value="authentic-stamp-strip">Vintage Stamp Strip (Kylie)</option>
-                      <option value="none">Hidden</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-gray-800 mb-1">
-                      9. Promo & Story
-                    </label>
-                    <select
-                      value={draftConfig.promoDealVariant}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          promoDealVariant: e.target.value as PromoDealVariantId,
-                        }))
-                      }
-                      className="w-full px-2.5 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                    >
-                      <option value="countdown-banner">Flash Deal Countdown (Bagkin)</option>
-                      <option value="split-story-stats">Split Story + Stat Card (Homepage-01)</option>
-                      <option value="none">Hidden</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-gray-800 mb-1">
-                      10. Testimonials
-                    </label>
-                    <select
-                      value={draftConfig.testimonialsVariant}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          testimonialsVariant: e.target.value as TestimonialsVariantId,
-                        }))
-                      }
-                      className="w-full px-2.5 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                    >
-                      <option value="single-pull-quote">5-Star Pull Quote (Luxora)</option>
-                      <option value="numbered-3col">Numbered 3-Col Cards (Minim)</option>
-                      <option value="press-quote-grid">&quot;As Seen In&quot; Press Grid (Glowing)</option>
-                      <option value="none">Hidden</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-gray-800 mb-1">
-                      11. Footer Style
-                    </label>
-                    <select
-                      value={draftConfig.footerVariant}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          footerVariant: e.target.value as FooterVariantId,
-                        }))
-                      }
-                      className="w-full px-2.5 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                    >
-                      <option value="clean-4col">Clean 4-Column (Drexel / Bagkin)</option>
-                      <option value="dark-instagram-grid">Dark + 6-Tile IG Grid (Storefront-01)</option>
-                      <option value="minimal-single-row">Minimal Single Row (Minim)</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* 12. Social & Newsletter Variant */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-1">
-                    12. Social & VIP Opt-In Section
-                  </label>
-                  <select
-                    value={draftConfig.socialNewsletterVariant}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        socialNewsletterVariant: e.target.value as SocialNewsletterVariantId,
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white font-medium"
-                  >
-                    <option value="dark-rounded-card">Dark Rounded Card &quot;Ready to Get Our New Stuff?&quot; (Stuffsus)</option>
-                    <option value="instagram-strip-plus-minimal">6-Tile Shoppable Instagram Strip + Minimal Input (Bagkin)</option>
-                    <option value="inline-fomo-bar">Inline &quot;Fear of missing out&quot; Bar (Kylie)</option>
-                  </select>
-                </div>
-
-                {/* Section Visibility Toggles */}
-                <div className="pt-3 border-t border-gray-200">
-                  <p className="font-bold text-gray-800 mb-2">Toggle Section Visibility</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        { key: "showAnnouncementBar", label: "Top Announcement Bar" },
-                        { key: "showTrustStrip", label: "Trust & Value Strip" },
-                        { key: "showCategoryBento", label: "Category Bento Mosaic" },
-                        { key: "showFeaturedCarousel", label: "Featured / Recs Row" },
-                        { key: "showPromoDeal", label: "Flash Deal / Promo" },
-                        { key: "showBrandStory", label: "About / Brand Story" },
-                        { key: "showTestimonials", label: "Customer Reviews" },
-                        { key: "showSocialNewsletter", label: "Instagram & VIP Club" },
-                      ] as const
-                    ).map((item) => (
-                      <label
-                        key={item.key}
-                        className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 bg-gray-50 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={draftConfig.visibility[item.key]}
-                          onChange={(e) =>
-                            setDraftConfig((prev) => ({
-                              ...prev,
-                              visibility: {
-                                ...prev.visibility,
-                                [item.key]: e.target.checked,
-                              },
-                            }))
-                          }
-                          className="rounded border-gray-300"
                         />
-                        <span className="text-[11px] font-medium text-gray-700 truncate">
-                          {item.label}
-                        </span>
-                      </label>
-                    ))}
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-gray-900 mb-2">
+                      Catalog Storefront Presets (Starter & Dropshipper)
+                    </h3>
+                    <div className="space-y-2">
+                      {starterPresets.map((preset) => (
+                        <VariantOptionCard
+                          key={preset.id}
+                          selected={draftConfig.presetId === preset.id}
+                          title={preset.name}
+                          subtitle={preset.tagline}
+                          badge={preset.mockupReference}
+                          onClick={() => handleApplyPreset(preset.id)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* ===============================================================
-                TAB 3: THEME TOKENS (FONTS, SURFACE, ACCENT COLOR, GEOMETRY)
-               =============================================================== */}
-            {activeTab === "theme" && (
-              <div className="space-y-5 text-xs">
-                {/* Font Pairing */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-2">
-                    Typography Pairing
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        { id: "editorial-serif", label: "Editorial Serif", sample: "Jenahara / Bagkin" },
-                        { id: "modern-sans", label: "Modern Clean Sans", sample: "Guza / Stuffsus" },
-                        { id: "street-geometric", label: "Street Uppercase", sample: "Kylie / Constructor" },
-                        { id: "luxury-warm", label: "Warm Botanical", sample: "Glowing / Funio" },
-                      ] as const
-                    ).map((f) => (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() =>
+              {/* =============================================================
+                  TAB 3: THEME TOKENS & STYLING
+                 ============================================================= */}
+              {studioTab === "theme" && (
+                <div className="space-y-5 text-xs">
+                  <div>
+                    <label className="block font-bold text-gray-800 mb-2">
+                      Brand Primary Accent Color
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {ACCENT_COLOR_SWATCHES.map((swatch) => {
+                        const isSelected =
+                          draftConfig.theme.accentColor.toLowerCase() === swatch.hex.toLowerCase();
+                        return (
+                          <button
+                            key={swatch.hex}
+                            type="button"
+                            title={swatch.label}
+                            onClick={() =>
+                              setDraftConfig((prev) => ({
+                                ...prev,
+                                theme: { ...prev.theme, accentColor: swatch.hex },
+                              }))
+                            }
+                            className={`w-7 h-7 rounded-full border transition-transform cursor-pointer ${
+                              isSelected ? "scale-115 ring-2 ring-offset-2 ring-indigo-600" : ""
+                            }`}
+                            style={{ backgroundColor: swatch.hex }}
+                          />
+                        );
+                      })}
+                      <input
+                        type="color"
+                        value={draftConfig.theme.accentColor}
+                        onChange={(e) =>
                           setDraftConfig((prev) => ({
                             ...prev,
-                            theme: { ...prev.theme, fontPairing: f.id as FontPairingId },
+                            theme: { ...prev.theme, accentColor: e.target.value },
                           }))
                         }
-                        className={`p-3 rounded-xl border text-left cursor-pointer ${
-                          draftConfig.theme.fontPairing === f.id
-                            ? "border-gray-900 bg-gray-50 font-bold"
-                            : "border-gray-200 hover:border-gray-300"
-                        }`}
-                      >
-                        <div className="text-xs font-bold text-gray-900">{f.label}</div>
-                        <div className="text-[10px] text-gray-500 mt-0.5">{f.sample}</div>
-                      </button>
-                    ))}
+                        className="w-8 h-8 rounded-lg cursor-pointer border border-gray-200"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                {/* Surface Palette Mode */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-2">
-                    Page Surface Palette
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        { id: "light", label: "Crisp Studio White", bg: "#FFFFFF" },
-                        { id: "warm-cream", label: "Warm Alabaster Cream", bg: "#FAF8F5" },
-                        { id: "soft-sage", label: "Botanical Sage Mist", bg: "#F4F8F5" },
-                        { id: "dark-luxury", label: "Obsidian Dark Luxury", bg: "#141519" },
-                      ] as const
-                    ).map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() =>
-                          setDraftConfig((prev) => ({
-                            ...prev,
-                            theme: { ...prev.theme, surfaceMode: s.id as SurfaceModeId },
-                          }))
-                        }
-                        className={`p-2.5 rounded-xl border flex items-center gap-2.5 text-left cursor-pointer ${
-                          draftConfig.theme.surfaceMode === s.id
-                            ? "border-gray-900 bg-gray-50 font-bold"
-                            : "border-gray-200"
-                        }`}
-                      >
-                        <span
-                          className="w-5 h-5 rounded-full border border-gray-300 shrink-0"
-                          style={{ backgroundColor: s.bg }}
-                        />
-                        <span className="text-[11px] text-gray-800 truncate">{s.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Brand Accent Color */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-2">
-                    Brand Primary Accent Color
-                  </label>
-                  <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
-                    {ACCENT_COLOR_SWATCHES.map((swatch) => {
-                      const isSelected =
-                        draftConfig.theme.accentColor.toLowerCase() === swatch.hex.toLowerCase();
-                      return (
-                        <button
-                          key={swatch.hex}
-                          type="button"
-                          title={swatch.label}
+                  <div>
+                    <label className="block font-bold text-gray-800 mb-2">
+                      Typography Pairing
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          { id: "editorial-serif", label: "Editorial Serif", sub: "Playfair / Georgia" },
+                          { id: "modern-sans", label: "Modern Clean Sans", sub: "Inter / Geometric" },
+                          { id: "street-geometric", label: "Street Uppercase", sub: "Bold Display" },
+                          { id: "luxury-warm", label: "Warm Botanical", sub: "Soft Humanist" },
+                        ] as const
+                      ).map((f) => (
+                        <VariantOptionCard
+                          key={f.id}
+                          selected={draftConfig.theme.fontPairing === f.id}
+                          title={f.label}
+                          subtitle={f.sub}
                           onClick={() =>
                             setDraftConfig((prev) => ({
                               ...prev,
-                              theme: { ...prev.theme, accentColor: swatch.hex },
+                              theme: { ...prev.theme, fontPairing: f.id as FontPairingId },
                             }))
                           }
-                          className={`w-7 h-7 rounded-full border transition-transform cursor-pointer ${
-                            isSelected ? "scale-115 ring-2 ring-offset-2 ring-gray-900" : ""
-                          }`}
-                          style={{ backgroundColor: swatch.hex }}
                         />
-                      );
-                    })}
-                    <input
-                      type="color"
-                      value={draftConfig.theme.accentColor}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          theme: { ...prev.theme, accentColor: e.target.value },
-                        }))
-                      }
-                      className="w-8 h-8 rounded-lg cursor-pointer border border-gray-200"
-                      title="Custom Hex Color"
-                    />
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                {/* Corner Radius Geometry */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-2">
-                    Corner Radius & Button Geometry
-                  </label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {(
-                      [
-                        { id: "sharp", label: "Sharp 0px" },
-                        { id: "soft", label: "Soft 8px" },
-                        { id: "rounded", label: "Round 16px" },
-                        { id: "pill", label: "Pill 24px" },
-                      ] as const
-                    ).map((r) => (
-                      <button
-                        key={r.id}
-                        type="button"
-                        onClick={() =>
+                  <div>
+                    <label className="block font-bold text-gray-800 mb-2">
+                      Page Surface Mode
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          { id: "light", label: "Crisp White", sub: "#FFFFFF Studio" },
+                          { id: "warm-cream", label: "Warm Alabaster", sub: "#FAF8F5 Cream" },
+                          { id: "soft-sage", label: "Botanical Sage", sub: "#F8FAF8 Mist" },
+                          { id: "dark-luxury", label: "Obsidian Dark", sub: "#111215 Luxury" },
+                        ] as const
+                      ).map((s) => (
+                        <VariantOptionCard
+                          key={s.id}
+                          selected={draftConfig.theme.surfaceMode === s.id}
+                          title={s.label}
+                          subtitle={s.sub}
+                          onClick={() =>
+                            setDraftConfig((prev) => ({
+                              ...prev,
+                              theme: { ...prev.theme, surfaceMode: s.id as SurfaceModeId },
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-800 mb-2">
+                      Section Heading Style
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          { id: "clean-centered", label: "Clean Centered", sub: "Classic minimal" },
+                          { id: "flanking-lines", label: "Flanking Lines", sub: "─── TITLE ───" },
+                          { id: "framed-box", label: "Framed Box", sub: "[ BEST SELLERS ]" },
+                          { id: "left-with-link", label: "Left + Action Link", sub: "Title + View All →" },
+                        ] as const
+                      ).map((h) => (
+                        <VariantOptionCard
+                          key={h.id}
+                          selected={draftConfig.sectionHeadingStyle === h.id}
+                          title={h.label}
+                          subtitle={h.sub}
+                          onClick={() =>
+                            setDraftConfig((prev) => ({
+                              ...prev,
+                              sectionHeadingStyle: h.id as SectionHeadingStyleId,
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-gray-800 mb-1.5">
+                        Corner Radius
+                      </label>
+                      <select
+                        value={draftConfig.theme.borderRadius}
+                        onChange={(e) =>
                           setDraftConfig((prev) => ({
                             ...prev,
-                            theme: { ...prev.theme, borderRadius: r.id as BorderRadiusToken },
+                            theme: {
+                              ...prev.theme,
+                              borderRadius: e.target.value as BorderRadiusToken,
+                            },
                           }))
                         }
-                        className={`py-2 px-2 rounded-lg border text-center text-[11px] font-semibold cursor-pointer ${
-                          draftConfig.theme.borderRadius === r.id
-                            ? "bg-gray-900 text-white border-gray-900"
-                            : "bg-white text-gray-700 border-gray-200"
-                        }`}
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 font-semibold"
                       >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                        <option value="sharp">Sharp (0px)</option>
+                        <option value="soft">Soft (8px)</option>
+                        <option value="rounded">Rounded (16px)</option>
+                        <option value="pill">Pill (24px)</option>
+                      </select>
+                    </div>
 
-                {/* Product Card Image Backdrop */}
-                <div>
-                  <label className="block font-bold text-gray-800 mb-2">
-                    Product Card Studio Backdrop
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        { id: "studio-gray", label: "Studio Neutral Gray" },
-                        { id: "pastel-tint", label: "Multi-Color Pastel Tints" },
-                        { id: "pure-white", label: "Pure Crisp White" },
-                        { id: "warm-sand", label: "Editorial Warm Sand" },
-                      ] as const
-                    ).map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() =>
+                    <div>
+                      <label className="block font-bold text-gray-800 mb-1.5">
+                        Card Backdrop
+                      </label>
+                      <select
+                        value={draftConfig.theme.cardTone}
+                        onChange={(e) =>
                           setDraftConfig((prev) => ({
                             ...prev,
-                            theme: { ...prev.theme, cardTone: t.id as CardToneToken },
+                            theme: {
+                              ...prev.theme,
+                              cardTone: e.target.value as CardToneToken,
+                            },
                           }))
                         }
-                        className={`py-2 px-3 rounded-lg border text-left text-[11px] font-semibold cursor-pointer ${
-                          draftConfig.theme.cardTone === t.id
-                            ? "border-gray-900 bg-gray-50 font-bold"
-                            : "border-gray-200"
-                        }`}
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 font-semibold"
                       >
-                        {t.label}
-                      </button>
-                    ))}
+                        <option value="studio-gray">Studio Neutral Gray</option>
+                        <option value="pastel-tint">Multi-Color Pastel Tints</option>
+                        <option value="pure-white">Pure White</option>
+                        <option value="warm-sand">Editorial Warm Sand</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* ===============================================================
-                TAB 4: COPY, HEADLINES & HERO IMAGE
-               =============================================================== */}
-            {activeTab === "copy" && (
-              <div className="space-y-3.5 text-xs">
-                <div>
-                  <label className="block font-bold text-gray-700 mb-1">
-                    Top Announcement Bar Text
-                  </label>
-                  <input
-                    type="text"
-                    value={draftConfig.copy.announcementText}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        copy: { ...prev.copy, announcementText: e.target.value },
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-700 mb-1">
-                    Hero Overline / Subtitle
-                  </label>
-                  <input
-                    type="text"
-                    value={draftConfig.copy.heroSubtitle}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        copy: { ...prev.copy, heroSubtitle: e.target.value },
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-700 mb-1">
-                    Hero Display Headline
-                  </label>
-                  <input
-                    type="text"
-                    value={draftConfig.copy.heroTitle}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        copy: { ...prev.copy, heroTitle: e.target.value },
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-700 mb-1">
-                    Hero Description
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={draftConfig.copy.heroDescription}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        copy: { ...prev.copy, heroDescription: e.target.value },
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block font-bold text-gray-700 mb-1">
-                      Primary CTA Label
-                    </label>
-                    <input
-                      type="text"
-                      value={draftConfig.copy.heroPrimaryCta}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          copy: { ...prev.copy, heroPrimaryCta: e.target.value },
-                        }))
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-gray-700 mb-1">
-                      Secondary CTA Label
-                    </label>
-                    <input
-                      type="text"
-                      value={draftConfig.copy.heroSecondaryCta}
-                      onChange={(e) =>
-                        setDraftConfig((prev) => ({
-                          ...prev,
-                          copy: { ...prev.copy, heroSecondaryCta: e.target.value },
-                        }))
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-700 mb-1">
-                    Hero Banner Image URL
-                  </label>
-                  <input
-                    type="url"
-                    value={draftConfig.copy.heroImageUrl ?? ""}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        copy: { ...prev.copy, heroImageUrl: e.target.value },
-                      }))
-                    }
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-700 mb-1">
-                    Flash Deal / Promo Headline
-                  </label>
-                  <input
-                    type="text"
-                    value={draftConfig.copy.dealHeadline}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        copy: { ...prev.copy, dealHeadline: e.target.value },
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-700 mb-1">
-                    Brand Story Headline
-                  </label>
-                  <input
-                    type="text"
-                    value={draftConfig.copy.storyHeadline}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        copy: { ...prev.copy, storyHeadline: e.target.value },
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-700 mb-1">
-                    Newsletter / VIP Club Headline
-                  </label>
-                  <input
-                    type="text"
-                    value={draftConfig.copy.newsletterHeadline}
-                    onChange={(e) =>
-                      setDraftConfig((prev) => ({
-                        ...prev,
-                        copy: { ...prev.copy, newsletterHeadline: e.target.value },
-                      }))
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200"
-                  />
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* RIGHT LIVE INTERACTIVE CANVAS */}
-        <div className="xl:col-span-8 flex flex-col items-center">
+        {/* RIGHT INTERACTIVE LIVE PREVIEW CANVAS */}
+        <div className="w-full flex-1 min-w-0 flex flex-col items-center">
           <div
             className={`w-full transition-all duration-300 bg-white border border-gray-300 rounded-2xl shadow-xl overflow-hidden ${
-              viewport === "mobile" ? "max-w-[410px]" : "w-full"
+              viewport === "mobile"
+                ? "max-w-[390px]"
+                : viewport === "tablet"
+                  ? "max-w-[768px]"
+                  : "w-full"
             }`}
           >
-            {/* Browser Chrome Mock Bar */}
-            <div className="bg-gray-100 border-b border-gray-200 px-4 py-2.5 flex items-center justify-between gap-3">
+            {/* Browser Bar */}
+            <div className="bg-gray-100 border-b border-gray-200 px-3.5 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
               </div>
 
-              <div className="flex-1 max-w-md mx-auto px-3 py-1 rounded-md bg-white border border-gray-200 text-[11px] font-mono text-gray-600 truncate text-center">
-                {effectivePreviewConfig.mode === "FULL_WEBSITE"
-                  ? `https://${state.vendor.slug}.caterlog.shop`
-                  : `https://caterlog.shop/store/${state.vendor.slug}`}
+              <div className="flex-1 min-w-[140px] max-w-md mx-auto px-3 py-1 rounded-lg bg-white border border-gray-200 text-[11px] font-mono text-gray-600 truncate text-center">
+                {standaloneStorefrontUrl}
               </div>
 
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-xs bg-gray-200 text-gray-700">
-                {effectivePreviewConfig.mode === "FULL_WEBSITE"
-                  ? "Full Website"
-                  : "Storefront"}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-xs bg-indigo-100 text-indigo-800">
+                  {viewport === "mobile"
+                    ? "Mobile · 390px"
+                    : viewport === "tablet"
+                      ? "Tablet · 768px"
+                      : "Click Section to Edit"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setInspectorCollapsed((prev) => !prev)}
+                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-xs border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer"
+                >
+                  {inspectorCollapsed ? "Show Panel" : "Expand"}
+                </button>
+              </div>
             </div>
 
-            {/* Embedded Live StorefrontRenderer (100% same component as /store/[slug]) */}
-            <div className="max-h-[800px] overflow-y-auto">
+            <div className="max-h-[820px] overflow-y-auto">
               <StorefrontRenderer
                 vendor={{
                   id: state.vendor.id,
@@ -1211,6 +1758,19 @@ export function StorefrontView({
                 shippingZones={state.shippingZones}
                 discounts={state.discounts}
                 config={effectivePreviewConfig}
+                activePageOverride={activePreviewPage}
+                onActivePageChange={setActivePreviewPage}
+                isStudioMode
+                activeStudioSection={activeSection}
+                onSelectStudioSection={handleSelectSectionFromCanvas}
+                onOrderCompleted={async () => {
+                  try {
+                    const latest = await api.getState();
+                    onStateChange(latest);
+                  } catch {
+                    // ignore
+                  }
+                }}
               />
             </div>
           </div>

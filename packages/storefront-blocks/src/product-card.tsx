@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import type { Product } from "@/lib/types";
-import { resolveImageUrl } from "@/lib/api";
+import { useState } from "react";
+import type { StorefrontProduct } from "./types";
 import {
   resolveCardImageBackdrop,
   resolveHeadingFontStyle,
@@ -10,10 +9,11 @@ import {
   resolveSurfacePalette,
   type ProductCardVariantId,
   type StorefrontThemeTokens,
-} from "@/lib/storefront-presets";
+} from "./presets";
 import {
   computeSyntheticRating,
   extractProductSwatches,
+  resolveStorefrontImageUrl,
   StorefrontButton,
   StorefrontColorSwatches,
   StorefrontPrice,
@@ -21,13 +21,13 @@ import {
 } from "./primitives";
 
 export interface StorefrontProductCardProps {
-  product: Product;
+  product: StorefrontProduct;
   index: number;
   variant: ProductCardVariantId;
   theme: StorefrontThemeTokens;
-  onAddToCart: (product: Product) => void;
-  onBuyNow: (product: Product) => void;
-  onQuickView: (product: Product) => void;
+  onAddToCart: (product: StorefrontProduct) => void;
+  onBuyNow: (product: StorefrontProduct) => void;
+  onQuickView: (product: StorefrontProduct) => void;
 }
 
 export function StorefrontProductCard({
@@ -44,7 +44,7 @@ export function StorefrontProductCard({
   const cardRadius = resolveRadiusClass(theme.borderRadius, "card");
   const imgBackdrop = resolveCardImageBackdrop(theme.cardTone, index, palette.isDark);
   const imageUrl =
-    resolveImageUrl(product.primaryImageUrl) ||
+    resolveStorefrontImageUrl(product.primaryImageUrl) ||
     "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&q=80";
 
   const isOutOfStock = product.availableStock <= 0;
@@ -53,25 +53,20 @@ export function StorefrontProductCard({
   const ratingInfo = computeSyntheticRating(product, index);
   const categoryLabel = product.category || "Collection";
 
-  // ---------------------------------------------------------------------------
   // VARIANT 1: dual-action-rounded (Stuffsus Shoppage-01.jpg)
-  // Rounded gray image box + top-right category pill + title + star reviews + price
-  // + [Add to Cart] (outline pill) & [Buy Now] (solid dark/accent pill)
-  // ---------------------------------------------------------------------------
   if (variant === "dual-action-rounded") {
     return (
       <div
-        className="group flex flex-col transition-all duration-200"
+        className="group flex flex-col transition-all duration-200 min-w-0"
         style={{ color: palette.textPrimary }}
       >
         <div
           onClick={() => onQuickView(product)}
-          className={`relative aspect-square w-full overflow-hidden ${cardRadius} mb-3 cursor-pointer flex items-center justify-center p-4 transition-transform duration-300 group-hover:scale-[1.01]`}
+          className={`relative aspect-square w-full overflow-hidden ${cardRadius} mb-2.5 @sm:mb-3 cursor-pointer flex items-center justify-center p-2.5 @sm:p-4 transition-transform duration-300 group-hover:scale-[1.01]`}
           style={{ backgroundColor: imgBackdrop }}
         >
-          {/* Top-right category pill badge from Shoppage-01 */}
           <span
-            className="absolute top-3 right-3 z-10 px-2.5 py-1 text-[10px] font-semibold rounded-full shadow-2xs"
+            className="absolute top-2.5 right-2.5 z-10 px-2 @sm:px-2.5 py-0.5 @sm:py-1 text-[9px] @sm:text-[10px] font-semibold rounded-full shadow-2xs max-w-[70%] truncate"
             style={{
               backgroundColor: palette.cardSurfaceBg,
               color: palette.textSecondary,
@@ -81,7 +76,7 @@ export function StorefrontProductCard({
           </span>
 
           {isOutOfStock && (
-            <span className="absolute top-3 left-3 z-10 px-2.5 py-1 text-[10px] font-bold uppercase rounded-full bg-red-600 text-white">
+            <span className="absolute top-2.5 left-2.5 z-10 px-2 py-0.5 text-[9px] @sm:text-[10px] font-bold uppercase rounded-full bg-red-600 text-white">
               Sold Out
             </span>
           )}
@@ -94,14 +89,11 @@ export function StorefrontProductCard({
           />
         </div>
 
-        <div
-          onClick={() => onQuickView(product)}
-          className="cursor-pointer mb-1"
-        >
-          <h3 className="text-sm sm:text-base font-bold truncate">{product.name}</h3>
+        <div onClick={() => onQuickView(product)} className="cursor-pointer mb-1 min-w-0">
+          <h3 className="text-xs @sm:text-sm @lg:text-base font-bold truncate">{product.name}</h3>
         </div>
 
-        <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-1 mb-2.5 @sm:mb-3">
           <StorefrontStarRating
             rating={ratingInfo.rating}
             reviewsCount={ratingInfo.reviewsCount}
@@ -112,20 +104,20 @@ export function StorefrontProductCard({
             priceFormatted={product.basePriceFormatted}
             priceNaira={product.basePriceNaira}
             textColor={palette.textPrimary}
-            size="md"
+            size="sm"
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-2 mt-auto">
+        <div className="grid grid-cols-1 @sm:grid-cols-2 gap-1.5 @sm:gap-2 mt-auto">
           <StorefrontButton
             theme={theme}
             variant="outline"
             size="xs"
             disabled={isOutOfStock}
             onClick={() => onAddToCart(product)}
-            className="!rounded-full font-semibold"
+            className="!rounded-full font-semibold text-[11px] py-1.5 whitespace-nowrap"
           >
-            Add to Cart
+            Add to Bag
           </StorefrontButton>
           <StorefrontButton
             theme={theme}
@@ -133,7 +125,7 @@ export function StorefrontProductCard({
             size="xs"
             disabled={isOutOfStock}
             onClick={() => onBuyNow(product)}
-            className="!rounded-full font-semibold"
+            className="!rounded-full font-semibold text-[11px] py-1.5 whitespace-nowrap"
           >
             {isOutOfStock ? "Sold Out" : "Buy Now"}
           </StorefrontButton>
@@ -142,28 +134,24 @@ export function StorefrontProductCard({
     );
   }
 
-  // ---------------------------------------------------------------------------
   // VARIANT 2: pastel-floating-cart (Constructor Shoppage-03.jpg)
-  // Pastel tinted top image area + floating circular white cart button straddling
-  // bottom-right of image + white card body with title, category & price
-  // ---------------------------------------------------------------------------
   if (variant === "pastel-floating-cart") {
     const pastelBg = resolveCardImageBackdrop("pastel-tint", index, palette.isDark);
     return (
       <div
         onClick={() => onQuickView(product)}
-        className={`group flex flex-col overflow-hidden ${cardRadius} border transition-all duration-200 hover:shadow-md cursor-pointer`}
+        className={`group flex flex-col overflow-hidden ${cardRadius} border transition-all duration-200 hover:shadow-md cursor-pointer min-w-0`}
         style={{
           backgroundColor: palette.cardSurfaceBg,
           borderColor: palette.borderSubtle,
         }}
       >
         <div
-          className="relative aspect-[4/3] w-full flex items-center justify-center p-5 overflow-hidden"
+          className="relative aspect-[4/3] w-full flex items-center justify-center p-3 @sm:p-5 overflow-hidden"
           style={{ backgroundColor: pastelBg }}
         >
           {isOutOfStock && (
-            <span className="absolute top-3 left-3 z-10 px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full bg-gray-900 text-white">
+            <span className="absolute top-2.5 left-2.5 z-10 px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full bg-gray-900 text-white">
               Sold Out
             </span>
           )}
@@ -175,8 +163,7 @@ export function StorefrontProductCard({
           />
         </div>
 
-        <div className="relative px-4 pt-4 pb-4 flex flex-col flex-1">
-          {/* Floating circular white cart button straddling the seam (Shoppage-03) */}
+        <div className="relative px-3 @sm:px-4 pt-3.5 pb-3.5 @sm:pt-4 @sm:pb-4 flex flex-col flex-1 min-w-0">
           <button
             type="button"
             disabled={isOutOfStock}
@@ -185,23 +172,25 @@ export function StorefrontProductCard({
               onAddToCart(product);
             }}
             title={isOutOfStock ? "Out of stock" : "Add to Bag"}
-            className="absolute -top-5 right-4 w-10 h-10 rounded-full bg-white text-gray-900 shadow-md border border-gray-100 flex items-center justify-center hover:scale-110 transition-transform cursor-pointer disabled:opacity-40"
+            className="absolute -top-4 @sm:-top-5 right-3 @sm:right-4 w-8 h-8 @sm:w-10 @sm:h-10 rounded-full bg-white text-gray-900 shadow-md border border-gray-100 flex items-center justify-center hover:scale-110 transition-transform cursor-pointer disabled:opacity-40"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5 @sm:w-4 @sm:h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
           </button>
 
           <h3
-            className="text-sm font-bold truncate pr-10 mb-2"
+            className="text-xs @sm:text-sm font-bold truncate pr-8 @sm:pr-10 mb-1.5 @sm:mb-2"
             style={{ color: palette.textPrimary }}
           >
             {product.name}
           </h3>
 
-          <div className="flex items-center justify-between text-xs mt-auto pt-1">
-            <span style={{ color: palette.textMuted }}>{categoryLabel}</span>
-            <span className="font-bold" style={{ color: palette.textPrimary }}>
+          <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] @sm:text-xs mt-auto pt-1">
+            <span className="truncate" style={{ color: palette.textMuted }}>
+              {categoryLabel}
+            </span>
+            <span className="font-bold shrink-0" style={{ color: palette.textPrimary }}>
               {product.basePriceFormatted}
             </span>
           </div>
@@ -210,16 +199,12 @@ export function StorefrontProductCard({
     );
   }
 
-  // ---------------------------------------------------------------------------
   // VARIANT 3: lookbook-gradient-overlay (Jenahara Storefront-05.jpg)
-  // Tall 3:4 portrait rounded card with bottom white/dark fade overlay holding
-  // product name, bold price on the left, and quick cart icon on the right
-  // ---------------------------------------------------------------------------
   if (variant === "lookbook-gradient-overlay") {
     return (
       <div
         onClick={() => onQuickView(product)}
-        className={`group relative aspect-[3/4] w-full overflow-hidden ${cardRadius} cursor-pointer shadow-xs hover:shadow-lg transition-all duration-300`}
+        className={`group relative aspect-[3/4] w-full overflow-hidden ${cardRadius} cursor-pointer shadow-xs hover:shadow-lg transition-all duration-300 min-w-0`}
         style={{ backgroundColor: imgBackdrop }}
       >
         <img
@@ -230,21 +215,20 @@ export function StorefrontProductCard({
         />
 
         {isOutOfStock ? (
-          <span className="absolute top-3 left-3 z-10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-black/80 text-white">
+          <span className="absolute top-2.5 left-2.5 z-10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-black/80 text-white">
             Out of Stock
           </span>
         ) : (
           product.variants &&
           product.variants.length > 0 && (
-            <span className="absolute top-3 left-3 z-10 px-2.5 py-1 text-[10px] font-medium rounded-full bg-white/85 backdrop-blur-xs text-gray-900">
+            <span className="absolute top-2.5 left-2.5 z-10 px-2 py-0.5 text-[10px] font-medium rounded-full bg-white/85 backdrop-blur-xs text-gray-900">
               {product.variants.length} Options
             </span>
           )
         )}
 
-        {/* Bottom gradient overlay matching Storefront-05 Jenahara */}
         <div
-          className="absolute inset-x-0 bottom-0 pt-14 pb-4 px-4 flex items-end justify-between gap-3"
+          className="absolute inset-x-0 bottom-0 pt-12 pb-3 @sm:pb-4 px-3 @sm:px-4 flex items-end justify-between gap-2"
           style={{
             background: palette.isDark
               ? "linear-gradient(to top, rgba(17,18,21,0.95) 20%, rgba(17,18,21,0.55) 65%, transparent 100%)"
@@ -253,13 +237,13 @@ export function StorefrontProductCard({
         >
           <div className="min-w-0">
             <h3
-              className="text-sm sm:text-base font-medium truncate"
+              className="text-xs @sm:text-sm @lg:text-base font-medium truncate"
               style={{ ...headingFont, color: palette.textPrimary }}
             >
               {product.name}
             </h3>
             <p
-              className="text-sm sm:text-base font-extrabold leading-tight mt-0.5"
+              className="text-xs @sm:text-sm @lg:text-base font-extrabold leading-tight mt-0.5"
               style={{ color: palette.textPrimary }}
             >
               {product.basePriceFormatted}
@@ -273,14 +257,14 @@ export function StorefrontProductCard({
               e.stopPropagation();
               onAddToCart(product);
             }}
-            aria-label="Add to Cart"
-            className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-transform hover:scale-110 cursor-pointer disabled:opacity-40"
+            aria-label="Add to Bag"
+            className="shrink-0 w-8 h-8 @sm:w-9 @sm:h-9 rounded-full flex items-center justify-center transition-transform hover:scale-110 cursor-pointer disabled:opacity-40"
             style={{
               backgroundColor: palette.textPrimary,
               color: palette.pageBg,
             }}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5 @sm:w-4 @sm:h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
           </button>
@@ -289,21 +273,17 @@ export function StorefrontProductCard({
     );
   }
 
-  // ---------------------------------------------------------------------------
   // VARIANT 4: minimal-swatch-studio (Guza Storefront-06, Ugmonk Storefront-07, Bagkin Storefront-02)
-  // Tall clean studio card, quick-add hover bar, left-aligned title, price,
-  // and interactive color swatch dots directly below
-  // ---------------------------------------------------------------------------
   if (variant === "minimal-swatch-studio") {
     return (
-      <div className="group flex flex-col">
+      <div className="group flex flex-col min-w-0">
         <div
           onClick={() => onQuickView(product)}
-          className={`relative aspect-[4/5] w-full overflow-hidden ${cardRadius} mb-3 cursor-pointer`}
+          className={`relative aspect-[4/5] w-full overflow-hidden ${cardRadius} mb-2.5 @sm:mb-3 cursor-pointer`}
           style={{ backgroundColor: imgBackdrop }}
         >
           {isOutOfStock && (
-            <span className="absolute top-3 left-3 z-10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider bg-black text-white">
+            <span className="absolute top-2.5 left-2.5 z-10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider bg-black text-white">
               Sold Out
             </span>
           )}
@@ -314,29 +294,25 @@ export function StorefrontProductCard({
             loading="lazy"
           />
 
-          {/* Subtle hover quick-add bar */}
           {!isOutOfStock && (
-            <div className="absolute inset-x-3 bottom-3 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200 flex gap-1.5">
+            <div className="absolute inset-x-2.5 bottom-2.5 opacity-100 @lg:opacity-0 @lg:translate-y-2 @lg:group-hover:opacity-100 @lg:group-hover:translate-y-0 transition-all duration-200 flex gap-1.5">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onAddToCart(product);
                 }}
-                className="flex-1 py-2 px-3 text-[11px] font-semibold uppercase tracking-wider bg-white/95 text-gray-900 shadow-md hover:bg-black hover:text-white transition-colors cursor-pointer"
+                className="flex-1 py-1.5 @sm:py-2 px-2.5 text-[10px] @sm:text-[11px] font-semibold uppercase tracking-wider bg-white/95 text-gray-900 shadow-md hover:bg-black hover:text-white transition-colors cursor-pointer truncate"
               >
-                + Quick Add
+                + Add to Bag
               </button>
             </div>
           )}
         </div>
 
-        <div
-          onClick={() => onQuickView(product)}
-          className="cursor-pointer"
-        >
+        <div onClick={() => onQuickView(product)} className="cursor-pointer min-w-0">
           <h3
-            className="text-xs sm:text-sm font-semibold truncate"
+            className="text-xs @sm:text-sm font-semibold truncate"
             style={{ color: palette.textPrimary }}
           >
             {product.name}
@@ -361,22 +337,17 @@ export function StorefrontProductCard({
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // VARIANT 5: boutique-badged (Drexel Shoppage-02, Funio Storefront-09, Glowing Storefront-12, Luxora)
-  // Studio frame with corner badge (HOT / SALE / -15%), star rating, centered or
-  // clean title, compare-at price, and full-width or underlined ADD TO CART CTA
-  // ---------------------------------------------------------------------------
+  // VARIANT 5: boutique-badged (Drexel Shoppage-02, Funio Storefront-09, Glowing Storefront-12)
   const badgeType = index % 3 === 0 ? "HOT" : index % 3 === 1 ? "-15%" : "NEW";
   return (
-    <div className="group flex flex-col">
+    <div className="group flex flex-col min-w-0">
       <div
         onClick={() => onQuickView(product)}
-        className={`relative aspect-square w-full overflow-hidden ${cardRadius} mb-3.5 cursor-pointer`}
+        className={`relative aspect-square w-full overflow-hidden ${cardRadius} mb-3 cursor-pointer`}
         style={{ backgroundColor: imgBackdrop }}
       >
-        {/* Top corner badge */}
         <span
-          className="absolute top-3 left-3 z-10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+          className="absolute top-2.5 left-2.5 z-10 px-2 @sm:px-2.5 py-0.5 text-[9px] @sm:text-[10px] font-bold uppercase tracking-wider"
           style={{
             backgroundColor:
               badgeType === "-15%"
@@ -395,7 +366,6 @@ export function StorefrontProductCard({
           {isOutOfStock ? "SOLD OUT" : badgeType}
         </span>
 
-        {/* Top-right wishlist / quick-view icon (Illuminate & SA) */}
         <button
           type="button"
           onClick={(e) => {
@@ -403,7 +373,7 @@ export function StorefrontProductCard({
             onQuickView(product);
           }}
           title="Quick View"
-          className="absolute top-3 right-3 z-10 w-7 h-7 rounded-full bg-white/85 text-gray-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-2xs"
+          className="absolute top-2.5 right-2.5 z-10 w-7 h-7 rounded-full bg-white/85 text-gray-800 flex items-center justify-center opacity-100 @lg:opacity-0 @lg:group-hover:opacity-100 transition-opacity cursor-pointer shadow-2xs"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -419,16 +389,16 @@ export function StorefrontProductCard({
         />
       </div>
 
-      <div className="text-center flex flex-col items-center flex-1">
+      <div className="text-center flex flex-col items-center flex-1 min-w-0">
         <p
-          className="text-[10px] font-semibold uppercase tracking-[0.18em] mb-1"
+          className="text-[9px] @sm:text-[10px] font-semibold uppercase tracking-[0.18em] mb-1 truncate max-w-full"
           style={{ color: palette.textMuted }}
         >
           {categoryLabel}
         </p>
         <h3
           onClick={() => onQuickView(product)}
-          className="text-xs sm:text-sm font-bold uppercase tracking-wide truncate max-w-full cursor-pointer mb-1"
+          className="text-xs @sm:text-sm font-bold uppercase tracking-wide truncate max-w-full cursor-pointer mb-1"
           style={{ color: palette.textPrimary }}
         >
           {product.name}
@@ -438,14 +408,14 @@ export function StorefrontProductCard({
           <StorefrontStarRating rating={ratingInfo.rating} mutedColor={palette.textMuted} />
         </div>
 
-        <div className="mb-3">
+        <div className="mb-2.5 @sm:mb-3">
           <StorefrontPrice
             priceFormatted={product.basePriceFormatted}
             priceNaira={product.basePriceNaira}
             showCompareAt={badgeType === "-15%"}
             textColor={palette.textPrimary}
             mutedColor={palette.textMuted}
-            size="md"
+            size="sm"
           />
         </div>
 
@@ -455,9 +425,9 @@ export function StorefrontProductCard({
           size="xs"
           disabled={isOutOfStock}
           onClick={() => onAddToCart(product)}
-          className="mt-auto uppercase tracking-wider text-[11px] px-5"
+          className="mt-auto uppercase tracking-wider text-[10px] @sm:text-[11px] px-4 @sm:px-5 w-full @sm:w-auto"
         >
-          {isOutOfStock ? "Out of Stock" : "Add to Cart"}
+          {isOutOfStock ? "Out of Stock" : "Add to Bag"}
         </StorefrontButton>
       </div>
     </div>

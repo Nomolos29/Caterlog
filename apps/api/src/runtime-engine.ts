@@ -3339,6 +3339,10 @@ export class CaterlogStage1Engine {
     cartItems?: RuntimeCartItem[];
     shippingZone: RuntimeShippingZone;
     discountCode?: string;
+    deliveryAddress?: string;
+    deliveryLandmark?: string;
+    alternatePhone?: string;
+    salesChannel?: RuntimeOrder["salesChannel"];
   }): Promise<RuntimeOrder | undefined> {
     const rawCart: RuntimeCartItem[] =
       params.cartItems && params.cartItems.length > 0
@@ -3496,7 +3500,11 @@ export class CaterlogStage1Engine {
       resellerShareKobo: splitResolution?.resellerShareKobo ?? pricing.totalAmountKobo,
       platformFeeKobo: splitResolution?.platformFeeKobo ?? 0n,
       splitSettlementStatus: splitResolution?.isDropship ? "PENDING" : "NOT_APPLICABLE",
+      deliveryAddress: params.deliveryAddress,
+      deliveryLandmark: params.deliveryLandmark,
+      alternatePhone: params.alternatePhone,
       salesChannel:
+        params.salesChannel ??
         this.buyerSessions.get(params.buyerPhone)?.sourceChannel ??
         this.activeSourceChannel ??
         "WHATSAPP",
@@ -7251,31 +7259,49 @@ export class CaterlogStage1Engine {
       cartItems,
       shippingZone: matchedZone,
       discountCode: input.discountCode?.trim() || undefined,
+      deliveryAddress: input.deliveryAddress?.trim() || undefined,
+      deliveryLandmark: input.deliveryLandmark?.trim() || undefined,
+      alternatePhone: input.alternatePhone?.trim() || undefined,
+      salesChannel: "WEB_STOREFRONT",
     });
 
     if (!order) {
       throw new Error("Could not reserve stock for one or more items in your bag. Please check available stock.");
     }
 
-    order.salesChannel = "WEB_STOREFRONT";
-    if (input.deliveryAddress?.trim()) {
-      order.deliveryAddress = input.deliveryAddress.trim();
-    }
-    if (input.deliveryLandmark?.trim()) {
-      order.deliveryLandmark = input.deliveryLandmark.trim();
-    }
-    if (input.alternatePhone?.trim()) {
-      order.alternatePhone = input.alternatePhone.trim();
-    }
+    this.notifications.unshift({
+      id: `notif-web-${order.shortCode}-${Date.now()}`,
+      notificationKey: `notif-web-order-${order.shortCode}`,
+      title: `New Website Order #${order.shortCode}`,
+      message: `${input.buyerName.trim()} (${normalizedPhone}) placed a website order for ${order.productName} (${formatNaira(order.totalAmountKobo)}).`,
+      category: "ORDERS",
+      isRead: false,
+      isDismissed: false,
+      linkText: "View Customer & Order",
+      targetView: "customers",
+      targetRef: order.shortCode,
+      createdAt: new Date(),
+    });
 
-    await this.persistNow("saveWebStorefrontOrderMeta", () =>
-      this.persistence.saveOrder(order)
+    this.recordAuditEvent(
+      "WEB_STOREFRONT_ORDER_CREATED",
+      "BUYER_WEB_STOREFRONT",
+      "ORDER",
+      order.shortCode,
+      {
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        totalAmountKobo: order.totalAmountKobo.toString(),
+        deliveryAddress: order.deliveryAddress,
+      }
     );
+
     await this.broadcastStateChange();
 
     return {
       orderShortCode: order.shortCode,
       receipt: this.getPublicOrderReceipt(order.shortCode),
+      state: this.serializeState(),
     };
   }
 

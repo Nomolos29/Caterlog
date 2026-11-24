@@ -4,16 +4,19 @@ import { EmptyState } from "../ui/empty-state";
 
 interface CustomerProfile {
   id: string;
+  key: string;
   name: string;
   phone: string;
   email: string;
   location: string;
   firstOrderDate: string;
   lastOrderDate: string;
+  lastOrderTimestamp: number;
   orderCount: number;
   totalSpentNaira: number;
   totalSpentFormatted: string;
   tag: "VIP" | "Repeat" | "New";
+  hasWebsiteOrders: boolean;
   notes?: string;
   orders: OrderItem[];
 }
@@ -36,61 +39,75 @@ export function CustomersView({
   const [customerNotes, setCustomerNotes] = useState<Record<string, string>>({});
   const [newNoteInput, setNewNoteInput] = useState("");
 
-  // Aggregate customers solely from real orders
+  // Aggregate customers from real orders (chronological pass -> sorted most-recent first)
   const customers: CustomerProfile[] = useMemo(() => {
     const customerMap = new Map<string, CustomerProfile>();
 
-    // Process actual orders
-    for (const o of orders) {
+    // Sort oldest -> newest so firstOrderDate is first and lastOrderDate/location reflect the latest purchase
+    const chronological = [...orders].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+
+    for (const o of chronological) {
       const phone = o.customerPhone?.trim();
       if (!phone) continue;
-      const existing = customerMap.get(phone);
+      const cleanName = (o.customerName || "Customer").trim();
+      const customerKey = `${phone}::${cleanName.toLowerCase()}`;
+      const existing = customerMap.get(customerKey) ?? customerMap.get(phone);
+      const orderTs = new Date(o.createdAt).getTime() || Date.now();
+      const dateLabel = new Date(o.createdAt).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+      const isWebOrder = o.salesChannel === "WEB_STOREFRONT";
+      const locationLabel = o.deliveryAddress || o.shippingZoneName || "Nigeria";
+
       if (existing) {
         existing.orderCount += 1;
         existing.totalSpentNaira += o.totalAmountNaira;
         existing.totalSpentFormatted = `₦${existing.totalSpentNaira.toLocaleString()}`;
-        existing.orders.push(o);
-        existing.lastOrderDate = new Date(o.createdAt).toLocaleDateString("en-GB", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        });
+        existing.orders.unshift(o);
+        existing.name = cleanName || existing.name;
+        existing.location = locationLabel;
+        existing.lastOrderDate = dateLabel;
+        existing.lastOrderTimestamp = Math.max(existing.lastOrderTimestamp, orderTs);
+        if (isWebOrder) existing.hasWebsiteOrders = true;
         if (existing.orderCount > 3) existing.tag = "VIP";
         else if (existing.orderCount > 1) existing.tag = "Repeat";
       } else {
-        customerMap.set(phone, {
+        customerMap.set(customerKey, {
           id: `cust-${customerMap.size + 1}`,
-          name: o.customerName || "WhatsApp Customer",
+          key: customerKey,
+          name: cleanName,
           phone: o.customerPhone,
-          email: o.customerName
-            ? `${o.customerName.toLowerCase().replace(/\s+/g, ".")}@example.com`
-            : "customer@whatsapp.buyer",
-          location: o.shippingZoneName || "Nigeria",
+          email: cleanName
+            ? `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@buyer.caterlog.shop`
+            : "customer@buyer.caterlog.shop",
+          location: locationLabel,
           tag: "New",
-          firstOrderDate: new Date(o.createdAt).toLocaleDateString("en-GB", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          }),
-          lastOrderDate: new Date(o.createdAt).toLocaleDateString("en-GB", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          }),
+          firstOrderDate: dateLabel,
+          lastOrderDate: dateLabel,
+          lastOrderTimestamp: orderTs,
           orderCount: 1,
           totalSpentNaira: o.totalAmountNaira,
           totalSpentFormatted: o.totalAmountFormatted,
+          hasWebsiteOrders: isWebOrder,
           orders: [o],
         });
       }
     }
 
-    return Array.from(customerMap.values());
+    return Array.from(customerMap.values()).sort(
+      (a, b) => b.lastOrderTimestamp - a.lastOrderTimestamp
+    );
   }, [orders]);
 
   // Dynamically derive selectedCustomer so updates to orders/totals instantly reflect
   const selectedCustomer = selectedCustomerPhone
-    ? customers.find((c) => c.phone === selectedCustomerPhone) ?? null
+    ? customers.find(
+        (c) => c.key === selectedCustomerPhone || c.phone === selectedCustomerPhone
+      ) ?? null
     : null;
 
   // Filtered list
@@ -265,7 +282,14 @@ export function CustomersView({
                               {c.name.charAt(0)}
                             </div>
                             <div>
-                              <div className="font-semibold text-gray-900 text-xs">{c.name}</div>
+                              <div className="font-semibold text-gray-900 text-xs flex items-center gap-1.5">
+                                <span>{c.name}</span>
+                                {c.hasWebsiteOrders && (
+                                  <span className="px-1.5 py-0.2 rounded-xs bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-bold uppercase">
+                                    Website
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-[11px] text-gray-400">{c.email}</div>
                             </div>
                           </div>
@@ -305,7 +329,7 @@ export function CustomersView({
                               <span>WA</span>
                             </a>
                             <button
-                              onClick={() => setSelectedCustomerPhone(c.phone)}
+                              onClick={() => setSelectedCustomerPhone(c.key)}
                               className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
                             >
                               Profile

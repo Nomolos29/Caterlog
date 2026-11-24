@@ -6,6 +6,7 @@ const detached = process.platform !== "win32";
 const children = [
   spawn(npm, ["run", "dev:api"], { stdio: "inherit", detached }),
   spawn(npm, ["run", "dev:dashboard"], { stdio: "inherit", detached }),
+  spawn(npm, ["run", "dev:storefront"], { stdio: "inherit", detached }),
 ];
 
 let shuttingDown = false;

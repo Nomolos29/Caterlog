@@ -1,8 +1,12 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import type { Discount, Product, ShippingZone } from "@/lib/types";
-import { resolveImageUrl } from "@/lib/api";
+import type {
+  StorefrontActivePage,
+  StorefrontDiscount,
+  StorefrontProduct,
+  StorefrontShippingZone,
+} from "./types";
 import {
   resolveHeadingFontStyle,
   resolveRadiusClass,
@@ -15,16 +19,12 @@ import {
   type StorefrontThemeTokens,
   type TestimonialsVariantId,
   type TrustStripVariantId,
-} from "@/lib/storefront-presets";
-import type { StorefrontActivePage } from "./header-section";
-import { StorefrontButton, StorefrontSectionHeading } from "./primitives";
-
-// ---------------------------------------------------------------------------
-// 1. TRUST & VALUE PROPOSITION STRIP SECTION
-//    - 4-col-horizontal-icons (Luxora Websitelinkmockup & Glowing Storefront-12)
-//    - 3-col-feature-cards (Homepage-01 "Why Choose Us?" & Orgamic Storefront-13)
-//    - authentic-stamp-strip (Kylie Storefront-04 & Homepage-01 Partner Strip)
-// ---------------------------------------------------------------------------
+} from "./presets";
+import {
+  resolveStorefrontImageUrl,
+  StorefrontButton,
+  StorefrontSectionHeading,
+} from "./primitives";
 
 export function StorefrontTrustStripSection({
   variant,
@@ -40,7 +40,7 @@ export function StorefrontTrustStripSection({
   headingStyle: SectionHeadingStyleId;
   isVerified: boolean;
   cacNumber?: string;
-  shippingZones: ShippingZone[];
+  shippingZones: StorefrontShippingZone[];
   reservationTtlMinutes: number;
 }) {
   if (variant === "none") return null;
@@ -76,7 +76,7 @@ export function StorefrontTrustStripSection({
     },
     {
       title: `${reservationTtlMinutes}-Min Stock Lock`,
-      subtitle: "Your items are held atomically while you pay",
+      subtitle: "Your items are held atomically while you checkout",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.6} viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -84,8 +84,8 @@ export function StorefrontTrustStripSection({
       ),
     },
     {
-      title: "Protected Escrow Checkout",
-      subtitle: "Instant Monnify Virtual Account & WhatsApp receipt",
+      title: "Protected Web Checkout",
+      subtitle: "Instant Bank Transfer & Card payments verified in real time",
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.6} viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -94,21 +94,20 @@ export function StorefrontTrustStripSection({
     },
   ];
 
-  // VARIANT 1: 3-col-feature-cards (Homepage-01.jpg "WHY CHOOSE US?" & Orgamic Storefront-13)
   if (variant === "3-col-feature-cards") {
     return (
-      <section className="max-w-7xl mx-auto px-4 sm:px-8 py-14">
+      <section className="max-w-7xl mx-auto px-3.5 @sm:px-6 @lg:px-8 py-10 @sm:py-14">
         <StorefrontSectionHeading
           title="WHY CHOOSE US?"
           subtitle="Every order is backed by verified inventory reservation, protected settlement, and live tracking."
           styleVariant={headingStyle}
           theme={theme}
         />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-2">
+        <div className="grid grid-cols-1 @md:grid-cols-3 gap-6 @sm:gap-8 pt-2">
           {items.slice(0, 3).map((item, idx) => (
-            <div key={idx} className="text-center flex flex-col items-center px-4">
+            <div key={idx} className="text-center flex flex-col items-center px-3 @sm:px-4">
               <div
-                className="w-14 h-14 rounded-full flex items-center justify-center mb-4 border"
+                className="w-12 h-12 @sm:w-14 @sm:h-14 rounded-full flex items-center justify-center mb-3.5 @sm:mb-4 border"
                 style={{
                   backgroundColor: palette.sectionAltBg,
                   borderColor: palette.borderSubtle,
@@ -118,7 +117,7 @@ export function StorefrontTrustStripSection({
                 {item.icon}
               </div>
               <h3
-                className="text-sm sm:text-base font-bold mb-1.5"
+                className="text-sm @sm:text-base font-bold mb-1.5"
                 style={{ ...headingFont, color: palette.textPrimary }}
               >
                 {item.title}
@@ -133,34 +132,33 @@ export function StorefrontTrustStripSection({
     );
   }
 
-  // VARIANT 2: authentic-stamp-strip (Kylie Storefront-04 & Homepage-01 logo bar)
   if (variant === "authentic-stamp-strip") {
     const stamps = [
       "CAC VERIFIED",
       "MONNIFY ESCROW",
       "SHIPBUBBLE LOGISTICS",
-      "WHATSAPP CO-PILOT",
+      "INSTANT CHECKOUT",
       "AUTHENTIC STOCK",
     ];
     return (
       <section
-        className="border-y py-7"
+        className="border-y py-5 @sm:py-7"
         style={{
           backgroundColor: palette.pageBg,
           borderColor: palette.borderSubtle,
         }}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 flex flex-wrap items-center justify-around gap-6">
+        <div className="max-w-7xl mx-auto px-3.5 @sm:px-6 @lg:px-8 flex flex-wrap items-center justify-center @md:justify-around gap-3 @sm:gap-5">
           {stamps.map((stamp) => (
             <div
               key={stamp}
-              className="px-4 py-2 border-2 border-dashed text-center select-none opacity-70 hover:opacity-100 transition-opacity"
+              className="px-3 @sm:px-4 py-1.5 @sm:py-2 border-2 border-dashed text-center select-none opacity-75 hover:opacity-100 transition-opacity"
               style={{
                 borderColor: palette.textMuted,
                 color: palette.textPrimary,
               }}
             >
-              <span className="text-[10px] sm:text-xs font-extrabold tracking-[0.22em] uppercase">
+              <span className="text-[10px] @sm:text-xs font-extrabold tracking-[0.18em] @sm:tracking-[0.22em] uppercase">
                 ★ {stamp} ★
               </span>
             </div>
@@ -170,20 +168,19 @@ export function StorefrontTrustStripSection({
     );
   }
 
-  // VARIANT 3 (Default): 4-col-horizontal-icons (Luxora Websitelinkmockup & Glowing Storefront-12)
   return (
     <section
-      className="border-b py-8"
+      className="border-b py-6 @sm:py-8"
       style={{
         backgroundColor: palette.pageBg,
         borderColor: palette.borderSubtle,
       }}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="max-w-7xl mx-auto px-3.5 @sm:px-6 @lg:px-8 grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-4 gap-4 @sm:gap-6">
         {items.map((item, idx) => (
-          <div key={idx} className="flex items-start gap-3.5">
+          <div key={idx} className="flex items-start gap-3">
             <div
-              className="shrink-0 p-2.5 rounded-xl border"
+              className="shrink-0 p-2 @sm:p-2.5 rounded-xl border"
               style={{
                 backgroundColor: palette.sectionAltBg,
                 borderColor: palette.borderSubtle,
@@ -192,7 +189,7 @@ export function StorefrontTrustStripSection({
             >
               {item.icon}
             </div>
-            <div>
+            <div className="min-w-0">
               <h3
                 className="text-xs font-extrabold uppercase tracking-wider"
                 style={{ color: palette.textPrimary }}
@@ -210,12 +207,6 @@ export function StorefrontTrustStripSection({
   );
 }
 
-// ---------------------------------------------------------------------------
-// 2. PROMO DEAL COUNTDOWN & BRAND STORY SECTION
-//    - countdown-banner (Bagkin Storefront-02.jpg: Deal of the day with Days : Hours : Mins : Sec)
-//    - split-story-stats (Homepage-01.jpg "About Us": Split brand story with floating stat card)
-// ---------------------------------------------------------------------------
-
 export function StorefrontPromoDealSection({
   variant,
   theme,
@@ -227,8 +218,8 @@ export function StorefrontPromoDealSection({
   variant: PromoDealVariantId;
   theme: StorefrontThemeTokens;
   copy: StorefrontCopyConfig;
-  discounts: Discount[];
-  products: Product[];
+  discounts: StorefrontDiscount[];
+  products: StorefrontProduct[];
   onShopDeal: () => void;
 }) {
   if (variant === "none") return null;
@@ -238,7 +229,6 @@ export function StorefrontPromoDealSection({
   const cardRadius = resolveRadiusClass(theme.borderRadius, "card");
   const activeDiscount = discounts.find((d) => d.isActive);
 
-  // Live countdown clock state
   const [timeLeft, setTimeLeft] = useState({ days: 2, hours: 14, mins: 43, secs: 19 });
   useEffect(() => {
     const timer = setInterval(() => {
@@ -253,14 +243,13 @@ export function StorefrontPromoDealSection({
   }, []);
 
   const promoImg =
-    resolveImageUrl(products[1]?.primaryImageUrl || products[0]?.primaryImageUrl) ||
+    resolveStorefrontImageUrl(products[1]?.primaryImageUrl || products[0]?.primaryImageUrl) ||
     copy.heroImageUrl ||
     "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=1400&q=80";
 
-  // VARIANT 1: countdown-banner (Bagkin Storefront-02.jpg "Handbags 50% Off" with 4 frosted glass boxes)
   if (variant === "countdown-banner") {
     return (
-      <section className="relative my-10 py-16 sm:py-24 overflow-hidden text-center text-white">
+      <section className="relative my-8 @sm:my-10 py-12 @sm:py-20 @lg:py-24 overflow-hidden text-center text-white">
         <img
           src={promoImg}
           alt={copy.dealHeadline}
@@ -269,23 +258,19 @@ export function StorefrontPromoDealSection({
         <div className="absolute inset-0 bg-slate-900/45" />
 
         <div className="relative z-10 max-w-3xl mx-auto px-4">
-          <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/85 mb-2">
+          <p className="text-[10px] @sm:text-xs font-bold uppercase tracking-[0.2em] @sm:tracking-[0.25em] text-white/85 mb-2">
             {activeDiscount
               ? `USE PROMO CODE: ${activeDiscount.code} (${activeDiscount.label})`
               : copy.dealDiscountLabel || "DEAL OF THE DAY"}
           </p>
-          <h2
-            className="text-3xl sm:text-5xl font-bold mb-3"
-            style={headingFont}
-          >
+          <h2 className="text-2xl @sm:text-4xl @lg:text-5xl font-bold mb-3 break-words" style={headingFont}>
             {copy.dealHeadline}
           </h2>
-          <p className="text-xs sm:text-sm text-white/80 max-w-lg mx-auto mb-8">
+          <p className="text-xs @sm:text-sm text-white/80 max-w-lg mx-auto mb-6 @sm:mb-8">
             {copy.dealSubcopy}
           </p>
 
-          {/* 4 Frosted Glass Countdown Boxes from Bagkin Storefront-02 */}
-          <div className="grid grid-cols-4 gap-3 sm:gap-5 max-w-lg mx-auto mb-8">
+          <div className="grid grid-cols-4 gap-2.5 @sm:gap-5 max-w-md @sm:max-w-lg mx-auto mb-7 @sm:mb-8">
             {[
               { value: String(timeLeft.days).padStart(2, "0"), label: "Days" },
               { value: String(timeLeft.hours).padStart(2, "0"), label: "Hours" },
@@ -293,15 +278,15 @@ export function StorefrontPromoDealSection({
               { value: String(timeLeft.secs).padStart(2, "0"), label: "Sec" },
             ].map((box) => (
               <div key={box.label} className="flex flex-col items-center">
-                <div className="w-full aspect-square max-w-[92px] bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center mb-2 shadow-lg">
+                <div className="w-full aspect-square max-w-[74px] @sm:max-w-[92px] bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center mb-1.5 @sm:mb-2 shadow-lg">
                   <span
-                    className="text-2xl sm:text-4xl font-bold tracking-tight"
+                    className="text-xl @sm:text-3xl @lg:text-4xl font-bold tracking-tight"
                     style={{ color: "#FDBA74" }}
                   >
                     {box.value}
                   </span>
                 </div>
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-white/85">
+                <span className="text-[10px] @sm:text-[11px] font-semibold uppercase tracking-wider text-white/85">
                   {box.label}
                 </span>
               </div>
@@ -313,7 +298,7 @@ export function StorefrontPromoDealSection({
             variant="white-pill"
             size="lg"
             onClick={onShopDeal}
-            className="uppercase tracking-widest text-xs px-9"
+            className="uppercase tracking-widest text-xs px-8 @sm:px-9"
           >
             Shop Now
           </StorefrontButton>
@@ -322,17 +307,16 @@ export function StorefrontPromoDealSection({
     );
   }
 
-  // VARIANT 2: split-story-stats (Homepage-01.jpg "About Us" with floating stat card)
   return (
     <section
-      className="py-14 sm:py-20 border-y"
+      className="py-10 @sm:py-16 @lg:py-20 border-y"
       style={{
         backgroundColor: palette.sectionAltBg,
         borderColor: palette.borderSubtle,
       }}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-8 grid grid-cols-1 md:grid-cols-12 items-center gap-10">
-        <div className="md:col-span-5 relative">
+      <div className="max-w-7xl mx-auto px-3.5 @sm:px-6 @lg:px-8 grid grid-cols-1 @md:grid-cols-12 items-center gap-8 @lg:gap-10">
+        <div className="@md:col-span-5 relative">
           <div
             className={`aspect-[4/3] w-full overflow-hidden ${cardRadius} shadow-lg`}
             style={{ backgroundColor: palette.cardSurfaceBg }}
@@ -344,9 +328,8 @@ export function StorefrontPromoDealSection({
             />
           </div>
 
-          {/* Floating stat badge from Homepage-01 ("Monthly Members 5000+") */}
           <div
-            className="absolute -bottom-4 right-4 sm:-right-4 px-5 py-3.5 rounded-2xl shadow-xl border"
+            className="absolute -bottom-3 right-3 @sm:-bottom-4 @sm:right-4 px-4 py-2.5 @sm:px-5 @sm:py-3.5 rounded-2xl shadow-xl border"
             style={{
               backgroundColor: palette.cardSurfaceBg,
               borderColor: palette.borderSubtle,
@@ -355,38 +338,33 @@ export function StorefrontPromoDealSection({
             <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.textMuted }}>
               {copy.storyStatLabel || "Verified Customers"}
             </p>
-            <p className="text-xl sm:text-2xl font-black mt-0.5" style={{ color: palette.textPrimary }}>
+            <p className="text-lg @sm:text-2xl font-black mt-0.5" style={{ color: palette.textPrimary }}>
               {copy.storyStatNumber || "5,000+"}
             </p>
           </div>
         </div>
 
-        <div className="md:col-span-7 md:pl-6 space-y-4">
+        <div className="@md:col-span-7 @md:pl-4 @lg:pl-6 space-y-3.5 @sm:space-y-4">
           <p
             className="text-xs font-bold uppercase tracking-[0.2em]"
             style={{ color: theme.accentColor }}
           >
-            About Our Studio
+            About Our Brand
           </p>
           <h2
-            className="text-2xl sm:text-4xl font-bold tracking-tight"
+            className="text-2xl @sm:text-3xl @lg:text-4xl font-bold tracking-tight break-words"
             style={{ ...headingFont, color: palette.textPrimary }}
           >
             {copy.storyHeadline}
           </h2>
           <p
-            className="text-sm sm:text-base leading-relaxed"
+            className="text-xs @sm:text-sm @lg:text-base leading-relaxed"
             style={{ color: palette.textSecondary }}
           >
             {copy.storyDescription}
           </p>
           <div className="pt-2">
-            <StorefrontButton
-              theme={theme}
-              variant="solid"
-              size="md"
-              onClick={onShopDeal}
-            >
+            <StorefrontButton theme={theme} variant="solid" size="md" onClick={onShopDeal}>
               Explore Collection
             </StorefrontButton>
           </div>
@@ -395,13 +373,6 @@ export function StorefrontPromoDealSection({
     </section>
   );
 }
-
-// ---------------------------------------------------------------------------
-// 3. TESTIMONIALS & PRESS PROOF SECTION
-//    - single-pull-quote (Luxora Websitelinkmockup.jpg)
-//    - numbered-3col (Minim Storefront-03.jpg)
-//    - press-quote-grid (Glowing Storefront-12.jpg "As seen in")
-// ---------------------------------------------------------------------------
 
 export function StorefrontTestimonialsSection({
   variant,
@@ -424,14 +395,14 @@ export function StorefrontTestimonialsSection({
     {
       num: "1",
       pressLogo: "Parker & Co.",
-      quote: `"Great shopping experience with ${businessName}. Instant virtual account confirmation and my package arrived the exact same day!"`,
+      quote: `"Seamless online checkout with ${businessName}. Instant payment verification and my package arrived the exact same day!"`,
       author: "Chidinma Okafor",
       location: "Lekki Phase 1, Lagos",
     },
     {
       num: "2",
       pressLogo: "HAYDEN",
-      quote: `"The product quality exceeded expectations and the WhatsApp Co-Pilot kept me updated with live courier tracking from pickup to delivery."`,
+      quote: `"The craftsmanship exceeded expectations and the live order tracker kept me updated from dispatch pickup to delivery."`,
       author: "Tunde Adebayo",
       location: "Wuse II, Abuja",
     },
@@ -444,7 +415,6 @@ export function StorefrontTestimonialsSection({
     },
   ];
 
-  // VARIANT 1: single-pull-quote (Luxora Websitelinkmockup.jpg)
   if (variant === "single-pull-quote") {
     return (
       <section className="max-w-4xl mx-auto px-4 sm:px-8 py-14 text-center">
@@ -467,30 +437,26 @@ export function StorefrontTestimonialsSection({
     );
   }
 
-  // VARIANT 2: press-quote-grid (Glowing Storefront-12.jpg "As seen in")
   if (variant === "press-quote-grid") {
     return (
-      <section
-        className="py-14 sm:py-16"
-        style={{ backgroundColor: palette.sectionAltBg }}
-      >
-        <div className="max-w-7xl mx-auto px-4 sm:px-8">
+      <section className="py-10 @sm:py-14 @lg:py-16" style={{ backgroundColor: palette.sectionAltBg }}>
+        <div className="max-w-7xl mx-auto px-3.5 @sm:px-6 @lg:px-8">
           <StorefrontSectionHeading
             title="As seen in"
             styleVariant={headingStyle}
             theme={theme}
           />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
+          <div className="grid grid-cols-1 @md:grid-cols-3 gap-6 @sm:gap-8 text-center">
             {reviews.map((r) => (
-              <div key={r.num} className="px-4">
+              <div key={r.num} className="px-3 @sm:px-4">
                 <h3
-                  className="text-xl font-serif font-extrabold tracking-tight mb-3"
+                  className="text-lg @sm:text-xl font-serif font-extrabold tracking-tight mb-2.5 @sm:mb-3"
                   style={{ ...headingFont, color: palette.textPrimary }}
                 >
                   {r.pressLogo}
                 </h3>
                 <p
-                  className="text-xs sm:text-sm font-medium leading-relaxed"
+                  className="text-xs @sm:text-sm font-medium leading-relaxed"
                   style={{ color: palette.textSecondary }}
                 >
                   {r.quote}
@@ -503,26 +469,25 @@ export function StorefrontTestimonialsSection({
     );
   }
 
-  // VARIANT 3: numbered-3col (Minim Storefront-03.jpg)
   return (
-    <section className="max-w-7xl mx-auto px-4 sm:px-8 py-14">
+    <section className="max-w-7xl mx-auto px-3.5 @sm:px-6 @lg:px-8 py-10 @sm:py-14">
       <StorefrontSectionHeading
         title="Testimonials"
         styleVariant={headingStyle}
         theme={theme}
       />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 @md:grid-cols-3 gap-5 @sm:gap-6">
         {reviews.map((r) => (
           <div
             key={r.num}
-            className={`p-6 border ${cardRadius} text-center flex flex-col items-center`}
+            className={`p-5 @sm:p-6 border ${cardRadius} text-center flex flex-col items-center`}
             style={{
               backgroundColor: palette.cardSurfaceBg,
               borderColor: palette.borderSubtle,
             }}
           >
             <span
-              className="w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center mb-4"
+              className="w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center mb-3.5 @sm:mb-4"
               style={{
                 backgroundColor: `${theme.accentColor}20`,
                 color: theme.accentColor,
@@ -531,15 +496,12 @@ export function StorefrontTestimonialsSection({
               {r.num}
             </span>
             <p
-              className="text-xs sm:text-sm italic leading-relaxed mb-4"
+              className="text-xs @sm:text-sm italic leading-relaxed mb-4"
               style={{ color: palette.textSecondary }}
             >
               {r.quote}
             </p>
-            <p
-              className="text-xs font-bold mt-auto"
-              style={{ color: palette.textPrimary }}
-            >
+            <p className="text-xs font-bold mt-auto" style={{ color: palette.textPrimary }}>
               {r.author}
             </p>
             <p className="text-[11px]" style={{ color: palette.textMuted }}>
@@ -551,13 +513,6 @@ export function StorefrontTestimonialsSection({
     </section>
   );
 }
-
-// ---------------------------------------------------------------------------
-// 4. SOCIAL & NEWSLETTER / WHATSAPP VIP CLUB SECTION
-//    - dark-rounded-card (Stuffsus Shoppage-01.jpg "Ready to Get Our New Stuff?")
-//    - instagram-strip-plus-minimal (Bagkin Storefront-02.jpg "SHOP INSTAGRAM")
-//    - inline-fomo-bar (Kylie Storefront-04.jpg "Fear of missing out")
-// ---------------------------------------------------------------------------
 
 export function StorefrontSocialNewsletterSection({
   variant,
@@ -573,8 +528,8 @@ export function StorefrontSocialNewsletterSection({
   copy: StorefrontCopyConfig;
   businessName: string;
   instagramHandle?: string;
-  products: Product[];
-  onSelectProduct: (p: Product) => void;
+  products: StorefrontProduct[];
+  onSelectProduct: (p: StorefrontProduct) => void;
 }) {
   const palette = resolveSurfacePalette(theme.surfaceMode);
   const headingFont = resolveHeadingFontStyle(theme.fontPairing);
@@ -584,36 +539,32 @@ export function StorefrontSocialNewsletterSection({
   const handleSubscribe = (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactInput.trim()) return;
-    setSubscribedMsg(`✓ You're on ${businessName}'s VIP drop list!`);
+    setSubscribedMsg(`✓ Subscribed to ${businessName} new arrivals & private offers!`);
     setContactInput("");
     setTimeout(() => setSubscribedMsg(null), 5000);
   };
 
-  // VARIANT 1: dark-rounded-card (Stuffsus Shoppage-01.jpg)
   if (variant === "dark-rounded-card") {
     return (
-      <section className="max-w-7xl mx-auto px-4 sm:px-8 py-10">
-        <div className="rounded-3xl bg-zinc-900 text-white p-8 sm:p-12 grid grid-cols-1 md:grid-cols-12 items-center gap-8 shadow-xl">
-          <div className="md:col-span-7 space-y-4">
-            <h2
-              className="text-2xl sm:text-4xl font-extrabold leading-tight"
-              style={headingFont}
-            >
+      <section className="max-w-7xl mx-auto px-3.5 @sm:px-6 @lg:px-8 py-8 @sm:py-10">
+        <div className="rounded-2xl @sm:rounded-3xl bg-zinc-900 text-white p-6 @sm:p-10 @lg:p-12 grid grid-cols-1 @md:grid-cols-12 items-center gap-6 @sm:gap-8 shadow-xl">
+          <div className="@md:col-span-7 space-y-4">
+            <h2 className="text-xl @sm:text-3xl @lg:text-4xl font-extrabold leading-tight break-words" style={headingFont}>
               {copy.newsletterHeadline || "Ready to Get Our New Stuff?"}
             </h2>
             <form onSubmit={handleSubscribe} className="flex items-center max-w-sm bg-white rounded-full p-1.5">
               <input
-                type="text"
+                type="email"
                 value={contactInput}
                 onChange={(e) => setContactInput(e.target.value)}
-                placeholder="Your WhatsApp or Email..."
-                className="flex-1 px-4 py-1.5 text-xs text-gray-900 bg-transparent focus:outline-none"
+                placeholder="Your Email Address..."
+                className="flex-1 min-w-0 px-3.5 py-1.5 text-xs text-gray-900 bg-transparent focus:outline-none"
               />
               <button
                 type="submit"
-                className="px-5 py-2 rounded-full text-xs font-bold bg-zinc-900 text-white hover:bg-black transition-colors cursor-pointer"
+                className="px-4 @sm:px-5 py-2 rounded-full text-xs font-bold bg-zinc-900 text-white hover:bg-black transition-colors cursor-pointer shrink-0"
               >
-                Send
+                Subscribe
               </button>
             </form>
             {subscribedMsg && (
@@ -621,9 +572,9 @@ export function StorefrontSocialNewsletterSection({
             )}
           </div>
 
-          <div className="md:col-span-5 md:text-right">
+          <div className="@md:col-span-5 @md:text-right">
             <h3 className="text-xs font-bold uppercase tracking-wider text-white mb-1.5">
-              {businessName} · VIP Broadcast
+              {businessName} · Newsletter
             </h3>
             <p className="text-xs text-zinc-400 leading-relaxed">
               {copy.newsletterSubcopy}
@@ -634,12 +585,10 @@ export function StorefrontSocialNewsletterSection({
     );
   }
 
-  // VARIANT 2: instagram-strip-plus-minimal (Bagkin Storefront-02.jpg)
   if (variant === "instagram-strip-plus-minimal") {
     const galleryItems = products.slice(0, 6);
     return (
       <section className="pt-10">
-        {/* Newsletter underline input strip */}
         <div
           className="py-12 px-4 text-center border-t"
           style={{
@@ -662,10 +611,10 @@ export function StorefrontSocialNewsletterSection({
             style={{ borderColor: palette.textPrimary }}
           >
             <input
-              type="text"
+              type="email"
               value={contactInput}
               onChange={(e) => setContactInput(e.target.value)}
-              placeholder="Enter your email or WhatsApp phone..."
+              placeholder="Enter your email address..."
               className="flex-1 text-xs bg-transparent focus:outline-none"
               style={{ color: palette.textPrimary }}
             />
@@ -682,7 +631,6 @@ export function StorefrontSocialNewsletterSection({
           )}
         </div>
 
-        {/* 6-Tile Edge-to-Edge SHOP INSTAGRAM Strip (Bagkin Storefront-02) */}
         <div className="pt-10 text-center">
           <div className="inline-flex flex-col items-center mb-6 px-4">
             <svg
@@ -708,7 +656,7 @@ export function StorefrontSocialNewsletterSection({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6">
+          <div className="grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-6">
             {galleryItems.map((p) => (
               <div
                 key={`ig-${p.id}`}
@@ -717,7 +665,7 @@ export function StorefrontSocialNewsletterSection({
               >
                 <img
                   src={
-                    resolveImageUrl(p.primaryImageUrl) ||
+                    resolveStorefrontImageUrl(p.primaryImageUrl) ||
                     "https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=500&q=80"
                   }
                   alt={p.name}
@@ -735,18 +683,17 @@ export function StorefrontSocialNewsletterSection({
     );
   }
 
-  // VARIANT 3: inline-fomo-bar (Kylie Storefront-04.jpg "Fear of missing out")
   return (
     <section
-      className="py-9 border-y"
+      className="py-7 @sm:py-9 border-y"
       style={{
         backgroundColor: palette.sectionAltBg,
         borderColor: palette.borderSubtle,
       }}
     >
-      <div className="max-w-4xl mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-center gap-6">
+      <div className="max-w-4xl mx-auto px-3.5 @sm:px-8 flex flex-col @sm:flex-row items-center justify-center gap-4 @sm:gap-6">
         <h3
-          className="text-sm sm:text-base font-extrabold tracking-tight shrink-0"
+          className="text-sm @sm:text-base font-extrabold tracking-tight shrink-0"
           style={{ ...headingFont, color: palette.textPrimary }}
         >
           {copy.newsletterHeadline || "Fear of missing out"}
@@ -757,11 +704,11 @@ export function StorefrontSocialNewsletterSection({
           style={{ borderColor: palette.textPrimary }}
         >
           <input
-            type="text"
+            type="email"
             value={contactInput}
             onChange={(e) => setContactInput(e.target.value)}
-            placeholder="TYPE YOUR WHATSAPP OR EMAIL HERE"
-            className="flex-1 text-xs tracking-wider bg-transparent focus:outline-none"
+            placeholder="TYPE YOUR EMAIL ADDRESS HERE"
+            className="flex-1 min-w-0 text-xs tracking-wider bg-transparent focus:outline-none"
             style={{ color: palette.textPrimary }}
           />
           <button
@@ -780,18 +727,10 @@ export function StorefrontSocialNewsletterSection({
   );
 }
 
-// ---------------------------------------------------------------------------
-// 5. REUSABLE FOOTER SECTION
-//    - clean-4col (Guza, Drexel, Bagkin)
-//    - dark-instagram-grid (SA Storefront-01 & Illuminate Storefront-11)
-//    - minimal-single-row (Minim Storefront-03)
-// ---------------------------------------------------------------------------
-
 export function StorefrontFooterSection({
   variant,
   theme,
   businessName,
-  whatsappPhone,
   instagramHandle,
   baseCity,
   baseState,
@@ -802,29 +741,27 @@ export function StorefrontFooterSection({
   variant: FooterVariantId;
   theme: StorefrontThemeTokens;
   businessName: string;
-  whatsappPhone: string;
+  whatsappPhone?: string;
   instagramHandle?: string;
   baseCity?: string;
   baseState?: string;
-  products: Product[];
+  products: StorefrontProduct[];
   onSelectPage: (page: StorefrontActivePage) => void;
-  onSelectProduct: (p: Product) => void;
+  onSelectProduct: (p: StorefrontProduct) => void;
 }) {
   const palette = resolveSurfacePalette(theme.surfaceMode);
   const headingFont = resolveHeadingFontStyle(theme.fontPairing);
-  const waLink = `https://wa.me/${whatsappPhone.replace(/\D/g, "")}`;
 
-  // VARIANT 1: minimal-single-row (Minim Storefront-03.jpg)
   if (variant === "minimal-single-row") {
     return (
       <footer
-        className="border-t py-8 px-4 sm:px-8"
+        className="border-t py-6 @sm:py-8 px-3.5 @sm:px-6 @lg:px-8"
         style={{
           backgroundColor: palette.pageBg,
           borderColor: palette.borderSubtle,
         }}
       >
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
+        <div className="max-w-7xl mx-auto flex flex-col @sm:flex-row items-center justify-between gap-4 text-xs text-center @sm:text-left">
           <div>
             <span
               className="text-base font-extrabold"
@@ -833,31 +770,28 @@ export function StorefrontFooterSection({
               {businessName}
             </span>
             <p className="text-[11px] mt-0.5" style={{ color: palette.textMuted }}>
-              © {new Date().getFullYear()} {businessName}. Powered by Caterlog Commerce.
+              © {new Date().getFullYear()} {businessName}. All rights reserved.
             </p>
           </div>
 
-          <div className="flex items-center gap-6" style={{ color: palette.textSecondary }}>
+          <div className="flex flex-wrap items-center justify-center gap-4 @sm:gap-6" style={{ color: palette.textSecondary }}>
             <button type="button" onClick={() => onSelectPage("shop")} className="hover:underline cursor-pointer">
               Catalog
+            </button>
+            <button type="button" onClick={() => onSelectPage("checkout")} className="hover:underline cursor-pointer">
+              Checkout
             </button>
             <button type="button" onClick={() => onSelectPage("track")} className="hover:underline cursor-pointer">
               Track Order
             </button>
-            <a href={waLink} target="_blank" rel="noreferrer" className="hover:underline">
-              WhatsApp Support
-            </a>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <span className="px-2.5 py-1 rounded-xs border text-[10px] font-bold" style={{ borderColor: palette.borderSubtle, color: palette.textPrimary }}>
-              MONNIFY
+              VISA / MASTERCARD
             </span>
             <span className="px-2.5 py-1 rounded-xs border text-[10px] font-bold" style={{ borderColor: palette.borderSubtle, color: palette.textPrimary }}>
               BANK TRANSFER
-            </span>
-            <span className="px-2.5 py-1 rounded-xs border text-[10px] font-bold" style={{ borderColor: palette.borderSubtle, color: palette.textPrimary }}>
-              VISA / MASTERCARD
             </span>
           </div>
         </div>
@@ -865,21 +799,19 @@ export function StorefrontFooterSection({
     );
   }
 
-  // VARIANT 2: dark-instagram-grid (SA Storefront-01.jpg & Guza Storefront-06 dark footer)
   if (variant === "dark-instagram-grid") {
     return (
-      <footer className="bg-zinc-900 text-zinc-300 pt-14 pb-8 px-4 sm:px-8">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 pb-10 border-b border-zinc-800">
+      <footer className="bg-zinc-900 text-zinc-300 pt-10 @sm:pt-14 pb-8 px-3.5 @sm:px-6 @lg:px-8">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-4 gap-8 @lg:gap-10 pb-10 border-b border-zinc-800">
           <div>
             <h3 className="text-lg font-extrabold text-white mb-3" style={headingFont}>
               {businessName}
             </h3>
-            <p className="text-xs text-zinc-400 leading-relaxed mb-4">
-              📍 {baseCity || "Ikeja"}, {baseState || "Lagos"}, Nigeria
+            <p className="text-xs text-zinc-400 leading-relaxed mb-3">
+              {baseCity || "Ikeja"}, {baseState || "Lagos"}, Nigeria
             </p>
-            <p className="text-xs text-zinc-400 mb-1">📞 {whatsappPhone}</p>
             {instagramHandle && (
-              <p className="text-xs text-zinc-400">📸 Instagram: {instagramHandle}</p>
+              <p className="text-xs text-zinc-400">Instagram: {instagramHandle}</p>
             )}
           </div>
 
@@ -913,24 +845,23 @@ export function StorefrontFooterSection({
 
           <div>
             <h4 className="text-xs font-extrabold uppercase tracking-wider text-white mb-4">
-              Buyer Protection
+              Customer Service
             </h4>
             <ul className="space-y-2.5 text-xs text-zinc-400">
-              <li>› Dynamic Monnify Virtual Account</li>
-              <li>› Atomic Stock Reservation</li>
-              <li>› Shipbubble Live Courier Tracking</li>
+              <li>› Protected Card & Bank Transfer Checkout</li>
+              <li>› Atomic 15-Minute Stock Reservation</li>
+              <li>› Real-Time Courier Tracking</li>
               <li>
-                <a href={waLink} target="_blank" rel="noreferrer" className="text-emerald-400 hover:underline">
-                  › Chat with WhatsApp Co-Pilot
-                </a>
+                <button type="button" onClick={() => onSelectPage("checkout")} className="text-white hover:underline cursor-pointer">
+                  › Proceed to Checkout
+                </button>
               </li>
             </ul>
           </div>
 
-          {/* 4th Column: 6-tile Instagram Photo Grid from Storefront-01 */}
           <div>
             <h4 className="text-xs font-extrabold uppercase tracking-wider text-white mb-4">
-              Instagram Feed
+              Featured Gallery
             </h4>
             <div className="grid grid-cols-3 gap-2">
               {products.slice(0, 6).map((p) => (
@@ -942,7 +873,7 @@ export function StorefrontFooterSection({
                 >
                   <img
                     src={
-                      resolveImageUrl(p.primaryImageUrl) ||
+                      resolveStorefrontImageUrl(p.primaryImageUrl) ||
                       "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&q=80"
                     }
                     alt={p.name}
@@ -954,29 +885,28 @@ export function StorefrontFooterSection({
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-zinc-500">
-          <p>© {new Date().getFullYear()} {businessName}. All Rights Reserved · Powered by Caterlog.</p>
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 bg-zinc-800 text-zinc-300 rounded-xs font-bold">MONNIFY</span>
+        <div className="max-w-7xl mx-auto pt-6 flex flex-col @sm:flex-row items-center justify-between gap-4 text-[11px] text-zinc-500">
+          <p>© {new Date().getFullYear()} {businessName}. All Rights Reserved.</p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <span className="px-2 py-0.5 bg-zinc-800 text-zinc-300 rounded-xs font-bold">VISA / MASTERCARD</span>
+            <span className="px-2 py-0.5 bg-zinc-800 text-zinc-300 rounded-xs font-bold">INSTANT TRANSFER</span>
             <span className="px-2 py-0.5 bg-zinc-800 text-zinc-300 rounded-xs font-bold">SHIPBUBBLE</span>
-            <span className="px-2 py-0.5 bg-zinc-800 text-zinc-300 rounded-xs font-bold">WHATSAPP PAY</span>
           </div>
         </div>
       </footer>
     );
   }
 
-  // VARIANT 3 (Default): clean-4col (Drexel, Bagkin, Constructor)
   return (
     <footer
-      className="border-t pt-14 pb-8 px-4 sm:px-8"
+      className="border-t pt-10 @sm:pt-14 pb-8 px-3.5 @sm:px-6 @lg:px-8"
       style={{
         backgroundColor: palette.pageBg,
         borderColor: palette.borderSubtle,
       }}
     >
       <div
-        className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 pb-10 border-b"
+        className="max-w-7xl mx-auto grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-4 gap-8 pb-10 border-b"
         style={{ borderColor: palette.borderSubtle }}
       >
         <div>
@@ -989,9 +919,11 @@ export function StorefrontFooterSection({
           <p className="text-xs leading-relaxed mb-3" style={{ color: palette.textMuted }}>
             {baseCity || "Ikeja"}, {baseState || "Lagos"}, Nigeria
           </p>
-          <p className="text-xs font-medium" style={{ color: palette.textSecondary }}>
-            WhatsApp: {whatsappPhone}
-          </p>
+          {instagramHandle && (
+            <p className="text-xs font-medium" style={{ color: palette.textSecondary }}>
+              Instagram: {instagramHandle}
+            </p>
+          )}
         </div>
 
         <div>
@@ -1025,20 +957,20 @@ export function StorefrontFooterSection({
             className="text-xs font-extrabold uppercase tracking-wider mb-3.5"
             style={{ color: palette.textPrimary }}
           >
-            Customer Care
+            Orders & Delivery
           </h4>
           <ul className="space-y-2 text-xs" style={{ color: palette.textSecondary }}>
             <li>
-              <button type="button" onClick={() => onSelectPage("track")} className="hover:underline cursor-pointer">
-                Order Tracking & Receipt
+              <button type="button" onClick={() => onSelectPage("checkout")} className="hover:underline cursor-pointer">
+                Shopping Bag & Checkout
               </button>
             </li>
             <li>
-              <a href={waLink} target="_blank" rel="noreferrer" className="hover:underline">
-                24/7 WhatsApp Sales Co-Pilot
-              </a>
+              <button type="button" onClick={() => onSelectPage("track")} className="hover:underline cursor-pointer">
+                Live Order & Courier Tracker
+              </button>
             </li>
-            <li>Delivery Zones & Rates</li>
+            <li>Nationwide Doorway Delivery</li>
           </ul>
         </div>
 
@@ -1047,34 +979,34 @@ export function StorefrontFooterSection({
             className="text-xs font-extrabold uppercase tracking-wider mb-3.5"
             style={{ color: palette.textPrimary }}
           >
-            Verified Checkout
+            Secure Checkout
           </h4>
           <p className="text-xs leading-relaxed mb-3" style={{ color: palette.textMuted }}>
-            Instant NUBAN Virtual Account transfers & card payments verified server-to-server by Monnify.
+            Pay securely online via Card (Visa, Mastercard, Verve) or Instant Virtual Account Transfer.
           </p>
           <div className="flex flex-wrap gap-1.5">
             <span
               className="px-2.5 py-1 text-[10px] font-bold border rounded-xs"
               style={{ borderColor: palette.borderSubtle, color: palette.textPrimary }}
             >
-              MONNIFY ESCROW
+              VISA / MASTERCARD
             </span>
             <span
               className="px-2.5 py-1 text-[10px] font-bold border rounded-xs"
               style={{ borderColor: palette.borderSubtle, color: palette.textPrimary }}
             >
-              SHIPBUBBLE
+              BANK TRANSFER
             </span>
           </div>
         </div>
       </div>
 
       <div
-        className="max-w-7xl mx-auto pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px]"
+        className="max-w-7xl mx-auto pt-6 flex flex-col @sm:flex-row items-center justify-between gap-4 text-[11px] text-center @sm:text-left"
         style={{ color: palette.textMuted }}
       >
-        <p>© {new Date().getFullYear()} {businessName}. Powered by Caterlog.</p>
-        <p>Instant Inventory Lock · Verified Merchant Storefront</p>
+        <p>© {new Date().getFullYear()} {businessName}. All rights reserved.</p>
+        <p>Instant Inventory Lock · Verified E-Commerce Storefront</p>
       </div>
     </footer>
   );

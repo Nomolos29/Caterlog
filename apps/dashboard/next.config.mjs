@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  transpilePackages: ["@caterlog/storefront-blocks", "@caterlog/shared"],
   // Do not auto-generate AGENTS.md into the app directory during dev/build.
   agentRules: false,
   async rewrites() {
