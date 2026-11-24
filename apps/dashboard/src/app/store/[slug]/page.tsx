@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useSearchParams } from "next/navigation";
-import { LiveStorefrontPageClient } from "@caterlog/storefront-blocks";
+import { LiveStorefrontPageClient } from "@/lib/storefront-presets";
 
 export default function PublicVendorStorefrontPage() {
   const params = useParams<{ slug: string }>();

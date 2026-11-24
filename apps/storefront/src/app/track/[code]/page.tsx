@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import { LiveStorefrontPageClient } from "@caterlog/storefront-blocks";
+import { LiveStorefrontPageClient } from "@/lib/storefront-blocks";
 
 export default function StorefrontTrackPage() {
   return (

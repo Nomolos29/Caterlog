@@ -15,9 +15,10 @@ import {
   type SectionHeadingStyleId,
   type StorefrontActivePage,
   type StorefrontConfig,
+  type StorefrontPresetDefinition,
   type StudioSectionId,
   type SurfaceModeId,
-} from "@caterlog/storefront-blocks";
+} from "@/lib/storefront-presets";
 
 interface StorefrontViewProps {
   state: VendorState;
@@ -69,7 +70,7 @@ export function StorefrontView({
   const isInitialMount = useRef(true);
 
   useEffect(() => {
-    setDraftConfig((prev) => {
+    setDraftConfig((prev: StorefrontConfig) => {
       const nextEligible = canUseFullWebsiteMode(activeWorkspace);
       const currentPreset = getStorefrontPresetById(prev.presetId);
       if (!nextEligible && prev.mode === "FULL_WEBSITE") {
@@ -192,10 +193,10 @@ export function StorefrontView({
   };
 
   const starterPresets = STOREFRONT_PRESETS.filter(
-    (p) => p.recommendedTier === "STARTER_RESELLER"
+    (p: StorefrontPresetDefinition) => p.recommendedTier === "STARTER_RESELLER"
   );
   const growthProPresets = STOREFRONT_PRESETS.filter(
-    (p) => p.recommendedTier === "GROWTH_PRO"
+    (p: StorefrontPresetDefinition) => p.recommendedTier === "GROWTH_PRO"
   );
 
   // Reusable Visual Variant Option Card for the Inspector
@@ -326,7 +327,7 @@ export function StorefrontView({
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setInspectorCollapsed((prev) => !prev)}
+            onClick={() => setInspectorCollapsed((prev: boolean) => !prev)}
             className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50 cursor-pointer"
             title="Toggle Left Inspector"
           >
@@ -459,7 +460,7 @@ export function StorefrontView({
             <button
               type="button"
               onClick={() => {
-                setPreviewFullWebsiteAsStarter((prev) => {
+                setPreviewFullWebsiteAsStarter((prev: boolean) => {
                   const next = !prev;
                   setActivePreviewPage(next ? "home" : "shop");
                   return next;
@@ -565,7 +566,7 @@ export function StorefrontView({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const key = sec.visibilityKey!;
-                                  setDraftConfig((prev) => ({
+                                  setDraftConfig((prev: StorefrontConfig) => ({
                                     ...prev,
                                     visibility: {
                                       ...prev.visibility,
@@ -601,7 +602,7 @@ export function StorefrontView({
                                     subtitle="Brand left, navigation links center, search & bag right (Guza / Stuffsus)"
                                     badge="Clean"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({ ...p, headerVariant: "minimal-inline" }))
+                                      setDraftConfig((p: StorefrontConfig) => ({ ...p, headerVariant: "minimal-inline" }))
                                     }
                                   />
                                   <VariantOptionCard
@@ -610,7 +611,7 @@ export function StorefrontView({
                                     subtitle="Navigation left, centered brand wordmark, utility icons right (Glowing / Bagkin)"
                                     badge="Editorial"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         headerVariant: "centered-editorial",
                                       }))
@@ -622,7 +623,7 @@ export function StorefrontView({
                                     subtitle="Architectural hairline grid dividing Brand, Navigation & Bag (Jenahara)"
                                     badge="Couture"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         headerVariant: "bordered-editorial",
                                       }))
@@ -634,7 +635,7 @@ export function StorefrontView({
                                     subtitle="Top row with search, framed logo & bag; second row with navigation links (SA)"
                                     badge="Boutique"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         headerVariant: "stacked-boutique",
                                       }))
@@ -649,7 +650,7 @@ export function StorefrontView({
                                       type="checkbox"
                                       checked={draftConfig.visibility.showAnnouncementBar}
                                       onChange={(e) =>
-                                        setDraftConfig((p) => ({
+                                        setDraftConfig((p: StorefrontConfig) => ({
                                           ...p,
                                           visibility: {
                                             ...p.visibility,
@@ -663,7 +664,7 @@ export function StorefrontView({
                                     type="text"
                                     value={draftConfig.copy.announcementText}
                                     onChange={(e) =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         copy: { ...p.copy, announcementText: e.target.value },
                                       }))
@@ -685,7 +686,7 @@ export function StorefrontView({
                                     subtitle="Badge pill, bold headline & dual CTAs left; framed lookbook portrait with floating product card right"
                                     badge="Nyture / Glowing"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({ ...p, heroVariant: "split-studio" }))
+                                      setDraftConfig((p: StorefrontConfig) => ({ ...p, heroVariant: "split-studio" }))
                                     }
                                   />
                                   <VariantOptionCard
@@ -694,7 +695,7 @@ export function StorefrontView({
                                     subtitle="Oversized serif masthead above 3-column editorial stage & central arched model frame"
                                     badge="Jenahara"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         heroVariant: "magazine-layered",
                                       }))
@@ -706,7 +707,7 @@ export function StorefrontView({
                                     subtitle="Watermark 01 numeral, dual CTAs, feature columns & floating stat badges"
                                     badge="Homepage-01"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         heroVariant: "product-spotlight",
                                       }))
@@ -718,7 +719,7 @@ export function StorefrontView({
                                     subtitle="Full-width photography with vignette overlay, frosted badge & centered typography"
                                     badge="Bagkin / Kylie"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         heroVariant: "editorial-center-overlay",
                                       }))
@@ -730,7 +731,7 @@ export function StorefrontView({
                                     subtitle="High-contrast dark radial-lit hero with gold price badge & spotlight card"
                                     badge="Illuminate"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({ ...p, heroVariant: "dark-luxury" }))
+                                      setDraftConfig((p: StorefrontConfig) => ({ ...p, heroVariant: "dark-luxury" }))
                                     }
                                   />
                                   <VariantOptionCard
@@ -739,7 +740,7 @@ export function StorefrontView({
                                     subtitle="Framed portrait left; decorative italic script accent above bold display title right"
                                     badge="Orgamic"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         heroVariant: "script-overlap",
                                       }))
@@ -756,7 +757,7 @@ export function StorefrontView({
                                       type="text"
                                       value={draftConfig.copy.heroSubtitle}
                                       onChange={(e) =>
-                                        setDraftConfig((p) => ({
+                                        setDraftConfig((p: StorefrontConfig) => ({
                                           ...p,
                                           copy: { ...p.copy, heroSubtitle: e.target.value },
                                         }))
@@ -772,7 +773,7 @@ export function StorefrontView({
                                       type="text"
                                       value={draftConfig.copy.heroTitle}
                                       onChange={(e) =>
-                                        setDraftConfig((p) => ({
+                                        setDraftConfig((p: StorefrontConfig) => ({
                                           ...p,
                                           copy: { ...p.copy, heroTitle: e.target.value },
                                         }))
@@ -788,7 +789,7 @@ export function StorefrontView({
                                       rows={2}
                                       value={draftConfig.copy.heroDescription}
                                       onChange={(e) =>
-                                        setDraftConfig((p) => ({
+                                        setDraftConfig((p: StorefrontConfig) => ({
                                           ...p,
                                           copy: { ...p.copy, heroDescription: e.target.value },
                                         }))
@@ -805,7 +806,7 @@ export function StorefrontView({
                                         type="text"
                                         value={draftConfig.copy.heroPrimaryCta}
                                         onChange={(e) =>
-                                          setDraftConfig((p) => ({
+                                          setDraftConfig((p: StorefrontConfig) => ({
                                             ...p,
                                             copy: { ...p.copy, heroPrimaryCta: e.target.value },
                                           }))
@@ -821,7 +822,7 @@ export function StorefrontView({
                                         type="text"
                                         value={draftConfig.copy.heroSecondaryCta}
                                         onChange={(e) =>
-                                          setDraftConfig((p) => ({
+                                          setDraftConfig((p: StorefrontConfig) => ({
                                             ...p,
                                             copy: { ...p.copy, heroSecondaryCta: e.target.value },
                                           }))
@@ -838,7 +839,7 @@ export function StorefrontView({
                                       type="url"
                                       value={draftConfig.copy.heroImageUrl ?? ""}
                                       onChange={(e) =>
-                                        setDraftConfig((p) => ({
+                                        setDraftConfig((p: StorefrontConfig) => ({
                                           ...p,
                                           copy: { ...p.copy, heroImageUrl: e.target.value },
                                         }))
@@ -860,7 +861,7 @@ export function StorefrontView({
                                   subtitle="Oversized display title over photo with floating search card docked at bottom"
                                   badge="Shoppage-01"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       shopBannerVariant: "overlap-typographic",
                                     }))
@@ -872,7 +873,7 @@ export function StorefrontView({
                                   subtitle="Curved bottom-edge banner with floating white pill button straddling the seam"
                                   badge="Shoppage-03"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       shopBannerVariant: "curved-arch",
                                     }))
@@ -884,7 +885,7 @@ export function StorefrontView({
                                   subtitle="Page title & breadcrumb left; interactive product showcase cards right"
                                   badge="Guza"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       shopBannerVariant: "split-breadcrumb",
                                     }))
@@ -896,7 +897,7 @@ export function StorefrontView({
                                   subtitle="Warm full-width product photography with bottom-left caption"
                                   badge="Ugmonk"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       shopBannerVariant: "minimal-rack",
                                     }))
@@ -908,7 +909,7 @@ export function StorefrontView({
                                   subtitle="Clean bordered promo header box above catalog grid"
                                   badge="Drexel"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       shopBannerVariant: "promo-box",
                                     }))
@@ -930,7 +931,7 @@ export function StorefrontView({
                                     subtitle="Rounded studio frame, category pill, star reviews & dual bottom CTA pills"
                                     badge="Stuffsus"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         productCardVariant: "dual-action-rounded",
                                       }))
@@ -944,7 +945,7 @@ export function StorefrontView({
                                     subtitle="Soft pastel tinted card top with floating circular cart button on seam"
                                     badge="Constructor"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         productCardVariant: "pastel-floating-cart",
                                       }))
@@ -959,7 +960,7 @@ export function StorefrontView({
                                     subtitle="Full-bleed portrait photo with title, price & bag icon inside bottom fade"
                                     badge="Jenahara"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         productCardVariant: "lookbook-gradient-overlay",
                                       }))
@@ -973,7 +974,7 @@ export function StorefrontView({
                                     subtitle="Clean 4:5 studio portrait, hover quick-add & clickable color dots below"
                                     badge="Guza / Bagkin"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         productCardVariant: "minimal-swatch-studio",
                                       }))
@@ -985,7 +986,7 @@ export function StorefrontView({
                                     subtitle="Corner promo tags, star rating, compare-at price & centered CTA"
                                     badge="Drexel / Glowing"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         productCardVariant: "boutique-badged",
                                       }))
@@ -1000,7 +1001,7 @@ export function StorefrontView({
                                     title="Left Sidebar Filters"
                                     subtitle="Categories with counts, Price tiers, Color circles & Size matrix grid"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         filterLayoutVariant: "sidebar-full",
                                       }))
@@ -1013,7 +1014,7 @@ export function StorefrontView({
                                     title="Top Popover Bar + 2/3/4 Column Switcher"
                                     subtitle="Horizontal filter dropdowns + sort + grid column density toggle"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         filterLayoutVariant: "horizontal-popover-bar",
                                       }))
@@ -1026,7 +1027,7 @@ export function StorefrontView({
                                     title="Centered Category Tabs"
                                     subtitle="Minimal pill/underline category tabs above product grid"
                                     onClick={() =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         filterLayoutVariant: "centered-category-tabs",
                                       }))
@@ -1047,7 +1048,7 @@ export function StorefrontView({
                                   subtitle="Compact icon + title + subtitle row (Dispatch, CAC Verified, Stock Lock, Escrow)"
                                   badge="Luxora"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       trustStripVariant: "4-col-horizontal-icons",
                                     }))
@@ -1061,7 +1062,7 @@ export function StorefrontView({
                                   subtitle="Large centered circular icons with editorial value pillars"
                                   badge="Homepage-01"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       trustStripVariant: "3-col-feature-cards",
                                     }))
@@ -1075,7 +1076,7 @@ export function StorefrontView({
                                   subtitle="Bordered vintage authenticity badges row"
                                   badge="Kylie"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       trustStripVariant: "authentic-stamp-strip",
                                     }))
@@ -1095,7 +1096,7 @@ export function StorefrontView({
                                   subtitle="1 tall vertical feature left + 1 wide top-right + 2 square bottom-right"
                                   badge="Bagkin"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       categoryBentoVariant: "4-tile-left-tall",
                                     }))
@@ -1109,7 +1110,7 @@ export function StorefrontView({
                                   subtitle="Editorial title card & 3 portrait tiles left + 1 tall lookbook tile right"
                                   badge="Nyture"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       categoryBentoVariant: "4-tile-right-tall",
                                     }))
@@ -1123,7 +1124,7 @@ export function StorefrontView({
                                   subtitle="2 stacked pastel banners + 1 large square + 3 asymmetric bottom cards"
                                   badge="Kylie"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       categoryBentoVariant: "6-tile-editorial-mosaic",
                                     }))
@@ -1137,7 +1138,7 @@ export function StorefrontView({
                                   subtitle="Two wide side-by-side landscape collection banners"
                                   badge="Funio / Glowing"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       categoryBentoVariant: "2-col-split-banners",
                                     }))
@@ -1149,7 +1150,7 @@ export function StorefrontView({
                                   subtitle="Clean row of 5 square category thumbnails with item counts"
                                   badge="Top Categories"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       categoryBentoVariant: "thumbnail-strip",
                                     }))
@@ -1167,7 +1168,7 @@ export function StorefrontView({
                                   subtitle="Frosted glass Days : Hours : Mins : Sec timer tied to active discounts"
                                   badge="Bagkin"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       promoDealVariant: "countdown-banner",
                                     }))
@@ -1179,7 +1180,7 @@ export function StorefrontView({
                                   subtitle="Image with floating stat badge left + story headline & CTA right"
                                   badge="Homepage-01"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       promoDealVariant: "split-story-stats",
                                     }))
@@ -1193,7 +1194,7 @@ export function StorefrontView({
                                     type="text"
                                     value={draftConfig.copy.dealHeadline}
                                     onChange={(e) =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         copy: { ...p.copy, dealHeadline: e.target.value },
                                       }))
@@ -1215,7 +1216,7 @@ export function StorefrontView({
                                     type="text"
                                     value={draftConfig.copy.storyHeadline}
                                     onChange={(e) =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         copy: { ...p.copy, storyHeadline: e.target.value },
                                       }))
@@ -1231,7 +1232,7 @@ export function StorefrontView({
                                     rows={2}
                                     value={draftConfig.copy.storyDescription}
                                     onChange={(e) =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         copy: { ...p.copy, storyDescription: e.target.value },
                                       }))
@@ -1248,7 +1249,7 @@ export function StorefrontView({
                                       type="text"
                                       value={draftConfig.copy.storyStatNumber}
                                       onChange={(e) =>
-                                        setDraftConfig((p) => ({
+                                        setDraftConfig((p: StorefrontConfig) => ({
                                           ...p,
                                           copy: { ...p.copy, storyStatNumber: e.target.value },
                                         }))
@@ -1264,7 +1265,7 @@ export function StorefrontView({
                                       type="text"
                                       value={draftConfig.copy.storyStatLabel}
                                       onChange={(e) =>
-                                        setDraftConfig((p) => ({
+                                        setDraftConfig((p: StorefrontConfig) => ({
                                           ...p,
                                           copy: { ...p.copy, storyStatLabel: e.target.value },
                                         }))
@@ -1287,7 +1288,7 @@ export function StorefrontView({
                                   subtitle="Large centered serif pull quote with 5-star badge"
                                   badge="Luxora"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       testimonialsVariant: "single-pull-quote",
                                     }))
@@ -1299,7 +1300,7 @@ export function StorefrontView({
                                   subtitle="Three bordered customer review cards numbered 1, 2, 3"
                                   badge="Minim"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       testimonialsVariant: "numbered-3col",
                                     }))
@@ -1311,7 +1312,7 @@ export function StorefrontView({
                                   subtitle="Publication/brand headers with verified customer quotes below"
                                   badge="Glowing"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       testimonialsVariant: "press-quote-grid",
                                     }))
@@ -1331,7 +1332,7 @@ export function StorefrontView({
                                   subtitle="High-contrast dark rounded container with pill email subscribe bar"
                                   badge="Stuffsus"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       socialNewsletterVariant: "dark-rounded-card",
                                     }))
@@ -1346,7 +1347,7 @@ export function StorefrontView({
                                   subtitle="Edge-to-edge 6-photo shoppable strip with minimal underline newsletter bar"
                                   badge="Bagkin"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       socialNewsletterVariant: "instagram-strip-plus-minimal",
                                     }))
@@ -1360,7 +1361,7 @@ export function StorefrontView({
                                   subtitle="Single-line horizontal email capture strip"
                                   badge="Kylie"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       socialNewsletterVariant: "inline-fomo-bar",
                                     }))
@@ -1374,7 +1375,7 @@ export function StorefrontView({
                                     type="text"
                                     value={draftConfig.copy.newsletterHeadline}
                                     onChange={(e) =>
-                                      setDraftConfig((p) => ({
+                                      setDraftConfig((p: StorefrontConfig) => ({
                                         ...p,
                                         copy: { ...p.copy, newsletterHeadline: e.target.value },
                                       }))
@@ -1394,7 +1395,7 @@ export function StorefrontView({
                                   subtitle="Brand info, Navigation, Orders & Delivery, and Payment badges"
                                   badge="Drexel / Bagkin"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({ ...p, footerVariant: "clean-4col" }))
+                                    setDraftConfig((p: StorefrontConfig) => ({ ...p, footerVariant: "clean-4col" }))
                                   }
                                 />
                                 <VariantOptionCard
@@ -1403,7 +1404,7 @@ export function StorefrontView({
                                   subtitle="Rich dark footer with a 6-photo shoppable gallery in column 4"
                                   badge="Storefront-01"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       footerVariant: "dark-instagram-grid",
                                     }))
@@ -1415,7 +1416,7 @@ export function StorefrontView({
                                   subtitle="Ultra-clean horizontal row with wordmark, links & payment pills"
                                   badge="Minim"
                                   onClick={() =>
-                                    setDraftConfig((p) => ({
+                                    setDraftConfig((p: StorefrontConfig) => ({
                                       ...p,
                                       footerVariant: "minimal-single-row",
                                     }))
@@ -1445,7 +1446,7 @@ export function StorefrontView({
                         <button
                           type="button"
                           onClick={() => {
-                            setDraftConfig((p) => ({ ...p, mode: "FULL_WEBSITE" }));
+                            setDraftConfig((p: StorefrontConfig) => ({ ...p, mode: "FULL_WEBSITE" }));
                             setActivePreviewPage("home");
                           }}
                           className={`py-2 px-3 rounded-lg text-xs font-bold border cursor-pointer ${
@@ -1459,7 +1460,7 @@ export function StorefrontView({
                         <button
                           type="button"
                           onClick={() => {
-                            setDraftConfig((p) => ({ ...p, mode: "STOREFRONT_ONLY" }));
+                            setDraftConfig((p: StorefrontConfig) => ({ ...p, mode: "STOREFRONT_ONLY" }));
                             setActivePreviewPage("shop");
                           }}
                           className={`py-2 px-3 rounded-lg text-xs font-bold border cursor-pointer ${
@@ -1479,7 +1480,7 @@ export function StorefrontView({
                       Full Brand Website Presets (Growth & Pro)
                     </h3>
                     <div className="space-y-2">
-                      {growthProPresets.map((preset) => (
+                      {growthProPresets.map((preset: StorefrontPresetDefinition) => (
                         <VariantOptionCard
                           key={preset.id}
                           selected={draftConfig.presetId === preset.id}
@@ -1497,7 +1498,7 @@ export function StorefrontView({
                       Catalog Storefront Presets (Starter & Dropshipper)
                     </h3>
                     <div className="space-y-2">
-                      {starterPresets.map((preset) => (
+                      {starterPresets.map((preset: StorefrontPresetDefinition) => (
                         <VariantOptionCard
                           key={preset.id}
                           selected={draftConfig.presetId === preset.id}
@@ -1531,7 +1532,7 @@ export function StorefrontView({
                             type="button"
                             title={swatch.label}
                             onClick={() =>
-                              setDraftConfig((prev) => ({
+                              setDraftConfig((prev: StorefrontConfig) => ({
                                 ...prev,
                                 theme: { ...prev.theme, accentColor: swatch.hex },
                               }))
@@ -1547,7 +1548,7 @@ export function StorefrontView({
                         type="color"
                         value={draftConfig.theme.accentColor}
                         onChange={(e) =>
-                          setDraftConfig((prev) => ({
+                          setDraftConfig((prev: StorefrontConfig) => ({
                             ...prev,
                             theme: { ...prev.theme, accentColor: e.target.value },
                           }))
@@ -1576,7 +1577,7 @@ export function StorefrontView({
                           title={f.label}
                           subtitle={f.sub}
                           onClick={() =>
-                            setDraftConfig((prev) => ({
+                            setDraftConfig((prev: StorefrontConfig) => ({
                               ...prev,
                               theme: { ...prev.theme, fontPairing: f.id as FontPairingId },
                             }))
@@ -1605,7 +1606,7 @@ export function StorefrontView({
                           title={s.label}
                           subtitle={s.sub}
                           onClick={() =>
-                            setDraftConfig((prev) => ({
+                            setDraftConfig((prev: StorefrontConfig) => ({
                               ...prev,
                               theme: { ...prev.theme, surfaceMode: s.id as SurfaceModeId },
                             }))
@@ -1634,7 +1635,7 @@ export function StorefrontView({
                           title={h.label}
                           subtitle={h.sub}
                           onClick={() =>
-                            setDraftConfig((prev) => ({
+                            setDraftConfig((prev: StorefrontConfig) => ({
                               ...prev,
                               sectionHeadingStyle: h.id as SectionHeadingStyleId,
                             }))
@@ -1652,7 +1653,7 @@ export function StorefrontView({
                       <select
                         value={draftConfig.theme.borderRadius}
                         onChange={(e) =>
-                          setDraftConfig((prev) => ({
+                          setDraftConfig((prev: StorefrontConfig) => ({
                             ...prev,
                             theme: {
                               ...prev.theme,
@@ -1676,7 +1677,7 @@ export function StorefrontView({
                       <select
                         value={draftConfig.theme.cardTone}
                         onChange={(e) =>
-                          setDraftConfig((prev) => ({
+                          setDraftConfig((prev: StorefrontConfig) => ({
                             ...prev,
                             theme: {
                               ...prev.theme,
@@ -1732,7 +1733,7 @@ export function StorefrontView({
                 </span>
                 <button
                   type="button"
-                  onClick={() => setInspectorCollapsed((prev) => !prev)}
+                  onClick={() => setInspectorCollapsed((prev: boolean) => !prev)}
                   className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-xs border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer"
                 >
                   {inspectorCollapsed ? "Show Panel" : "Expand"}

@@ -1,1 +1,1 @@
-export * from "@caterlog/storefront-blocks";
+export * from "../../../../packages/storefront-blocks/src/index";

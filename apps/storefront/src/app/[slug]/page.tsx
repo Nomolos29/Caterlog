@@ -2,7 +2,7 @@
 
 import { Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { LiveStorefrontPageClient } from "@caterlog/storefront-blocks";
+import { LiveStorefrontPageClient } from "@/lib/storefront-blocks";
 
 function VendorSlugInner() {
   const params = useParams<{ slug: string }>();
