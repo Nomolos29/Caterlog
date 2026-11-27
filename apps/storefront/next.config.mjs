@@ -4,7 +4,8 @@ const nextConfig = {
   transpilePackages: ["@caterlog/storefront-blocks", "@caterlog/shared"],
   agentRules: false,
   async rewrites() {
-    const backendUrl = process.env.API_BASE_URL || "http://127.0.0.1:4000";
+    // Strip trailing slashes: "https://api.vercel.app/" would otherwise produce "//api/..." (404).
+    const backendUrl = (process.env.API_BASE_URL || "http://127.0.0.1:4000").replace(/\/+$/, "");
     return [
       {
         source: "/api/:path*",

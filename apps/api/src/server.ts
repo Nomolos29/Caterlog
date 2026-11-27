@@ -236,22 +236,8 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
   });
 
   const server = http.createServer(async (req, res) => {
-    // Enable CORS for Web Dashboard
-    const reqOrigin = req.headers.origin;
-    if (reqOrigin) {
-      res.setHeader("Access-Control-Allow-Origin", reqOrigin);
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-    } else {
-      res.setHeader("Access-Control-Allow-Origin", "*");
-    }
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET, POST, PATCH, PUT, DELETE, OPTIONS"
-    );
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, x-caterlog-staff-email, monnify-signature, x-hub-signature-256, x-ship-signature"
-    );
+    // Enable CORS for Web Dashboard & public Storefront
+    applyCorsHeaders(req, res);
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -2812,6 +2798,79 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown) {
       typeof value === "bigint" ? value.toString() : value
     )
   );
+}
+
+/**
+ * Applies CORS headers to EVERY response (success, error, preflight, boot failure) so the
+ * browser always sees the real API status instead of an opaque "CORS error".
+ * The caller's Origin is reflected (required when `credentials: "include"` is used) and the
+ * exact headers requested in the preflight are allowed.
+ */
+function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse) {
+  const reqOrigin = req.headers.origin;
+  if (reqOrigin) {
+    res.setHeader("Access-Control-Allow-Origin", reqOrigin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Vary", "Origin, Access-Control-Request-Headers");
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
+  const requested = req.headers["access-control-request-headers"];
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    typeof requested === "string" && requested.trim()
+      ? requested
+      : "Content-Type, Authorization, x-caterlog-staff-email, monnify-signature, x-hub-signature-256, x-ship-signature"
+  );
+  res.setHeader("Access-Control-Max-Age", "86400");
+}
+
+// ---------------------------------------------------------------------------
+// Vercel entry point: Vercel does not run `server.listen()`; it invokes a default-exported
+// (req, res) handler per request. The engine is booted lazily once per warm instance.
+// Preflight (OPTIONS) is answered BEFORE booting so CORS never depends on the DB being up.
+// ---------------------------------------------------------------------------
+let cachedVercelServer: http.Server | null = null;
+let bootingVercelServer: Promise<http.Server> | null = null;
+
+async function getVercelServer(): Promise<http.Server> {
+  if (cachedVercelServer) return cachedVercelServer;
+  if (!bootingVercelServer) {
+    bootingVercelServer = (async () => {
+      const { engine } = await createEngineFromEnv();
+      const { server } = createCaterlogApiServer(engine);
+      cachedVercelServer = server;
+      return server;
+    })();
+  }
+  try {
+    return await bootingVercelServer;
+  } catch (err) {
+    bootingVercelServer = null;
+    throw err;
+  }
+}
+
+export default async function vercelHandler(
+  req: http.IncomingMessage,
+  res: http.ServerResponse
+) {
+  applyCorsHeaders(req, res);
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+  try {
+    const server = await getVercelServer();
+    server.emit("request", req, res);
+  } catch (err) {
+    console.error("[caterlog] Failed to boot API on Vercel:", err);
+    sendJson(res, 500, {
+      error: `API failed to start: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
 }
 
 // Start server if invoked directly

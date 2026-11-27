@@ -10,13 +10,25 @@ import {
   type StorefrontThemeTokens,
 } from "./presets";
 
+export function resolveStorefrontApiBase(): string {
+  const configured = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const isLocal = host === "localhost" || host === "127.0.0.1";
+    if (configured && !/localhost|127\.0\.0\.1/.test(configured)) return configured;
+    // Local dev: talk to the API on :4000. Deployed: same-origin (Next.js rewrites proxy /api/*).
+    return isLocal ? `http://${host}:4000` : "";
+  }
+  return configured || "http://127.0.0.1:4000";
+}
+
 export function resolveStorefrontImageUrl(url?: string): string {
   if (!url) return "";
   if (url.startsWith("/api/v1/media/")) {
     if (typeof window !== "undefined") {
       return url;
     }
-    return `http://127.0.0.1:4000${url}`;
+    return `${resolveStorefrontApiBase()}${url}`;
   }
   return url;
 }

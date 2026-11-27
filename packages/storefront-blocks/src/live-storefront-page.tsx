@@ -14,6 +14,7 @@ import {
   type StorefrontConfig,
 } from "./presets";
 import { StorefrontRenderer } from "./storefront-renderer";
+import { resolveStorefrontApiBase } from "./primitives";
 
 export interface LiveStorefrontPageClientProps {
   slug?: string;
@@ -35,12 +36,7 @@ export function LiveStorefrontPageClient({
   const [error, setError] = useState<string | null>(null);
   const [liveConnected, setLiveConnected] = useState(false);
 
-  const getApiHost = useCallback(() => {
-    if (typeof window !== "undefined") {
-      return `http://${window.location.hostname}:4000`;
-    }
-    return "http://127.0.0.1:4000";
-  }, []);
+  const getApiHost = useCallback(() => resolveStorefrontApiBase(), []);
 
   const loadStorefront = useCallback(
     async (showSpinner = false) => {
@@ -53,10 +49,11 @@ export function LiveStorefrontPageClient({
       try {
         let res: Response;
         try {
-          res = await fetch(relativeUrl, { cache: "no-store" });
+          // Prefer the explicit API origin; fall back to the same-origin Next.js proxy.
+          res = await fetch(directUrl, { cache: "no-store" });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
         } catch {
-          res = await fetch(directUrl, { cache: "no-store" });
+          res = await fetch(relativeUrl, { cache: "no-store" });
         }
         if (!res.ok) {
           throw new Error(`Storefront request failed with HTTP ${res.status}`);
@@ -91,9 +88,13 @@ export function LiveStorefrontPageClient({
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // 1. Server-Sent Events from Backend API (Port 4000)
+    // 1. Server-Sent Events from the backend API (local dev only). Vercel serverless functions
+    //    cannot hold long-lived SSE connections, so deployed storefronts poll instead.
+    const host = window.location.hostname;
+    const isLocalHost = host === "localhost" || host === "127.0.0.1";
     let source: EventSource | null = null;
-    if ("EventSource" in window) {
+    let pollTimer: number | null = null;
+    if (isLocalHost && "EventSource" in window) {
       source = new EventSource(`${getApiHost()}/api/v1/events`);
       source.onopen = () => setLiveConnected(true);
       source.onerror = () => setLiveConnected(false);
@@ -146,6 +147,12 @@ export function LiveStorefrontPageClient({
       };
     }
 
+    if (!isLocalHost) {
+      pollTimer = window.setInterval(() => {
+        if (document.visibilityState === "visible") void loadStorefront(false);
+      }, 15000);
+    }
+
     // 2. Same-Browser Instant Draft & Publish BroadcastChannel from Dashboard Studio
     let bc: BroadcastChannel | null = null;
     if ("BroadcastChannel" in window) {
@@ -169,6 +176,7 @@ export function LiveStorefrontPageClient({
 
     return () => {
       if (source) source.close();
+      if (pollTimer !== null) window.clearInterval(pollTimer);
       if (bc) bc.close();
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleFocus);

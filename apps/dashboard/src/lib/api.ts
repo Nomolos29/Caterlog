@@ -119,8 +119,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
     return data as T;
   } catch (err) {
-    // If same-origin relative fetch failed and we are in the browser, attempt direct backend fallback
-    if (typeof window !== "undefined" && !path.startsWith("http")) {
+    // Local-dev only: if same-origin relative fetch failed, retry the API directly on :4000.
+    // On deployed hosts this URL does not exist (and would only add misleading mixed-content errors).
+    const isLocalHost =
+      typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    if (isLocalHost && !path.startsWith("http")) {
       try {
         const fallbackUrl = `http://${window.location.hostname}:4000${path}`;
         const fallbackResponse = await fetch(fallbackUrl, {
@@ -156,7 +160,10 @@ export const api = {
       if (configured) {
         return `${configured.replace(/\/+$/, "")}/api/v1/events`;
       }
-      return `http://${window.location.hostname}:4000/api/v1/events`;
+      const host = window.location.hostname;
+      return host === "localhost" || host === "127.0.0.1"
+        ? `http://${host}:4000/api/v1/events`
+        : "/api/v1/events";
     }
     return `${API_BASE_URL}/api/v1/events`;
   },
