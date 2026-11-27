@@ -91,6 +91,7 @@ export interface PersistenceStore {
     dismissedKeys?: string[];
     markAllRead?: boolean;
   }): Promise<void>;
+  saveCustomer?(customer: import("../runtime-types.ts").RuntimeCustomer): Promise<void>;
 
   recordEvent(event: PersistenceEvent): Promise<void>;
   close(): Promise<void>;

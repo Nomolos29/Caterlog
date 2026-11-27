@@ -1037,7 +1037,7 @@ export function Dashboard() {
         {/* View Surface */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
           {error && (
-            <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex justify-between items-center">
+            <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex justify-between items-center animate-popup-spring">
               <span>{error}</span>
               <button
                 onClick={() => setError(null)}
@@ -1048,6 +1048,7 @@ export function Dashboard() {
             </div>
           )}
 
+          <div key={`${currentView}-${settingsTab}-${profileTab}-${activeWorkspace}`} className="animate-view-transition">
           {currentView === "overview" && (
             <OverviewView
               analytics={state.analytics}
@@ -1090,6 +1091,9 @@ export function Dashboard() {
           {currentView === "orders" && (
             <OrdersView
               orders={state.orders}
+              products={state.products}
+              shippingZones={state.shippingZones}
+              discounts={state.discounts}
               selectedOrder={selectedOrder}
               vendor={state.vendor}
               workspaceRole={activeWorkspace}
@@ -1108,9 +1112,13 @@ export function Dashboard() {
           {currentView === "products" && (
             <ProductsView
               products={state.products}
+              discounts={state.discounts}
+              vendor={state.vendor}
+              bookingCatalogRules={state.bookingCatalogRules}
               suppliers={state.suppliers}
               resellerMirrors={state.resellerMirrors}
               workspaceRole={activeWorkspace}
+              onStateChange={setState}
               initialTab={productsTab}
               initialEditResellSku={editResellSku}
               onConsumeEditResellSku={() => setEditResellSku(null)}
@@ -1139,6 +1147,9 @@ export function Dashboard() {
             <BookingsView
               products={state.products}
               orders={state.orders}
+              dbBookings={state.wholesaleBookings}
+              bookingCatalogRules={state.bookingCatalogRules}
+              onStateChange={setState}
               onNavigateToProducts={() => setCurrentView("products")}
               onNavigateToPayments={() => setCurrentView("payments")}
               onOpenTour={() => handleOpenTour("bookings")}
@@ -1164,6 +1175,8 @@ export function Dashboard() {
             <CustomersView
               orders={state.orders}
               dbCustomers={state.customers}
+              discounts={state.discounts}
+              onStateChange={setState}
               onSelectOrder={(ord) => {
                 handleSelectOrder(ord);
                 setCurrentView("orders");
@@ -1228,7 +1241,10 @@ export function Dashboard() {
             <PaymentLinksView
               products={state.products}
               orders={state.orders}
+              shippingZones={state.shippingZones}
+              discounts={state.discounts}
               paymentLinks={state.paymentLinks}
+              onStateChange={setState}
               onCreatePaymentLink={handleCreatePaymentLink}
               onDeletePaymentLink={handleDeletePaymentLink}
               vendorName={state.vendor.businessName}
@@ -1351,6 +1367,7 @@ export function Dashboard() {
               }}
             />
           )}
+          </div>
         </main>
       </div>
 

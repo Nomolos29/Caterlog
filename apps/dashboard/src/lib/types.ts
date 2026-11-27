@@ -85,7 +85,49 @@ export type SalesChannel =
   | "FACEBOOK"
   | "PAYMENT_LINK"
   | "RESELLER_NETWORK"
-  | "WEB_STOREFRONT";
+  | "WEB_STOREFRONT"
+  | "POS_WALK_IN"
+  | "MANUAL_DM";
+
+export type BookingStatus =
+  | "REQUESTED"
+  | "CONFIRMED"
+  | "DEPOSIT_PENDING"
+  | "DEPOSIT_PAID"
+  | "READY_FOR_DISPATCH"
+  | "FULFILLED"
+  | "CANCELLED";
+
+export interface WholesaleBookingItem {
+  id: string;
+  reference: string;
+  clientName: string;
+  clientOrganization?: string;
+  clientPhone: string;
+  clientType: "WHOLESALER" | "RESELLER_NETWORK" | "RETAIL_CHAIN" | "VIP_BUYER" | "CORPORATE";
+  channel: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK" | "PORTAL";
+  productSku: string;
+  productName: string;
+  quantity: number;
+  unitPriceNaira: number;
+  totalAmountNaira: number;
+  depositRequiredNaira: number;
+  depositPaidNaira: number;
+  depositStatus: "UNPAID" | "PARTIAL" | "PAID";
+  targetDeliveryDate: string;
+  requestedAt: string;
+  status: BookingStatus;
+  notes?: string;
+}
+
+export interface BookingCatalogRules {
+  allCatalogBookable: boolean;
+  selectedBookableCategories: string[];
+  defaultDepositPercent: number;
+  defaultLeadTimeDays: number;
+  minimumOrderValueNaira: number;
+  autoExpireHours: number;
+}
 
 export interface QuickReplyOption {
   label: string;
@@ -150,10 +192,44 @@ export function planIdToRole(planId?: string): PlatformRole {
   }
 }
 
+export interface SocialAccountSync {
+  platform: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
+  connected: boolean;
+  handleOrPhone: string;
+  businessAssetId?: string;
+  businessPortfolioName?: string;
+  syncCatalogToSocial: boolean;
+  importSocialBuyersToCrm: boolean;
+  copilotAutoReply: boolean;
+  webhookStatus: "ACTIVE" | "PENDING" | "DISCONNECTED";
+  lastSyncedAt?: string;
+  syncedProductsCount?: number;
+}
+
+export interface VendorFeatureFlags {
+  webCheckoutEnabled: boolean;
+  guestCheckoutEnabled: boolean;
+  liveStockCountdownEnabled: boolean;
+  vacationModeEnabled: boolean;
+  whatsappCopilotEnabled: boolean;
+  instagramDmCopilotEnabled: boolean;
+  facebookMessengerCopilotEnabled: boolean;
+  autoHoldStockOnChatCheckout: boolean;
+  marketBoostDiscoveryEnabled: boolean;
+  autoApproveResellerMirrors: boolean;
+  interstateMirroringEnabled: boolean;
+  requirePasskeyForWithdrawals: boolean;
+  requireSmsOtpOnNewDevice: boolean;
+}
+
 export interface Vendor {
   id: string;
   slug: string;
   businessName: string;
+  email?: string;
+  phoneVerifiedAt?: string;
+  totpEnabled?: boolean;
+  totpVerifiedAt?: string;
   role?: PlatformRole;
   whatsappPhone: string;
   whatsappPhoneId: string;
@@ -185,6 +261,12 @@ export interface Vendor {
   platformInvoices?: PlatformInvoiceItem[];
   shipbubbleConfig?: ShipbubbleVendorConfig;
   storefrontConfig?: import("./storefront-presets").StorefrontConfig;
+  featureFlags?: VendorFeatureFlags;
+  socialAccounts?: {
+    WHATSAPP?: SocialAccountSync;
+    INSTAGRAM?: SocialAccountSync;
+    FACEBOOK?: SocialAccountSync;
+  };
 }
 
 export interface ShipbubbleVendorConfig {
@@ -769,7 +851,11 @@ export interface CustomerRecordItem {
   id: string;
   whatsappPhone: string;
   name: string;
+  email?: string;
   defaultAddress?: string;
+  notes?: string;
+  tags?: string[];
+  segmentOverride?: "VIP" | "Repeat" | "New";
   totalOrdersCount: number;
   lifetimeSpendKobo: string;
   lifetimeSpendNaira: number;
@@ -787,6 +873,8 @@ export interface VendorState {
   discounts: Discount[];
   orders: Order[];
   customers?: CustomerRecordItem[];
+  wholesaleBookings?: WholesaleBookingItem[];
+  bookingCatalogRules?: BookingCatalogRules;
   chatMessages: ChatMessage[];
   marketBoostListing?: MarketBoostListing | null;
   suppliers?: SupplierProfile[];

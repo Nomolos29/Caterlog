@@ -27,7 +27,7 @@ interface StorefrontViewProps {
   onNavigateToPlans?: () => void;
 }
 
-type StudioTab = "sections" | "presets" | "theme";
+type StudioTab = "sections" | "presets" | "theme" | "domain-policies";
 
 const ACCENT_COLOR_SWATCHES = [
   { label: "Obsidian", hex: "#111827" },
@@ -490,13 +490,14 @@ export function StorefrontView({
         {/* LEFT VISUAL INSPECTOR */}
         {!inspectorCollapsed && (
           <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
-            {/* 3 Clean Studio Tabs */}
-            <div className="grid grid-cols-3 border-b border-gray-200 bg-gray-50/80 text-xs font-extrabold">
+            {/* 4 Clean Studio Tabs */}
+            <div className="grid grid-cols-4 border-b border-gray-200 bg-gray-50/80 text-[11px] font-extrabold">
               {(
                 [
                   { id: "sections", label: "🧩 Sections" },
                   { id: "presets", label: "🎨 Presets" },
                   { id: "theme", label: "✨ Theme" },
+                  { id: "domain-policies", label: "🌐 Domain" },
                 ] as const
               ).map((t) => (
                 <button
@@ -1692,6 +1693,157 @@ export function StorefrontView({
                         <option value="pure-white">Pure White</option>
                         <option value="warm-sand">Editorial Warm Sand</option>
                       </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* =============================================================
+                  TAB 4: CUSTOM DOMAIN, AD PIXELS & STORE POLICIES
+                 ============================================================= */}
+              {studioTab === "domain-policies" && (
+                <div className="space-y-4 text-xs">
+                  <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-900">
+                        Custom Domain &amp; Subdomain
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                        SSL Active
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                        Custom Brand Domain
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. shop.niastores.com"
+                        value={draftConfig.customDomain || ""}
+                        onChange={(e) =>
+                          setDraftConfig((prev: StorefrontConfig) => ({
+                            ...prev,
+                            customDomain: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white font-mono text-xs"
+                      />
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Default Caterlog link:{" "}
+                        <strong className="font-mono">
+                          caterlog.store/{state.vendor.slug}
+                        </strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-gray-50 border border-gray-200 space-y-3">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-gray-600">
+                      Ad Attribution Pixels (Meta, TikTok &amp; GA4)
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                        Meta (Facebook / Instagram) Pixel ID
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 104928374650192"
+                        value={draftConfig.policiesAndPixels?.metaPixelId || ""}
+                        onChange={(e) =>
+                          setDraftConfig((prev: StorefrontConfig) => ({
+                            ...prev,
+                            policiesAndPixels: {
+                              ...(prev.policiesAndPixels ?? {}),
+                              metaPixelId: e.target.value,
+                            },
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                        TikTok Pixel ID
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. C9K2L8M1N4P7"
+                        value={draftConfig.policiesAndPixels?.tiktokPixelId || ""}
+                        onChange={(e) =>
+                          setDraftConfig((prev: StorefrontConfig) => ({
+                            ...prev,
+                            policiesAndPixels: {
+                              ...(prev.policiesAndPixels ?? {}),
+                              tiktokPixelId: e.target.value,
+                            },
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                        Google Analytics 4 (G-XXXX)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. G-92KLM8812A"
+                        value={draftConfig.policiesAndPixels?.googleAnalyticsId || ""}
+                        onChange={(e) =>
+                          setDraftConfig((prev: StorefrontConfig) => ({
+                            ...prev,
+                            policiesAndPixels: {
+                              ...(prev.policiesAndPixels ?? {}),
+                              googleAnalyticsId: e.target.value,
+                            },
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-gray-50 border border-gray-200 space-y-3">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-gray-600">
+                      Store Policies &amp; Delivery SLA
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                        Return &amp; Refund Policy
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={draftConfig.policiesAndPixels?.returnPolicyText || ""}
+                        onChange={(e) =>
+                          setDraftConfig((prev: StorefrontConfig) => ({
+                            ...prev,
+                            policiesAndPixels: {
+                              ...(prev.policiesAndPixels ?? {}),
+                              returnPolicyText: e.target.value,
+                            },
+                          }))
+                        }
+                        className="w-full p-2.5 rounded-xl border border-gray-200 bg-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                        Shipping &amp; Dispatch SLA
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={draftConfig.policiesAndPixels?.shippingSlaText || ""}
+                        onChange={(e) =>
+                          setDraftConfig((prev: StorefrontConfig) => ({
+                            ...prev,
+                            policiesAndPixels: {
+                              ...(prev.policiesAndPixels ?? {}),
+                              shippingSlaText: e.target.value,
+                            },
+                          }))
+                        }
+                        className="w-full p-2.5 rounded-xl border border-gray-200 bg-white text-xs"
+                      />
                     </div>
                   </div>
                 </div>

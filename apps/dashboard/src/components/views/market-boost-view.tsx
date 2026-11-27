@@ -49,8 +49,12 @@ export function MarketBoostView({
   resellerMirrors = [],
   onSaveListing,
 }: MarketBoostViewProps) {
-  // Tabs: 'visibility' | 'setup' | 'subscription'
-  const [activeTab, setActiveTab] = useState<"visibility" | "setup" | "subscription">(initialTab);
+  // Tabs: 'visibility' | 'setup'
+  const [activeTab, setActiveTab] = useState<"visibility" | "setup">(
+    initialTab === "setup" ? "setup" : "visibility"
+  );
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showPublishConfirmModal, setShowPublishConfirmModal] = useState(false);
 
   // Listing status (hydrated from database MarketBoostListing when present)
   const [listingPublished, setListingPublished] = useState(listing?.isPublished ?? false);
@@ -123,6 +127,9 @@ export function MarketBoostView({
 
   const [draftSaved, setDraftSaved] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
+  const [syncState, setSyncState] = useState<"idle" | "syncing" | "synced">("idle");
+  const lastLocalEditAtRef = React.useRef<number>(0);
+  const hydratedServerAtRef = React.useRef<string>("");
 
   // Group real catalog products by category
   const categorizedProducts = useMemo(() => {
@@ -202,22 +209,31 @@ export function MarketBoostView({
     return { connected, discoveries, profileViews, viewRate, connectRate };
   }, [resellerMirrors.length, mirroredProducts.length, listingPublished]);
 
+  const markDirty = () => {
+    lastLocalEditAtRef.current = Date.now();
+    setHasUnsavedChanges(true);
+    setSyncState("idle");
+  };
+
   const toggleEntireCategoryMirror = (catName: string, items: ProductItem[]) => {
     const isCurrentlyFull = mirroredCategories.some(
       (c) => c.toLowerCase() === catName.toLowerCase()
     );
     const itemSkus = items.map((i) => i.skuCode.toUpperCase());
+    let nextCats: string[];
+    let nextSkus: string[];
     if (isCurrentlyFull) {
-      setMirroredCategories(
-        mirroredCategories.filter((c) => c.toLowerCase() !== catName.toLowerCase())
-      );
-      setMirroredProductSkus(
-        mirroredProductSkus.filter((s) => !itemSkus.includes(s.toUpperCase()))
+      nextCats = mirroredCategories.filter((c) => c.toLowerCase() !== catName.toLowerCase());
+      nextSkus = Array.from(effectiveMirroredSkus).filter(
+        (s) => !itemSkus.includes(s.toUpperCase())
       );
     } else {
-      setMirroredCategories(Array.from(new Set([...mirroredCategories, catName])));
-      setMirroredProductSkus(Array.from(new Set([...mirroredProductSkus, ...itemSkus])));
+      nextCats = Array.from(new Set([...mirroredCategories, catName]));
+      nextSkus = Array.from(new Set([...Array.from(effectiveMirroredSkus), ...itemSkus]));
     }
+    setMirroredCategories(nextCats);
+    setMirroredProductSkus(nextSkus);
+    markDirty();
   };
 
   const toggleSingleProductMirror = (skuCode: string, catName: string, categoryItems: ProductItem[]) => {
@@ -226,33 +242,37 @@ export function MarketBoostView({
     const catSkus = categoryItems.map((i) => i.skuCode.toUpperCase());
 
     let nextSkus: string[];
+    let nextCats = mirroredCategories;
     if (isCurrentlyMirrored) {
       // Remove from mirroredProductSkus; if the entire category was marked, expand remaining items instead
       const baseSkus = Array.from(effectiveMirroredSkus);
       nextSkus = baseSkus.filter((s) => s !== upperSku);
-      setMirroredCategories(
-        mirroredCategories.filter((c) => c.toLowerCase() !== catName.toLowerCase())
-      );
-      setMirroredProductSkus(nextSkus);
+      nextCats = mirroredCategories.filter((c) => c.toLowerCase() !== catName.toLowerCase());
     } else {
       nextSkus = Array.from(new Set([...Array.from(effectiveMirroredSkus), upperSku]));
-      setMirroredProductSkus(nextSkus);
       // If all items in this category are now selected, mark entire category as mirrored too
       const allInCatSelected = catSkus.every((s) => nextSkus.includes(s));
       if (allInCatSelected) {
-        setMirroredCategories(Array.from(new Set([...mirroredCategories, catName])));
+        nextCats = Array.from(new Set([...mirroredCategories, catName]));
       }
     }
+    setMirroredCategories(nextCats);
+    setMirroredProductSkus(nextSkus);
+    markDirty();
   };
 
   const selectAllCatalogForMirror = () => {
-    setMirroredCategories(categorizedProducts.map((g) => g.category));
-    setMirroredProductSkus(products.map((p) => p.skuCode.toUpperCase()));
+    const nextCats = categorizedProducts.map((g) => g.category);
+    const nextSkus = products.map((p) => p.skuCode.toUpperCase());
+    setMirroredCategories(nextCats);
+    setMirroredProductSkus(nextSkus);
+    markDirty();
   };
 
   const clearAllCatalogMirror = () => {
     setMirroredCategories([]);
     setMirroredProductSkus([]);
+    markDirty();
   };
 
   const handleAddDiscountRule = () => {
@@ -285,8 +305,10 @@ export function MarketBoostView({
       isActive: true,
       createdAt: new Date().toISOString(),
     };
-    setWholesaleDiscountRules([newRule, ...wholesaleDiscountRules]);
+    const nextRules = [newRule, ...wholesaleDiscountRules];
+    setWholesaleDiscountRules(nextRules);
     setRuleName("");
+    markDirty();
   };
 
   const computeEffectiveWholesalePrice = (product: ProductItem, targetReseller: string) => {
@@ -331,6 +353,17 @@ export function MarketBoostView({
 
   useEffect(() => {
     if (listing) {
+      // Never overwrite the user's in-progress form edits during 3-second polling if they have unsaved changes
+      const serverSignature = `${listing.id}:${listing.updatedAt ?? ""}:${(listing.mirroredProductSkus ?? []).join(",")}`;
+      if (
+        hasUnsavedChanges ||
+        hydratedServerAtRef.current === serverSignature ||
+        Date.now() - lastLocalEditAtRef.current < 4500
+      ) {
+        return;
+      }
+      hydratedServerAtRef.current = serverSignature;
+
       setListingPublished(listing.isPublished);
       setBusinessName(listing.businessName || vendorName || "My Store");
       setCategory(listing.category || "Home & living");
@@ -356,34 +389,42 @@ export function MarketBoostView({
       setMirroredCategories(listing.mirroredCategories ?? []);
       setMirroredProductSkus(listing.mirroredProductSkus ?? []);
       setWholesaleDiscountRules(listing.wholesaleDiscountRules ?? []);
-    } else if (vendorName) {
+    } else if (vendorName && !hydratedServerAtRef.current) {
       setBusinessName(vendorName);
     }
-  }, [listing, vendorName]);
+  }, [listing, vendorName, hasUnsavedChanges]);
 
   const persistCurrentListing = async (publishState: boolean) => {
+    lastLocalEditAtRef.current = Date.now();
     if (!onSaveListing) return;
-    await onSaveListing({
-      isPublished: publishState,
-      businessName,
-      category,
-      baseState: vendorState,
-      baseCity: vendorCity,
-      shippingScope,
-      allowInterstate,
-      coveredStates,
-      coveredLgas: targetSpecificLgas ? coveredLgas : [],
-      description,
-      moq,
-      startingPriceNaira: startingPrice,
-      fulfillmentMethod: fulfillment,
-      deliveryNote,
-      featuredTags: mirroredCategories,
-      mirroredCategories,
-      mirroredProductSkus: Array.from(effectiveMirroredSkus),
-      wholesaleDiscountRules,
-      subscriptionPlan: "GROWTH",
-    });
+    setSyncState("syncing");
+    try {
+      await onSaveListing({
+        isPublished: publishState,
+        businessName,
+        category,
+        baseState: vendorState,
+        baseCity: vendorCity,
+        shippingScope,
+        allowInterstate,
+        coveredStates,
+        coveredLgas: targetSpecificLgas ? coveredLgas : [],
+        description,
+        moq,
+        startingPriceNaira: startingPrice,
+        fulfillmentMethod: fulfillment,
+        deliveryNote,
+        featuredTags: mirroredCategories,
+        mirroredCategories,
+        mirroredProductSkus: Array.from(effectiveMirroredSkus),
+        wholesaleDiscountRules,
+        subscriptionPlan: "GROWTH",
+      });
+      setHasUnsavedChanges(false);
+      setSyncState("synced");
+    } catch {
+      setSyncState("idle");
+    }
   };
 
   // Sync state and city into location string
@@ -457,13 +498,6 @@ export function MarketBoostView({
     };
   };
 
-  // Subscription checkout form states
-  const [billingEmail, setBillingEmail] = useState("billing@aroko.example");
-  const [agreedTerms, setAgreedTerms] = useState(true);
-  const [paying, setPaying] = useState(false);
-  const [paymentSuccess, setPaymentSuccess] = useState(false);
-  const [autoRenew, setAutoRenew] = useState(true);
-
   const featuredCatalogsCount = useMemo(() => {
     const activeCats = new Set<string>(mirroredCategories.map((c) => c.toLowerCase()));
     for (const p of products) {
@@ -474,241 +508,6 @@ export function MarketBoostView({
     return activeCats.size;
   }, [mirroredCategories, products, effectiveMirroredSkus]);
 
-  const handlePayAndActivate = () => {
-    setPaying(true);
-    void persistCurrentListing(true);
-    setTimeout(() => {
-      setPaying(false);
-      setPaymentSuccess(true);
-      setListingPublished(true);
-      setTimeout(() => {
-        setActiveTab("visibility");
-        setPaymentSuccess(false);
-      }, 1200);
-    }, 600);
-  };
-
-  /* -------------------------------------------------------------------------- */
-  /* Screen 16: Market Boost · Subscription checkout                            */
-  /* -------------------------------------------------------------------------- */
-  if (activeTab === "subscription") {
-    return (
-      <div className="space-y-6 max-w-6xl mx-auto pb-16">
-        {/* Header */}
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Market Boost / Subscription</div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-            Activate Market Boost
-          </h1>
-          <p className="text-xs text-gray-500 mt-0.5">
-            A supplier subscription for wholesale directory visibility—not a reseller commission.
-          </p>
-        </div>
-
-        {/* Tab Strip */}
-        <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
-          <button
-            onClick={() => setActiveTab("setup")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            Listing setup
-          </button>
-          <button
-            onClick={() => setActiveTab("subscription")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
-          >
-            Subscription
-          </button>
-          <button
-            onClick={() => setActiveTab("visibility")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            Visibility &amp; performance
-          </button>
-        </div>
-
-        {/* 2 Column Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column (2 Cols) */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Selected plan card */}
-            <div className="bg-[#0d5c3a] text-white rounded-2xl p-6 shadow-xs space-y-3">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-800/80 text-emerald-100 border border-emerald-700">
-                Selected plan
-              </span>
-              <div className="text-lg font-bold">Market Boost · Monthly</div>
-              <div className="text-3xl font-black">
-                ₦15,000 <span className="text-xs font-normal text-emerald-200">/ month</span>
-              </div>
-              <p className="text-xs text-emerald-100 leading-relaxed">
-                Directory visibility for your verified supplier profile and selected wholesale catalogs.
-              </p>
-            </div>
-
-            {/* What your subscription includes */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-gray-900">What your subscription includes</h3>
-
-              <div className="space-y-2.5 text-gray-700">
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-600 font-bold">✓</span>
-                  <span>Discoverable profile in Find suppliers</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-600 font-bold">✓</span>
-                  <span>Category, location and wholesale search visibility</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-600 font-bold">✓</span>
-                  <span>Live catalog and reseller connection entry points</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-600 font-bold">✓</span>
-                  <span>Listing views and connection performance</span>
-                </div>
-              </div>
-
-              <div className="p-4 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1">
-                <div className="font-bold text-blue-900 flex items-center gap-1.5">
-                  <span>ℹ</span>
-                  <span>Visibility, not guaranteed sales</span>
-                </div>
-                <p className="text-[11px] text-blue-800 leading-relaxed">
-                  Market Boost does not guarantee rankings, reseller connections or orders. Supplier identity and catalog access rules still apply.
-                </p>
-              </div>
-            </div>
-
-            {/* Payment & activation */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-gray-900">Payment &amp; activation</h3>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Payment method</label>
-                <select className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg bg-white">
-                  <option>Secure gateway checkout · Card or bank transfer</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-gray-500 mb-1">Billing email</label>
-                <input
-                  type="email"
-                  value={billingEmail}
-                  onChange={(e) => setBillingEmail(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600"
-                />
-              </div>
-
-              <p className="text-[11px] text-gray-500">
-                Activation starts only after the gateway confirms payment. No payment has been taken on this review screen.
-              </p>
-
-              <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl space-y-1">
-                <div className="font-bold text-rose-800 flex items-center gap-1.5">
-                  <span>⚠</span>
-                  <span>If payment fails</span>
-                </div>
-                <p className="text-[11px] text-rose-700 leading-relaxed">
-                  Your listing stays a draft and hidden from discovery. Retry payment without creating another listing; existing reseller links remain intact.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Order summary & After payment */}
-          <div className="space-y-6">
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4 text-xs">
-              <h3 className="text-sm font-bold text-gray-900">Order summary</h3>
-
-              <div className="divide-y divide-gray-100">
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Business</span>
-                  <span className="font-semibold text-gray-900">Aroko Wholesale</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Plan</span>
-                  <span className="font-semibold text-gray-900">Market Boost Monthly</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Subscription</span>
-                  <span className="font-semibold text-gray-900">₦15,000</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Additional checkout fees</span>
-                  <span className="font-semibold text-gray-900">₦0</span>
-                </div>
-                <div className="py-2.5 flex justify-between text-sm font-bold text-gray-900">
-                  <span>Total billed today</span>
-                  <span>₦15,000</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Billing frequency</span>
-                  <span className="font-semibold text-gray-900">Every month</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Initial period</span>
-                  <span className="font-semibold text-gray-900">3 Nov–3 Dec 2026</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-gray-500">Next renewal</span>
-                  <span className="font-semibold text-gray-900">3 Dec · ₦15,000</span>
-                </div>
-              </div>
-
-              <label className="flex items-start gap-2 cursor-pointer text-xs text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={agreedTerms}
-                  onChange={(e) => setAgreedTerms(e.target.checked)}
-                  className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
-                />
-                <span className="text-[11px] leading-relaxed">
-                  I agree to a monthly charge of ₦15,000. Cancel renewal before the next billing date to avoid the next charge.
-                </span>
-              </label>
-
-              {paymentSuccess && (
-                <div className="p-3 bg-emerald-50 text-emerald-800 rounded-lg text-xs font-semibold">
-                  ✓ Payment confirmed! Market Boost is now activated.
-                </div>
-              )}
-
-              <button
-                onClick={handlePayAndActivate}
-                disabled={!agreedTerms || paying}
-                className="w-full py-2.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
-              >
-                {paying ? "Processing payment..." : "Pay ₦15,000 & activate"}
-              </button>
-
-              <button
-                onClick={() => setActiveTab("setup")}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-              >
-                Back to listing
-              </button>
-            </div>
-
-            {/* After payment card */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-              <h3 className="text-xs font-bold text-gray-900">After payment</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Once payment is server-confirmed, Market Boost becomes active. Review and publish your prepared listing to make it discoverable.
-              </p>
-              <button
-                onClick={() => setActiveTab("visibility")}
-                className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold block pt-1 text-left"
-              >
-                Next → Visibility &amp; performance
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   /* -------------------------------------------------------------------------- */
   /* Screen 14: Market Boost · Listing setup                                    */
   /* -------------------------------------------------------------------------- */
@@ -716,33 +515,33 @@ export function MarketBoostView({
     return (
       <div className="space-y-6 max-w-6xl mx-auto pb-24">
         {/* Header */}
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Market Boost / Listing setup</div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
-            Set up your wholesale listing
-          </h1>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Help resellers discover Aroko Wholesale in the supplier directory.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="text-xs text-gray-500 mb-1">Market Boost / Listing setup</div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              Set up your wholesale listing
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Configure your visible products, territory reach, and discount rules. Changes are only synced to the database when you save or publish.
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold self-start sm:self-center">
+            <span>✓</span>
+            <span>Included in Your Vendor Tier</span>
+          </span>
         </div>
 
         {/* Tab Strip */}
         <div className="flex border-b border-gray-200 text-xs font-medium gap-6">
           <button
             onClick={() => setActiveTab("setup")}
-            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
+            className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
           >
             Listing setup
           </button>
           <button
-            onClick={() => setActiveTab("subscription")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
-          >
-            Subscription
-          </button>
-          <button
             onClick={() => setActiveTab("visibility")}
-            className="pb-2.5 text-gray-500 hover:text-gray-900"
+            className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
           >
             Visibility &amp; performance
           </button>
@@ -752,10 +551,10 @@ export function MarketBoostView({
         <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs space-y-1">
           <div className="font-bold text-emerald-900 flex items-center gap-1.5">
             <span>✓</span>
-            <span>Verified identity · Eligible for Market Boost</span>
+            <span>Market Boost Active by Default in Your Subscription Tier</span>
           </div>
           <p className="text-[11px] text-emerald-800 leading-relaxed">
-            Aroko Wholesale meets the identity requirement. Publish a listing after activating your subscription; preview it before it becomes visible.
+            {businessName || vendorName || "Your store"} has full wholesale directory &amp; reseller mirroring access included in your plan. Select the products you want resellers to see below, then click <strong>Publish &amp; Sync to Database</strong> when you are done.
           </p>
         </div>
 
@@ -1159,7 +958,17 @@ export function MarketBoostView({
                     Select individual products inside each category, or toggle <strong>Entire Category</strong> to mirror every item in that category.
                   </p>
                 </div>
-                <div className="flex items-center gap-2 self-start sm:self-center">
+                <div className="flex items-center gap-2 self-start sm:self-center flex-wrap">
+                  {hasUnsavedChanges && (
+                    <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                      ● Unsaved selection (Publish or Save Draft to sync)
+                    </span>
+                  )}
+                  {!hasUnsavedChanges && syncState === "synced" && (
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                      ✓ Synced to PostgreSQL
+                    </span>
+                  )}
                   <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
                     {effectiveMirroredSkus.size} / {products.length} products selected
                   </span>
@@ -1634,24 +1443,26 @@ export function MarketBoostView({
                       <div className="flex items-center gap-2 self-end sm:self-center">
                         <button
                           type="button"
-                          onClick={() =>
-                            setWholesaleDiscountRules(
-                              wholesaleDiscountRules.map((r) =>
-                                r.id === rule.id ? { ...r, isActive: !r.isActive } : r
-                              )
-                            )
-                          }
+                          onClick={() => {
+                            const nextRules = wholesaleDiscountRules.map((r) =>
+                              r.id === rule.id ? { ...r, isActive: !r.isActive } : r
+                            );
+                            setWholesaleDiscountRules(nextRules);
+                            markDirty();
+                          }}
                           className="px-2.5 py-1 border border-gray-200 rounded-lg text-[11px] font-medium hover:bg-gray-50 cursor-pointer"
                         >
                           {rule.isActive ? "Pause" : "Activate"}
                         </button>
                         <button
                           type="button"
-                          onClick={() =>
-                            setWholesaleDiscountRules(
-                              wholesaleDiscountRules.filter((r) => r.id !== rule.id)
-                            )
-                          }
+                          onClick={() => {
+                            const nextRules = wholesaleDiscountRules.filter(
+                              (r) => r.id !== rule.id
+                            );
+                            setWholesaleDiscountRules(nextRules);
+                            markDirty();
+                          }}
                           className="px-2.5 py-1 border border-rose-200 text-rose-600 rounded-lg text-[11px] font-medium hover:bg-rose-50 cursor-pointer"
                         >
                           Delete
@@ -1785,23 +1596,27 @@ export function MarketBoostView({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-emerald-600 font-bold">✓</span>
-                  <span>Catalogs &amp; terms selected</span>
+                  <span>Included in active vendor subscription tier</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-emerald-600 font-bold">✓</span>
-                  <span className="text-gray-900 font-medium">Activate Market Boost subscription</span>
+                  <span className={effectiveMirroredSkus.size > 0 ? "text-emerald-600 font-bold" : "text-amber-600 font-bold"}>
+                    {effectiveMirroredSkus.size > 0 ? "✓" : "●"}
+                  </span>
+                  <span className="text-gray-900 font-medium">
+                    {effectiveMirroredSkus.size} product{effectiveMirroredSkus.size === 1 ? "" : "s"} selected for wholesale visibility
+                  </span>
                 </div>
               </div>
 
-              <p className="text-[11px] text-gray-400 leading-relaxed">
-                Saving a draft does not charge your account. Your listing remains hidden until the subscription is active and you publish.
+              <p className="text-[11px] text-gray-500 leading-relaxed">
+                Your product selections and discount rules stay in draft while you edit. Click <strong>Publish &amp; Sync Listing</strong> when you are ready to push all changes to the database.
               </p>
 
               <button
-                onClick={() => setActiveTab("subscription")}
-                className="w-full py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
+                onClick={() => setShowPublishConfirmModal(true)}
+                className="w-full py-2.5 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs cursor-pointer transition-colors"
               >
-                Continue to subscription →
+                Publish &amp; Sync Listing →
               </button>
             </div>
           </div>
@@ -1809,52 +1624,127 @@ export function MarketBoostView({
 
         {/* Sticky Bottom Bar */}
         <div className="fixed bottom-0 left-0 lg:left-64 right-0 bg-white border-t border-gray-200 py-3 px-6 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 z-30 shadow-lg text-xs">
-          <span className="text-gray-400 text-[11px]">
-            Activate your subscription to enable publishing.
-          </span>
+          <div className="flex items-center gap-2">
+            {hasUnsavedChanges ? (
+              <span className="text-amber-700 font-semibold text-[11px]">
+                ● You have unsaved Market Boost changes ({effectiveMirroredSkus.size} visible products selected).
+              </span>
+            ) : (
+              <span className="text-gray-500 text-[11px]">
+                All Market Boost settings are synced with the database.
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {draftSaved && (
               <span className="text-xs font-semibold text-emerald-700 mr-2">
-                ✓ Draft saved
+                ✓ Draft saved to database
               </span>
             )}
             {publishSuccess && (
               <span className="text-xs font-semibold text-emerald-700 mr-2">
-                ✓ Listing published to supplier directory!
+                ✓ Listing published &amp; synced to supplier directory!
               </span>
             )}
             <button
-              onClick={() => {
-                void persistCurrentListing(listingPublished);
+              onClick={async () => {
+                await persistCurrentListing(false);
+                setListingPublished(false);
                 setDraftSaved(true);
-                setTimeout(() => setDraftSaved(false), 2000);
+                setTimeout(() => setDraftSaved(false), 2500);
               }}
-              className="px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              disabled={syncState === "syncing"}
+              className="px-4 py-2 text-xs font-semibold text-gray-700 border border-gray-200 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
             >
-              Save draft
+              {syncState === "syncing" ? "Saving..." : "Save as Draft"}
             </button>
             <button
-              onClick={() => setActiveTab("subscription")}
-              className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs"
+              onClick={() => setShowPublishConfirmModal(true)}
+              disabled={syncState === "syncing"}
+              className="px-5 py-2 text-xs font-semibold text-white bg-[#0d5c3a] hover:bg-[#0b4b2f] rounded-lg transition-colors shadow-xs cursor-pointer disabled:opacity-50"
             >
-              Review &amp; continue
-            </button>
-            <button
-              onClick={() => {
-                void persistCurrentListing(true);
-                setPublishSuccess(true);
-                setListingPublished(true);
-                setTimeout(() => {
-                  setPublishSuccess(false);
-                  setActiveTab("visibility");
-                }, 1500);
-              }}
-              className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg"
-            >
-              Publish listing
+              {syncState === "syncing" ? "Syncing to Database..." : "Publish & Sync Listing"}
             </button>
           </div>
         </div>
+
+        {/* Publish & Sync Confirmation Modal */}
+        {showPublishConfirmModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-start justify-between border-b border-gray-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center text-base font-bold">
+                    🚀
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-sm">Confirm &amp; Publish Market Boost</h3>
+                    <p className="text-[11px] text-gray-500">Sync your wholesale visibility with PostgreSQL</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowPublishConfirmModal(false)}
+                  className="text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-gray-50 border border-gray-200 text-xs space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Supplier Name</span>
+                  <span className="font-bold text-gray-900">{businessName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Visible Products</span>
+                  <span className="font-bold text-emerald-700">
+                    {effectiveMirroredSkus.size} of {products.length} products
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Geographic Reach</span>
+                  <span className="font-semibold text-gray-900">{getVisibilityBadge().label}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Active Discount Rules</span>
+                  <span className="font-semibold text-gray-900">
+                    {wholesaleDiscountRules.filter((r) => r.isActive).length} rules
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-gray-500 leading-relaxed">
+                Publishing will commit these visible products and wholesale discount rules to the database and immediately update your live catalog in the Wholesale Supplier Directory.
+              </p>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPublishConfirmModal(false)}
+                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold rounded-xl cursor-pointer"
+                >
+                  Keep Editing
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setShowPublishConfirmModal(false);
+                    await persistCurrentListing(true);
+                    setListingPublished(true);
+                    setPublishSuccess(true);
+                    setTimeout(() => {
+                      setPublishSuccess(false);
+                      setActiveTab("visibility");
+                    }, 1200);
+                  }}
+                  className="px-5 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-xl shadow-xs cursor-pointer"
+                >
+                  Confirm &amp; Publish Now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Directory Preview Modal */}
         {showDirPreviewModal && (
@@ -1920,19 +1810,13 @@ export function MarketBoostView({
       <div className="flex border-b border-gray-200 text-xs font-medium gap-4 sm:gap-6 overflow-x-auto whitespace-nowrap scrollbar-none pb-px">
         <button
           onClick={() => setActiveTab("setup")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900"
+          className="pb-2.5 text-gray-500 hover:text-gray-900 cursor-pointer"
         >
           Listing setup
         </button>
         <button
-          onClick={() => setActiveTab("subscription")}
-          className="pb-2.5 text-gray-500 hover:text-gray-900"
-        >
-          Subscription
-        </button>
-        <button
           onClick={() => setActiveTab("visibility")}
-          className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold"
+          className="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 font-semibold cursor-pointer"
         >
           Visibility &amp; performance
         </button>
@@ -1945,20 +1829,14 @@ export function MarketBoostView({
           </div>
           <h3 className="text-base font-bold text-gray-900">No Active Market Boost Campaign</h3>
           <p className="text-xs text-gray-500 max-w-md mx-auto leading-relaxed">
-            Market Boost amplifies your wholesale inventory in the verified Caterlog B2B directory, helping verified retailers and social sellers discover and mirror your products.
+            Market Boost is included by default in your vendor subscription tier. Configure which products are visible to resellers and publish your listing to appear in the B2B Supplier Directory.
           </p>
           <div className="pt-2 flex justify-center gap-3">
             <button
               onClick={() => setActiveTab("setup")}
               className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-2xs cursor-pointer active:scale-95 transition-all"
             >
-              Create Directory Listing →
-            </button>
-            <button
-              onClick={() => setActiveTab("subscription")}
-              className="border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-semibold px-4 py-2.5 rounded-xl transition-all cursor-pointer"
-            >
-              View Boost Plans
+              Set Up &amp; Publish Directory Listing →
             </button>
           </div>
         </div>
@@ -1980,25 +1858,17 @@ export function MarketBoostView({
           <p className="text-xs text-gray-500 mt-1">
             {category} · {location} · {featuredCatalogsCount} categories · {effectiveMirroredSkus.size} mirrored products · {wholesaleDiscountRules.filter((r) => r.isActive).length} discount rules
           </p>
-          <div className="text-[11px] text-gray-400 mt-0.5">
-            Subscription active: 3 Nov–3 Dec 2026 · Last published today
+          <div className="text-[11px] text-emerald-700 font-medium mt-0.5">
+            ✓ Included in your active vendor subscription tier · Synced with PostgreSQL
           </div>
         </div>
 
-        <div className="flex items-center gap-6 text-xs">
-          <div>
-            <div className="text-gray-400">Next renewal</div>
-            <div className="font-semibold text-gray-900 mt-0.5">3 Dec 2026</div>
-          </div>
-          <div>
-            <div className="text-gray-400">Monthly charge</div>
-            <div className="font-bold text-gray-900 mt-0.5">₦15,000</div>
-          </div>
+        <div className="flex items-center gap-3 text-xs">
           <button
-            onClick={() => setActiveTab("subscription")}
-            className="px-3.5 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-lg font-medium transition-colors"
+            onClick={() => setActiveTab("setup")}
+            className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white rounded-lg font-semibold transition-colors cursor-pointer"
           >
-            Manage renewal
+            Configure Visible Products
           </button>
         </div>
       </div>
@@ -2183,7 +2053,7 @@ export function MarketBoostView({
             <div className="space-y-2 pt-1">
               <button
                 onClick={() => setShowDirPreviewModal(true)}
-                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium rounded-lg"
+                className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium rounded-lg cursor-pointer"
               >
                 Preview directory listing
               </button>
@@ -2193,7 +2063,7 @@ export function MarketBoostView({
                   setListingPublished(next);
                   void persistCurrentListing(next);
                 }}
-                className={`w-full py-2 border font-medium rounded-lg transition-colors ${
+                className={`w-full py-2 border font-medium rounded-lg transition-colors cursor-pointer ${
                   listingPublished
                     ? "border-gray-200 hover:bg-gray-50 text-rose-700"
                     : "border-emerald-200 bg-emerald-50 text-emerald-800"
@@ -2203,64 +2073,7 @@ export function MarketBoostView({
               </button>
             </div>
           </div>
-
-          {/* Renewal preferences card */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-            <h3 className="text-xs font-bold text-gray-900">Renewal preferences</h3>
-
-            <div className="divide-y divide-gray-100">
-              <div className="py-2 flex justify-between items-center">
-                <span className="text-gray-500">Automatic renewal</span>
-                <button
-                  onClick={() => setAutoRenew(!autoRenew)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    autoRenew ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-600"
-                  }`}
-                >
-                  {autoRenew ? "On" : "Off"}
-                </button>
-              </div>
-              <div className="py-2 flex justify-between">
-                <span className="text-gray-500">Payment source</span>
-                <span className="font-semibold text-gray-900">Gateway authorization</span>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-gray-400 leading-relaxed">
-              You can turn off renewal and remain visible until the current paid period expires.
-            </p>
-
-            <button
-              onClick={() => setActiveTab("subscription")}
-              className="w-full py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium rounded-lg"
-            >
-              Manage subscription
-            </button>
-          </div>
         </div>
-      </div>
-
-      {/* Expired-listing state banner */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-3 text-xs">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-gray-900">
-            Expired-listing state · separate scenario
-          </h3>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-            Expired · Hidden
-          </span>
-        </div>
-
-        <p className="text-gray-600 leading-relaxed">
-          If renewal is not completed after 3 Dec, this listing is hidden from new directory discovery. Existing supplier–reseller relationships and linked products are not deleted. Nia Stores remains connected; paid orders still need fulfillment.
-        </p>
-
-        <button
-          onClick={() => setActiveTab("subscription")}
-          className="px-4 py-2 bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-semibold rounded-lg shadow-xs"
-        >
-          Renew for ₦15,000/month
-        </button>
       </div>
       </>
       )}

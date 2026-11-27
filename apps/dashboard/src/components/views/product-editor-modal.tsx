@@ -203,9 +203,18 @@ export function ProductEditorModal({
   // Custom Fields (Key-Value attributes like Color, Size, Brand, Material)
   const [customFields, setCustomFields] = useState<CustomFieldItem[]>([]);
 
-  // Pricing & Margins
+  // Pricing & Margins + Strike-Through Compare-At & Product Type (Physical vs Digital)
   const [wholesaleCost, setWholesaleCost] = useState(product ? Math.round(product.basePriceNaira * 0.75) : 7500);
   const [sellingPrice, setSellingPrice] = useState(product?.basePriceNaira || 10000);
+  const [compareAtPrice, setCompareAtPrice] = useState<string>(
+    product?.customFields?.compareAtPriceNaira || ""
+  );
+  const [productType, setProductType] = useState<"PHYSICAL" | "DIGITAL">(
+    product?.customFields?.productType === "DIGITAL" ? "DIGITAL" : "PHYSICAL"
+  );
+  const [digitalDownloadUrl, setDigitalDownloadUrl] = useState<string>(
+    product?.customFields?.digitalDownloadUrl || ""
+  );
   const [stockTotal, setStockTotal] = useState(product?.stockTotal || 10);
   const [lowStockThreshold, setLowStockThreshold] = useState(5);
   const [isPublished, setIsPublished] = useState(true);
@@ -281,8 +290,22 @@ export function ProductEditorModal({
       setDescription(product.description || "");
       setSellingPrice(product.basePriceNaira);
       setWholesaleCost(Math.round(product.basePriceNaira * 0.75));
+      setCompareAtPrice(product.customFields?.compareAtPriceNaira || "");
+      setProductType(
+        product.customFields?.productType === "DIGITAL" ? "DIGITAL" : "PHYSICAL"
+      );
+      setDigitalDownloadUrl(product.customFields?.digitalDownloadUrl || "");
       setStockTotal(product.stockTotal);
-      setImages(product.primaryImageUrl ? [product.primaryImageUrl] : []);
+      const parsedGallery = (() => {
+        if (product.customFields?.galleryUrls) {
+          try {
+            const arr = JSON.parse(product.customFields.galleryUrls);
+            if (Array.isArray(arr) && arr.length > 0) return arr as string[];
+          } catch {}
+        }
+        return product.primaryImageUrl ? [product.primaryImageUrl] : [];
+      })();
+      setImages(parsedGallery);
       if (product.variants && product.variants.length > 0) {
         setHasVariants(true);
         setVariants(
@@ -301,7 +324,21 @@ export function ProductEditorModal({
       if (product.customFields) {
         setCustomFields(
           Object.entries(product.customFields)
-            .filter(([name]) => !["isBookable", "bookingMoq", "bookingDepositPercent", "bookingLeadTimeDays"].includes(name))
+            .filter(
+              ([name]) =>
+                ![
+                  "isBookable",
+                  "bookingMoq",
+                  "bookingDepositPercent",
+                  "bookingLeadTimeDays",
+                  "galleryUrls",
+                  "compareAtPriceNaira",
+                  "flashSalePercent",
+                  "flashSaleLabel",
+                  "productType",
+                  "digitalDownloadUrl",
+                ].includes(name)
+            )
             .map(([name, value], i) => ({
               id: `cf-${i}-${Date.now()}`,
               name,
@@ -329,6 +366,9 @@ export function ProductEditorModal({
       setDescription("");
       setSellingPrice(10000);
       setWholesaleCost(7500);
+      setCompareAtPrice("");
+      setProductType("PHYSICAL");
+      setDigitalDownloadUrl("");
       setStockTotal(10);
       setHasVariants(false);
       setVariants([]);
@@ -434,6 +474,17 @@ export function ProductEditorModal({
       customFieldsRecord["bookingLeadTimeDays"] = String(bookingLeadTimeDays);
     } else {
       customFieldsRecord["isBookable"] = "false";
+    }
+
+    if (images.length > 0) {
+      customFieldsRecord["galleryUrls"] = JSON.stringify(images);
+    }
+    if (Number(compareAtPrice) > sellingPrice) {
+      customFieldsRecord["compareAtPriceNaira"] = String(Number(compareAtPrice));
+    }
+    customFieldsRecord["productType"] = productType;
+    if (productType === "DIGITAL" && digitalDownloadUrl.trim()) {
+      customFieldsRecord["digitalDownloadUrl"] = digitalDownloadUrl.trim();
     }
 
     await onSave({
@@ -731,7 +782,7 @@ export function ProductEditorModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">
                 Wholesale Cost (NGN)
@@ -764,16 +815,49 @@ export function ProductEditorModal({
 
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-                Low-Stock Warning Threshold
+                Strike-Through Original (₦)
               </label>
-              <input
-                type="number"
-                value={lowStockThreshold}
-                onChange={(e) => setLowStockThreshold(Number(e.target.value) || 0)}
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 text-xs font-bold">₦</span>
+                <input
+                  type="number"
+                  placeholder="Optional e.g. 15000"
+                  value={compareAtPrice}
+                  onChange={(e) => setCompareAtPrice(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-xl pl-8 pr-3 py-2 text-xs text-gray-900 font-semibold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+                Product Fulfillment Type
+              </label>
+              <select
+                value={productType}
+                onChange={(e) => setProductType(e.target.value as "PHYSICAL" | "DIGITAL")}
                 className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-semibold focus:outline-none focus:border-emerald-500"
-              />
+              >
+                <option value="PHYSICAL">📦 Physical Merchandise</option>
+                <option value="DIGITAL">⚡ Digital / Instant Access</option>
+              </select>
             </div>
           </div>
+
+          {productType === "DIGITAL" && (
+            <div className="pt-2">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-emerald-800 mb-1">
+                Digital Delivery URL / Access Link (Sent automatically after payment)
+              </label>
+              <input
+                type="url"
+                placeholder="https://drive.google.com/... or digital access link"
+                value={digitalDownloadUrl}
+                onChange={(e) => setDigitalDownloadUrl(e.target.value)}
+                className="w-full bg-white border border-emerald-300 rounded-xl px-3.5 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+          )}
         </div>
 
         {/* Section 4: Variants Matrix (Matching Product Details & Edit.png) */}

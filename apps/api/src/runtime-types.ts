@@ -57,12 +57,98 @@ export type SalesChannel =
   | "FACEBOOK"
   | "PAYMENT_LINK"
   | "RESELLER_NETWORK"
-  | "WEB_STOREFRONT";
+  | "WEB_STOREFRONT"
+  | "POS_WALK_IN"
+  | "MANUAL_DM";
+
+export type RuntimeBookingStatus =
+  | "REQUESTED"
+  | "CONFIRMED"
+  | "DEPOSIT_PENDING"
+  | "DEPOSIT_PAID"
+  | "READY_FOR_DISPATCH"
+  | "FULFILLED"
+  | "CANCELLED";
+
+export interface RuntimeWholesaleBooking {
+  id: string;
+  reference: string;
+  clientName: string;
+  clientOrganization?: string;
+  clientPhone: string;
+  clientType: "WHOLESALER" | "RESELLER_NETWORK" | "RETAIL_CHAIN" | "VIP_BUYER" | "CORPORATE";
+  channel: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK" | "PORTAL";
+  productSku: string;
+  productName: string;
+  quantity: number;
+  unitPriceNaira: number;
+  totalAmountNaira: number;
+  depositRequiredNaira: number;
+  depositPaidNaira: number;
+  depositStatus: "UNPAID" | "PARTIAL" | "PAID";
+  targetDeliveryDate: string;
+  requestedAt: string;
+  status: RuntimeBookingStatus;
+  notes?: string;
+}
+
+export interface RuntimeBookingCatalogRules {
+  allCatalogBookable: boolean;
+  selectedBookableCategories: string[];
+  defaultDepositPercent: number;
+  defaultLeadTimeDays: number;
+  minimumOrderValueNaira: number;
+  autoExpireHours: number;
+}
+
+export interface RuntimeCustomerMetadata {
+  notes?: string;
+  tags?: string[];
+  email?: string;
+  segmentOverride?: "VIP" | "Repeat" | "New";
+  updatedAt?: string;
+}
+
+export interface RuntimeSocialAccountSync {
+  platform: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
+  connected: boolean;
+  handleOrPhone: string;
+  businessAssetId?: string;
+  businessPortfolioName?: string;
+  syncCatalogToSocial: boolean;
+  importSocialBuyersToCrm: boolean;
+  copilotAutoReply: boolean;
+  webhookStatus: "ACTIVE" | "PENDING" | "DISCONNECTED";
+  lastSyncedAt?: string;
+  syncedProductsCount?: number;
+}
+
+export interface RuntimeFeatureFlags {
+  webCheckoutEnabled: boolean;
+  guestCheckoutEnabled: boolean;
+  liveStockCountdownEnabled: boolean;
+  vacationModeEnabled: boolean;
+  whatsappCopilotEnabled: boolean;
+  instagramDmCopilotEnabled: boolean;
+  facebookMessengerCopilotEnabled: boolean;
+  autoHoldStockOnChatCheckout: boolean;
+  marketBoostDiscoveryEnabled: boolean;
+  autoApproveResellerMirrors: boolean;
+  interstateMirroringEnabled: boolean;
+  requirePasskeyForWithdrawals: boolean;
+  requireSmsOtpOnNewDevice: boolean;
+}
 
 export interface RuntimeVendor {
   id: string;
   slug: string;
   businessName: string;
+  email?: string;
+  passwordHash?: string;
+  phoneVerifiedAt?: string;
+  totpSecret?: string;
+  totpEnabled?: boolean;
+  totpVerifiedAt?: string;
   role?: "reseller" | "starter" | "growth" | "pro" | "vendor" | "supplier";
   whatsappPhone: string;
   whatsappPhoneId: string;
@@ -103,6 +189,15 @@ export interface RuntimeVendor {
   invoices?: RuntimePlatformInvoice[];
   shipbubbleConfig?: RuntimeShipbubbleConfig;
   storefrontConfig?: Record<string, unknown>;
+  featureFlags?: RuntimeFeatureFlags;
+  socialAccounts?: {
+    WHATSAPP?: RuntimeSocialAccountSync;
+    INSTAGRAM?: RuntimeSocialAccountSync;
+    FACEBOOK?: RuntimeSocialAccountSync;
+  };
+  wholesaleBookings?: RuntimeWholesaleBooking[];
+  bookingCatalogRules?: RuntimeBookingCatalogRules;
+  customerMetadata?: Record<string, RuntimeCustomerMetadata>;
 }
 
 export interface RuntimeShipbubbleConfig {
@@ -600,7 +695,11 @@ export interface RuntimeCustomer {
   id: string;
   whatsappPhone: string;
   name: string;
+  email?: string;
   defaultAddress?: string;
+  notes?: string;
+  tags?: string[];
+  segmentOverride?: "VIP" | "Repeat" | "New";
   totalOrdersCount: number;
   lifetimeSpendKobo: bigint;
   firstSeenAt: Date;

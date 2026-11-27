@@ -219,6 +219,9 @@ export class PrismaPersistenceStore implements PersistenceStore {
       `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "splitSettlementStatus" TEXT DEFAULT 'NOT_APPLICABLE'`,
       `UPDATE "Order" SET "isDropship" = COALESCE("isDropship", false), "supplierShareKobo" = COALESCE("supplierShareKobo", 0), "resellerShareKobo" = COALESCE("resellerShareKobo", 0), "platformFeeKobo" = COALESCE("platformFeeKobo", 0), "splitSettlementStatus" = COALESCE("splitSettlementStatus", 'NOT_APPLICABLE') WHERE "platformFeeKobo" IS NULL OR "supplierShareKobo" IS NULL OR "resellerShareKobo" IS NULL OR "isDropship" IS NULL OR "splitSettlementStatus" IS NULL`,
       `ALTER TABLE "MarketBoostListing" ADD COLUMN IF NOT EXISTS "coveredLgas" JSONB DEFAULT '[]'::jsonb`,
+      `ALTER TABLE "MarketBoostListing" ADD COLUMN IF NOT EXISTS "mirroredCategories" JSONB DEFAULT '[]'::jsonb`,
+      `ALTER TABLE "MarketBoostListing" ADD COLUMN IF NOT EXISTS "mirroredProductSkus" JSONB DEFAULT '[]'::jsonb`,
+      `ALTER TABLE "MarketBoostListing" ADD COLUMN IF NOT EXISTS "wholesaleDiscountRules" JSONB DEFAULT '[]'::jsonb`,
       `ALTER TABLE "SupplierProfile" ADD COLUMN IF NOT EXISTS "coveredLgas" JSONB DEFAULT '[]'::jsonb`,
       `UPDATE "Product" SET "stockReserved" = GREATEST(0, "stockReserved"), "stockTotal" = GREATEST(0, "stockTotal") WHERE "stockReserved" < 0 OR "stockTotal" < 0`,
       `UPDATE "ProductVariant" SET "stockReserved" = GREATEST(0, "stockReserved"), "stockTotal" = GREATEST(0, "stockTotal") WHERE "stockReserved" < 0 OR "stockTotal" < 0`,
@@ -312,6 +315,30 @@ export class PrismaPersistenceStore implements PersistenceStore {
         id: vendor.id,
         slug: vendor.slug,
         businessName: vendor.businessName,
+        email:
+          typeof extMeta?.email === "string"
+            ? extMeta.email
+            : `${vendor.slug}@caterlog.store`,
+        passwordHash:
+          typeof extMeta?.passwordHash === "string"
+            ? extMeta.passwordHash
+            : undefined,
+        phoneVerifiedAt:
+          typeof extMeta?.phoneVerifiedAt === "string"
+            ? extMeta.phoneVerifiedAt
+            : undefined,
+        totpSecret:
+          typeof extMeta?.totpSecret === "string"
+            ? extMeta.totpSecret
+            : undefined,
+        totpEnabled:
+          typeof extMeta?.totpEnabled === "boolean"
+            ? extMeta.totpEnabled
+            : undefined,
+        totpVerifiedAt:
+          typeof extMeta?.totpVerifiedAt === "string"
+            ? extMeta.totpVerifiedAt
+            : undefined,
         role: hydratedRole,
         whatsappPhone: vendor.whatsappPhone,
         whatsappPhoneId: vendor.whatsappPhoneId ?? "",
@@ -403,6 +430,25 @@ export class PrismaPersistenceStore implements PersistenceStore {
           : undefined,
         shipbubbleConfig: extMeta?.shipbubbleConfig as RuntimeVendor["shipbubbleConfig"],
         storefrontConfig: cleanStorefrontConfig,
+        featureFlags:
+          extMeta?.featureFlags && typeof extMeta.featureFlags === "object"
+            ? (extMeta.featureFlags as RuntimeVendor["featureFlags"])
+            : undefined,
+        socialAccounts:
+          extMeta?.socialAccounts && typeof extMeta.socialAccounts === "object"
+            ? (extMeta.socialAccounts as RuntimeVendor["socialAccounts"])
+            : undefined,
+        wholesaleBookings: Array.isArray(extMeta?.wholesaleBookings)
+          ? (extMeta.wholesaleBookings as RuntimeVendor["wholesaleBookings"])
+          : undefined,
+        bookingCatalogRules:
+          extMeta?.bookingCatalogRules && typeof extMeta.bookingCatalogRules === "object"
+            ? (extMeta.bookingCatalogRules as RuntimeVendor["bookingCatalogRules"])
+            : undefined,
+        customerMetadata:
+          extMeta?.customerMetadata && typeof extMeta.customerMetadata === "object"
+            ? (extMeta.customerMetadata as RuntimeVendor["customerMetadata"])
+            : undefined,
       },
       products: vendor.products.map((product) => ({
         id: product.id,
@@ -447,16 +493,28 @@ export class PrismaPersistenceStore implements PersistenceStore {
         isActive: discount.isActive,
       })),
       orders: vendor.orders.map((order) => this.mapOrder(order)),
-      customers: vendor.customers.map((c) => ({
-        id: c.id,
-        whatsappPhone: c.whatsappPhone,
-        name: c.name ?? c.whatsappPhone,
-        defaultAddress: c.defaultAddress ?? undefined,
-        totalOrdersCount: c.totalOrdersCount,
-        lifetimeSpendKobo: c.lifetimeSpendKobo,
-        firstSeenAt: c.firstSeenAt,
-        lastOrderAt: c.lastOrderAt ?? undefined,
-      })),
+      customers: vendor.customers.map((c) => {
+        const custMeta =
+          extMeta?.customerMetadata &&
+          typeof extMeta.customerMetadata === "object" &&
+          !Array.isArray(extMeta.customerMetadata)
+            ? (extMeta.customerMetadata as Record<string, any>)[c.whatsappPhone]
+            : undefined;
+        return {
+          id: c.id,
+          whatsappPhone: c.whatsappPhone,
+          name: c.name ?? c.whatsappPhone,
+          email: typeof custMeta?.email === "string" ? custMeta.email : undefined,
+          defaultAddress: c.defaultAddress ?? undefined,
+          notes: typeof custMeta?.notes === "string" ? custMeta.notes : undefined,
+          tags: Array.isArray(custMeta?.tags) ? (custMeta.tags as string[]) : undefined,
+          segmentOverride: custMeta?.segmentOverride,
+          totalOrdersCount: c.totalOrdersCount,
+          lifetimeSpendKobo: c.lifetimeSpendKobo,
+          firstSeenAt: c.firstSeenAt,
+          lastOrderAt: c.lastOrderAt ?? undefined,
+        };
+      }),
       processedTransactionRefs: processed.map((row) => row.providerTransactionRef),
       chatMessages: vendor.chatMessages.map((msg) => ({
         id: msg.id,
@@ -682,6 +740,12 @@ export class PrismaPersistenceStore implements PersistenceStore {
         ...baseStorefront,
         __vendorExtendedState: {
           role: vendor.role ?? "growth",
+          email: vendor.email,
+          passwordHash: vendor.passwordHash,
+          phoneVerifiedAt: vendor.phoneVerifiedAt,
+          totpSecret: vendor.totpSecret,
+          totpEnabled: vendor.totpEnabled,
+          totpVerifiedAt: vendor.totpVerifiedAt,
           instagramConnected: vendor.instagramConnected,
           instagramBusinessId: vendor.instagramBusinessId,
           facebookPageName: vendor.facebookPageName,
@@ -708,6 +772,11 @@ export class PrismaPersistenceStore implements PersistenceStore {
           trustTier: vendor.trustTier,
           invoices: vendor.invoices,
           shipbubbleConfig: vendor.shipbubbleConfig,
+          featureFlags: vendor.featureFlags,
+          socialAccounts: vendor.socialAccounts,
+          wholesaleBookings: vendor.wholesaleBookings,
+          bookingCatalogRules: vendor.bookingCatalogRules,
+          customerMetadata: vendor.customerMetadata,
         },
       };
 
@@ -946,13 +1015,28 @@ export class PrismaPersistenceStore implements PersistenceStore {
                 name: order.customerName,
                 defaultAddress: order.deliveryAddress ?? null,
                 totalOrdersCount: 1,
-                lifetimeSpendKobo: 0n,
+                lifetimeSpendKobo:
+                  order.status === "PAID"
+                    ? order.amountPaidKobo > 0n
+                      ? order.amountPaidKobo
+                      : order.totalAmountKobo
+                    : 0n,
                 lastOrderAt: order.createdAt,
               },
               update: {
                 name: order.customerName,
                 ...(order.deliveryAddress ? { defaultAddress: order.deliveryAddress } : {}),
                 totalOrdersCount: { increment: 1 },
+                ...(order.status === "PAID"
+                  ? {
+                      lifetimeSpendKobo: {
+                        increment:
+                          order.amountPaidKobo > 0n
+                            ? order.amountPaidKobo
+                            : order.totalAmountKobo,
+                      },
+                    }
+                  : {}),
                 lastOrderAt: order.createdAt,
               },
             }),
@@ -1026,6 +1110,20 @@ export class PrismaPersistenceStore implements PersistenceStore {
                 await tx.productVariant.update({
                   where: { id: matchedVariantId },
                   data: { stockReserved: { increment: it.quantity } },
+                });
+              }
+            } else if (isAlreadyPaid) {
+              await tx.product.update({
+                where: { id: dbProd.id },
+                data: { stockTotal: Math.max(0, dbProd.stockTotal - it.quantity) },
+              });
+              if (matchedVariantId) {
+                const matchedVar = dbProd.variants.find((v) => v.id === matchedVariantId);
+                await tx.productVariant.update({
+                  where: { id: matchedVariantId },
+                  data: {
+                    stockTotal: Math.max(0, (matchedVar?.stockTotal ?? it.quantity) - it.quantity),
+                  },
                 });
               }
             }
@@ -1592,13 +1690,47 @@ export class PrismaPersistenceStore implements PersistenceStore {
   }
 
   public async saveSupplierProfile(supplier: import("../runtime-types.ts").RuntimeSupplierProfile): Promise<void> {
-    await prisma.supplierProfile.updateMany({
-      where: {
-        OR: [{ id: supplier.id }, { slug: supplier.slug }],
-      },
-      data: {
+    await this.withRetry("saveSupplierProfile", async () => {
+      const data = {
+        name: supplier.name,
+        verified: supplier.verified,
+        cacNumber: supplier.cacNumber || null,
+        category: supplier.category,
+        location: supplier.location,
+        state: supplier.state,
+        shippingScope: supplier.shippingScope,
+        allowInterstate: supplier.allowInterstate,
+        coveredStates: toJson(supplier.coveredStates),
+        coveredLgas: toJson(supplier.coveredLgas ?? []),
+        warehouseAddress: supplier.warehouseAddress || null,
+        phone: supplier.phone,
+        whatsapp: supplier.whatsapp,
+        rating: supplier.rating,
+        totalFulfilled: supplier.totalFulfilled,
+        subAccountCode: supplier.subAccountCode || null,
+        leadTime: supplier.leadTime || "Same-Day Dispatch",
+        cutoffTime: supplier.cutoffTime || "3:00 PM WAT",
+        wholesaleTerms: toJson(supplier.wholesaleTerms),
         catalogProducts: toJson(supplier.catalogProducts),
-      },
+      };
+      const existing = await prisma.supplierProfile.findFirst({
+        where: {
+          OR: [{ id: supplier.id }, { slug: supplier.slug }],
+        },
+      });
+      if (existing) {
+        await prisma.supplierProfile.update({
+          where: { id: existing.id },
+          data,
+        });
+      } else {
+        await prisma.supplierProfile.create({
+          data: {
+            slug: supplier.slug,
+            ...data,
+          },
+        });
+      }
     });
   }
 
@@ -1834,6 +1966,37 @@ export class PrismaPersistenceStore implements PersistenceStore {
         data: { isDismissed: true },
       });
     }
+  }
+
+  public async saveCustomer(customer: import("../runtime-types.ts").RuntimeCustomer): Promise<void> {
+    await this.withRetry("saveCustomer", async () => {
+      const vendorId = await this.requireVendorId();
+      const upserted = await prisma.customer.upsert({
+        where: {
+          vendorId_whatsappPhone: {
+            vendorId,
+            whatsappPhone: customer.whatsappPhone,
+          },
+        },
+        create: {
+          vendorId,
+          whatsappPhone: customer.whatsappPhone,
+          name: customer.name || customer.whatsappPhone,
+          defaultAddress: customer.defaultAddress ?? null,
+          totalOrdersCount: customer.totalOrdersCount ?? 0,
+          lifetimeSpendKobo: customer.lifetimeSpendKobo ?? 0n,
+          firstSeenAt: customer.firstSeenAt ?? new Date(),
+          lastOrderAt: customer.lastOrderAt ?? null,
+        },
+        update: {
+          name: customer.name || customer.whatsappPhone,
+          ...(customer.defaultAddress !== undefined
+            ? { defaultAddress: customer.defaultAddress || null }
+            : {}),
+        },
+      });
+      customer.id = upserted.id;
+    });
   }
 
   public async close(): Promise<void> {

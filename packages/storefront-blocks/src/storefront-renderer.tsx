@@ -350,46 +350,141 @@ export function StorefrontRenderer({
 
             {trackedReceipt && (
               <div
-                className={`mt-6 p-6 border ${cardRadius} shadow-md space-y-4`}
+                className={`mt-6 p-6 sm:p-8 border ${cardRadius} shadow-lg space-y-6`}
                 style={{
                   backgroundColor: palette.cardSurfaceBg,
                   borderColor: palette.borderSubtle,
                 }}
               >
-                <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: palette.borderSubtle }}>
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 border-b pb-4"
+                  style={{ borderColor: palette.borderSubtle }}
+                >
                   <div>
-                    <span className="text-xs font-bold uppercase tracking-wider" style={{ color: palette.textMuted }}>
-                      Order Reference
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wider"
+                      style={{ color: palette.textMuted }}
+                    >
+                      Official Order Receipt &amp; Live Tracker
                     </span>
-                    <h3 className="text-xl font-black">#{trackedReceipt.shortCode}</h3>
+                    <h3 className="text-2xl font-black mt-0.5">
+                      #{trackedReceipt.shortCode}
+                    </h3>
+                    <p className="text-xs mt-0.5" style={{ color: palette.textMuted }}>
+                      Placed {new Date(trackedReceipt.createdAt).toLocaleString()} ·{" "}
+                      {vendor.businessName}
+                    </p>
                   </div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      trackedReceipt.isPaid
-                        ? "bg-emerald-500/15 text-emerald-700"
-                        : "bg-amber-500/15 text-amber-700"
-                    }`}
-                  >
-                    {trackedReceipt.status.replace(/_/g, " ")}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-extrabold ${
+                        trackedReceipt.isPaid
+                          ? "bg-emerald-500/15 text-emerald-700"
+                          : "bg-amber-500/15 text-amber-700"
+                      }`}
+                    >
+                      {trackedReceipt.status.replace(/_/g, " ")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="px-3 py-1.5 rounded-lg border text-xs font-bold cursor-pointer hover:opacity-80"
+                      style={{
+                        borderColor: palette.borderSubtle,
+                        color: palette.textPrimary,
+                      }}
+                    >
+                      🖨️ Print Receipt
+                    </button>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 text-xs">
+                {/* 4-Step Live Order Fulfillment Timeline */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                  {[
+                    {
+                      step: "1. Reserved",
+                      done: true,
+                      sub: "Stock Locked",
+                    },
+                    {
+                      step: "2. Payment",
+                      done: trackedReceipt.isPaid,
+                      sub: trackedReceipt.isPaid ? "Verified" : "Awaiting Transfer",
+                    },
+                    {
+                      step: "3. Dispatched",
+                      done:
+                        trackedReceipt.status === "OUT_FOR_DELIVERY" ||
+                        trackedReceipt.status === "FULFILLED",
+                      sub: trackedReceipt.dispatchedAt ? "With Courier" : "Preparing",
+                    },
+                    {
+                      step: "4. Delivered",
+                      done: trackedReceipt.status === "FULFILLED",
+                      sub:
+                        trackedReceipt.status === "FULFILLED"
+                          ? "Completed"
+                          : "Doorway Drop-off",
+                    },
+                  ].map((m, i) => (
+                    <div
+                      key={i}
+                      className="p-3 rounded-xl border"
+                      style={{
+                        borderColor: m.done ? config.theme.accentColor : palette.borderSubtle,
+                        backgroundColor: m.done
+                          ? `${config.theme.accentColor}12`
+                          : palette.sectionAltBg,
+                      }}
+                    >
+                      <div className="font-extrabold flex items-center justify-between">
+                        <span>{m.step}</span>
+                        <span>{m.done ? "✓" : "○"}</span>
+                      </div>
+                      <div className="text-[11px] mt-0.5" style={{ color: palette.textMuted }}>
+                        {m.sub}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs p-4 rounded-xl border" style={{ borderColor: palette.borderSubtle, backgroundColor: palette.sectionAltBg }}>
                   <div>
                     <p style={{ color: palette.textMuted }}>Customer</p>
-                    <p className="font-bold">{trackedReceipt.customerName}</p>
+                    <p className="font-bold text-sm">{trackedReceipt.customerName}</p>
+                    <p className="font-mono text-[11px]" style={{ color: palette.textSecondary }}>
+                      {trackedReceipt.customerPhone}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ color: palette.textMuted }}>Delivery Destination</p>
+                    <p className="font-bold">
+                      {trackedReceipt.deliveryAddress || trackedReceipt.shippingZoneName}
+                    </p>
+                    <p className="text-[11px]" style={{ color: palette.textSecondary }}>
+                      Zone: {trackedReceipt.shippingZoneName}
+                    </p>
                   </div>
                   <div>
                     <p style={{ color: palette.textMuted }}>Total Amount</p>
-                    <p className="font-bold">{trackedReceipt.totalAmountFormatted}</p>
+                    <p className="font-black text-base" style={{ color: config.theme.accentColor }}>
+                      {trackedReceipt.totalAmountFormatted}
+                    </p>
+                    <p className="text-[11px]" style={{ color: palette.textSecondary }}>
+                      Subtotal: {trackedReceipt.subtotalFormatted} · Shipping:{" "}
+                      {trackedReceipt.shippingFeeFormatted}
+                    </p>
                   </div>
                   <div>
-                    <p style={{ color: palette.textMuted }}>Delivery Zone</p>
-                    <p className="font-bold">{trackedReceipt.shippingZoneName}</p>
-                  </div>
-                  <div>
-                    <p style={{ color: palette.textMuted }}>Payment Status</p>
+                    <p style={{ color: palette.textMuted }}>Payment Verification Stamp</p>
                     <p className="font-bold text-emerald-600">{trackedReceipt.paymentStamp}</p>
+                    {!trackedReceipt.isPaid && trackedReceipt.accountNumber && (
+                      <p className="font-mono text-[11px] mt-0.5">
+                        Transfer to: <strong>{trackedReceipt.accountNumber}</strong> (
+                        {trackedReceipt.bankName})
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -746,6 +841,8 @@ export function StorefrontRenderer({
           instagramHandle={vendor.instagramHandle}
           baseCity={vendor.baseCity}
           baseState={vendor.baseState}
+          customDomain={config.customDomain}
+          policiesAndPixels={config.policiesAndPixels}
           products={products}
           onSelectPage={setActivePage}
           onSelectProduct={setQuickViewProduct}

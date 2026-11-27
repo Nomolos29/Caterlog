@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
-import type { CustomerRecordItem, OrderItem } from "@/lib/types";
+import React, { useState, useMemo } from "react";
+import { api } from "@/lib/api";
+import type { CustomerRecordItem, DiscountItem, OrderItem, VendorState } from "@/lib/types";
 import { EmptyState } from "../ui/empty-state";
 
 interface CustomerProfile {
@@ -24,6 +25,8 @@ interface CustomerProfile {
 interface CustomersViewProps {
   orders: OrderItem[];
   dbCustomers?: CustomerRecordItem[];
+  discounts?: DiscountItem[];
+  onStateChange?: (state: VendorState) => void;
   onSelectOrder?: (order: OrderItem) => void;
   onNavigateToPaymentLinks?: (customerName: string) => void;
 }
@@ -31,6 +34,8 @@ interface CustomersViewProps {
 export function CustomersView({
   orders,
   dbCustomers = [],
+  discounts = [],
+  onStateChange,
   onSelectOrder,
   onNavigateToPaymentLinks,
 }: CustomersViewProps) {
@@ -40,6 +45,36 @@ export function CustomersView({
   const [activeTab, setActiveTab] = useState<"overview" | "orders" | "notes">("overview");
   const [customerNotes, setCustomerNotes] = useState<Record<string, string>>({});
   const [newNoteInput, setNewNoteInput] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
+  // Add Customer Standalone Popup
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [newCustName, setNewCustName] = useState("");
+  const [newCustPhone, setNewCustPhone] = useState("+234");
+  const [newCustEmail, setNewCustEmail] = useState("");
+  const [newCustAddress, setNewCustAddress] = useState("");
+  const [newCustSegment, setNewCustSegment] = useState<"New" | "Repeat" | "VIP">("New");
+  const [newCustNote, setNewCustNote] = useState("");
+  const [savingCustomer, setSavingCustomer] = useState(false);
+
+  // Segment Broadcast Standalone Popup
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [bcastSegment, setBcastSegment] = useState<
+    "ALL" | "VIP" | "Repeat" | "New" | "PENDING_ORDERS"
+  >("ALL");
+  const [bcastChannel, setBcastChannel] = useState<"WHATSAPP" | "INSTAGRAM" | "SMS">("WHATSAPP");
+  const [bcastMessage, setBcastMessage] = useState(
+    "Hello {name}! We just restocked our best-selling items and opened fresh weekend discounts. Tap below to reserve yours before stock runs out!"
+  );
+  const [bcastPromoCode, setBcastPromoCode] = useState("");
+  const [bcastIncludeLink, setBcastIncludeLink] = useState(true);
+  const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [broadcastReceipt, setBroadcastReceipt] = useState<{
+    recipientCount: number;
+    segment: string;
+    channel: string;
+  } | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Aggregate customers from real orders (chronological pass -> sorted most-recent first)
   const customers: CustomerProfile[] = useMemo(() => {
@@ -113,6 +148,9 @@ export function CustomersView({
         if (dbc.defaultAddress && (!target.location || target.location === "Nigeria")) {
           target.location = dbc.defaultAddress;
         }
+        if (dbc.email) target.email = dbc.email;
+        if (dbc.notes) target.notes = dbc.notes;
+        if (dbc.segmentOverride) target.tag = dbc.segmentOverride;
         continue;
       }
       const ts = new Date(dbc.lastOrderAt || dbc.firstSeenAt).getTime() || Date.now();
@@ -134,9 +172,13 @@ export function CustomersView({
         key: customerKey,
         name: cleanName,
         phone,
-        email: `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@buyer.caterlog.shop`,
+        email:
+          dbc.email ||
+          `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@buyer.caterlog.shop`,
         location: dbc.defaultAddress || "Nigeria",
-        tag: dbc.totalOrdersCount > 3 ? "VIP" : dbc.totalOrdersCount > 1 ? "Repeat" : "New",
+        tag:
+          dbc.segmentOverride ||
+          (dbc.totalOrdersCount > 3 ? "VIP" : dbc.totalOrdersCount > 1 ? "Repeat" : "New"),
         firstOrderDate: firstDateLabel,
         lastOrderDate: lastDateLabel,
         lastOrderTimestamp: ts,
@@ -144,6 +186,7 @@ export function CustomersView({
         totalSpentNaira: dbc.lifetimeSpendNaira,
         totalSpentFormatted: dbc.lifetimeSpendFormatted,
         hasWebsiteOrders: false,
+        notes: dbc.notes,
         orders: [],
       });
     }
@@ -195,29 +238,119 @@ export function CustomersView({
     document.body.removeChild(link);
   };
 
-  const handleAddNote = (phone: string) => {
+  const handleAddNote = async (cust: CustomerProfile) => {
     if (!newNoteInput.trim()) return;
+    const existingNotes = customerNotes[cust.phone] ?? cust.notes ?? "";
+    const combined = existingNotes
+      ? `${existingNotes}\n• ${newNoteInput.trim()}`
+      : `• ${newNoteInput.trim()}`;
     setCustomerNotes((prev) => ({
       ...prev,
-      [phone]: prev[phone] ? `${prev[phone]}\n• ${newNoteInput.trim()}` : `• ${newNoteInput.trim()}`,
+      [cust.phone]: combined,
     }));
     setNewNoteInput("");
+    setSavingNote(true);
+    try {
+      const res = await api.upsertCustomer({
+        whatsappPhone: cust.phone,
+        name: cust.name,
+        notes: combined,
+      });
+      onStateChange?.(res.state);
+      setToastMsg("✓ Customer note saved to PostgreSQL!");
+      setTimeout(() => setToastMsg(null), 3000);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const handleCreateCustomerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustName.trim() || !newCustPhone.trim()) return;
+    setSavingCustomer(true);
+    try {
+      const res = await api.upsertCustomer({
+        whatsappPhone: newCustPhone.trim(),
+        name: newCustName.trim(),
+        email: newCustEmail.trim() || undefined,
+        defaultAddress: newCustAddress.trim() || undefined,
+        segmentOverride: newCustSegment,
+        notes: newCustNote.trim() ? `• ${newCustNote.trim()}` : undefined,
+      });
+      onStateChange?.(res.state);
+      setShowAddCustomerModal(false);
+      setNewCustName("");
+      setNewCustPhone("+234");
+      setNewCustEmail("");
+      setNewCustAddress("");
+      setNewCustNote("");
+      setToastMsg(`✓ Added ${res.customer.name} to Customers CRM in PostgreSQL!`);
+      setTimeout(() => setToastMsg(null), 3500);
+    } finally {
+      setSavingCustomer(false);
+    }
+  };
+
+  const handleSendBroadcastSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bcastMessage.trim()) return;
+    setSendingBroadcast(true);
+    try {
+      const res = await api.sendCustomerBroadcast({
+        segment: bcastSegment,
+        channel: bcastChannel,
+        messageText: bcastMessage.trim(),
+        includePromoCode: bcastPromoCode.trim() || undefined,
+        includeStoreLink: bcastIncludeLink,
+      });
+      onStateChange?.(res.state);
+      setBroadcastReceipt({
+        recipientCount: res.recipientCount,
+        segment: res.segment,
+        channel: res.channel,
+      });
+    } finally {
+      setSendingBroadcast(false);
+    }
   };
 
   return (
     <div className="space-y-6 sm:space-y-8 max-w-7xl mx-auto">
+      {toastMsg && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#0d5c3a] text-white text-xs font-bold px-4 py-3 rounded-2xl shadow-xl animate-popup-spring">
+          {toastMsg}
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">Customers</h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            Directory of buyers, purchase history, and direct WhatsApp communication channels.
+            Directory of buyers, purchase history, persistent CRM notes, and direct WhatsApp broadcast campaigns.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setBroadcastReceipt(null);
+              setShowBroadcastModal(true);
+            }}
+            className="text-xs font-bold px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 hover:bg-emerald-100 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>📢 Send Broadcast / Recovery Blast</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAddCustomerModal(true)}
+            className="text-xs font-bold px-3.5 py-2 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>+ Add Customer</span>
+          </button>
           <button
             onClick={handleExportCSV}
-            className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs flex items-center gap-1.5"
+            className="text-xs font-semibold px-3.5 py-2 rounded-xl bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
           >
             <span>↓ Export CSV</span>
           </button>
@@ -591,9 +724,18 @@ export function CustomersView({
             {activeTab === "notes" && (
               <div className="space-y-4 text-xs">
                 <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-3.5 text-gray-700">
-                  <div className="font-semibold text-amber-900 mb-1">Customer Preferences:</div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-semibold text-amber-900">
+                      Customer Preferences &amp; CRM Notes:
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Synced with PostgreSQL
+                    </span>
+                  </div>
                   <p className="whitespace-pre-line text-xs">
-                    {customerNotes[selectedCustomer.phone] || "No notes recorded yet for this customer."}
+                    {customerNotes[selectedCustomer.phone] ||
+                      selectedCustomer.notes ||
+                      "No notes recorded yet for this customer."}
                   </p>
                 </div>
 
@@ -608,14 +750,336 @@ export function CustomersView({
                       className="flex-1 bg-white border border-gray-200 rounded-xl px-3.5 py-2 text-xs text-gray-900 focus:outline-none focus:border-emerald-500"
                     />
                     <button
-                      onClick={() => handleAddNote(selectedCustomer.phone)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-colors shadow-2xs"
+                      type="button"
+                      disabled={savingNote}
+                      onClick={() => void handleAddNote(selectedCustomer)}
+                      className="bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-colors shadow-2xs cursor-pointer"
                     >
-                      Save
+                      {savingNote ? "Saving..." : "Save to DB"}
                     </button>
                   </div>
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Standalone Popup 1: Add Customer to CRM */}
+      {showAddCustomerModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 animate-backdrop-fade"
+          onClick={() => setShowAddCustomerModal(false)}
+        >
+          <form
+            onSubmit={handleCreateCustomerSubmit}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-[28px] max-w-lg w-full p-6 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border border-slate-200/80 space-y-5 text-xs animate-popup-spring"
+          >
+            <div className="flex items-start justify-between border-b border-gray-100 pb-4">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  Catlog Customer Directory
+                </span>
+                <h3 className="text-lg font-extrabold text-gray-900 mt-1">
+                  Add Customer to CRM
+                </h3>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Save a walk-in, phone, or social DM buyer directly to your PostgreSQL customer directory.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddCustomerModal(false)}
+                className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Tunde Bakare"
+                  value={newCustName}
+                  onChange={(e) => setNewCustName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 font-semibold focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">WhatsApp Phone *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="+234803..."
+                  value={newCustPhone}
+                  onChange={(e) => setNewCustPhone(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 font-mono focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">Email (Optional)</label>
+                <input
+                  type="email"
+                  placeholder="buyer@email.com"
+                  value={newCustEmail}
+                  onChange={(e) => setNewCustEmail(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">Buyer Segment Tag</label>
+                <select
+                  value={newCustSegment}
+                  onChange={(e) =>
+                    setNewCustSegment(e.target.value as "New" | "Repeat" | "VIP")
+                  }
+                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-semibold"
+                >
+                  <option value="New">New Buyer</option>
+                  <option value="Repeat">Repeat Buyer</option>
+                  <option value="VIP">VIP Client</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-gray-700 mb-1">Default Delivery Address</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 22 Admiralty Way, Lekki Phase 1, Lagos"
+                  value={newCustAddress}
+                  onChange={(e) => setNewCustAddress(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-gray-700 mb-1">Initial Merchant Note</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Sizing preference: EU 40, prefers morning dispatch"
+                  value={newCustNote}
+                  onChange={(e) => setNewCustNote(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setShowAddCustomerModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingCustomer}
+                className="px-5 py-2.5 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white font-bold shadow-xs cursor-pointer"
+              >
+                {savingCustomer ? "Saving to DB..." : "✓ Save Customer"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Standalone Popup 2: Customer Segment Broadcast & Abandoned Order Recovery */}
+      {showBroadcastModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 animate-backdrop-fade"
+          onClick={() => setShowBroadcastModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-[28px] max-w-xl w-full p-6 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border border-slate-200/80 space-y-5 text-xs animate-popup-spring"
+          >
+            {broadcastReceipt ? (
+              <div className="text-center space-y-4 py-2">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center text-3xl mx-auto">
+                  📢
+                </div>
+                <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  Campaign Dispatched &amp; Logged
+                </span>
+                <h3 className="text-xl font-extrabold text-gray-900">
+                  Sent to {broadcastReceipt.recipientCount} Buyer
+                  {broadcastReceipt.recipientCount === 1 ? "" : "s"}!
+                </h3>
+                <p className="text-xs text-gray-500 max-w-md mx-auto">
+                  Your {broadcastReceipt.channel} campaign was delivered to the{" "}
+                  <strong>{broadcastReceipt.segment}</strong> customer segment and recorded in your Co-Pilot activity log.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowBroadcastModal(false)}
+                  className="px-6 py-2.5 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSendBroadcastSubmit} className="space-y-4">
+                <div className="flex items-start justify-between border-b border-gray-100 pb-4">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      Catlog CRM Retargeting &amp; Recovery
+                    </span>
+                    <h3 className="text-lg font-extrabold text-gray-900 mt-1">
+                      Send Segment Broadcast or Payment Reminder
+                    </h3>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Announce restocks, share promo codes, or nudge shoppers with pending unpaid orders.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowBroadcastModal(false)}
+                    className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">
+                      Target Audience Segment
+                    </label>
+                    <select
+                      value={bcastSegment}
+                      onChange={(e) =>
+                        setBcastSegment(
+                          e.target.value as
+                            | "ALL"
+                            | "VIP"
+                            | "Repeat"
+                            | "New"
+                            | "PENDING_ORDERS"
+                        )
+                      }
+                      className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-semibold"
+                    >
+                      <option value="ALL">All Customers ({customers.length})</option>
+                      <option value="VIP">
+                        VIP Buyers ({customers.filter((c) => c.tag === "VIP").length})
+                      </option>
+                      <option value="Repeat">
+                        Repeat Buyers ({customers.filter((c) => c.tag === "Repeat").length})
+                      </option>
+                      <option value="New">
+                        New Buyers ({customers.filter((c) => c.tag === "New").length})
+                      </option>
+                      <option value="PENDING_ORDERS">
+                        ⏳ Unpaid / Abandoned Orders (
+                        {
+                          orders.filter(
+                            (o) =>
+                              o.status === "PENDING_PAYMENT" ||
+                              o.status === "PARTIALLY_PAID"
+                          ).length
+                        }
+                        )
+                      </option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">
+                      Delivery Channel
+                    </label>
+                    <select
+                      value={bcastChannel}
+                      onChange={(e) =>
+                        setBcastChannel(
+                          e.target.value as "WHATSAPP" | "INSTAGRAM" | "SMS"
+                        )
+                      }
+                      className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white font-semibold"
+                    >
+                      <option value="WHATSAPP">💬 WhatsApp Business Cloud</option>
+                      <option value="INSTAGRAM">📸 Instagram Direct Message</option>
+                      <option value="SMS">📱 Direct SMS Notification</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-gray-700">
+                      Message Body (Use {"{name}"} for buyer&apos;s first name)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBcastMessage(
+                          "Hi {name}! Your reserved items are waiting for you. Complete your transfer before your stock hold expires or reply if you need assistance!"
+                        )
+                      }
+                      className="text-[11px] font-semibold text-emerald-700 hover:underline cursor-pointer"
+                    >
+                      Use Abandoned Cart Template
+                    </button>
+                  </div>
+                  <textarea
+                    rows={4}
+                    required
+                    value={bcastMessage}
+                    onChange={(e) => setBcastMessage(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-gray-200 focus:outline-none focus:border-emerald-600 leading-relaxed"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-center bg-[#F8FAFC] p-3.5 rounded-2xl border border-slate-200/80">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">
+                      Attach Promo Voucher (Optional)
+                    </label>
+                    <select
+                      value={bcastPromoCode}
+                      onChange={(e) => setBcastPromoCode(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white font-mono font-bold"
+                    >
+                      <option value="">No Promo Code</option>
+                      {discounts.map((d) => (
+                        <option key={d.id} value={d.code}>
+                          {d.code} ({d.label})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer pt-4">
+                    <input
+                      type="checkbox"
+                      checked={bcastIncludeLink}
+                      onChange={(e) => setBcastIncludeLink(e.target.checked)}
+                      className="rounded text-emerald-600"
+                    />
+                    <span className="font-semibold text-gray-700">
+                      Append Direct Storefront Link
+                    </span>
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowBroadcastModal(false)}
+                    className="px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={sendingBroadcast}
+                    className="px-5 py-2.5 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white font-bold shadow-xs cursor-pointer"
+                  >
+                    {sendingBroadcast ? "Dispatching..." : "📢 Send Broadcast Now"}
+                  </button>
+                </div>
+              </form>
             )}
           </div>
         </div>

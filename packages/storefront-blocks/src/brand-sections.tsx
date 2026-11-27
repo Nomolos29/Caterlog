@@ -734,6 +734,8 @@ export function StorefrontFooterSection({
   instagramHandle,
   baseCity,
   baseState,
+  customDomain,
+  policiesAndPixels,
   products,
   onSelectPage,
   onSelectProduct,
@@ -745,6 +747,8 @@ export function StorefrontFooterSection({
   instagramHandle?: string;
   baseCity?: string;
   baseState?: string;
+  customDomain?: string;
+  policiesAndPixels?: import("./presets").StorefrontPoliciesAndPixels;
   products: StorefrontProduct[];
   onSelectPage: (page: StorefrontActivePage) => void;
   onSelectProduct: (p: StorefrontProduct) => void;
@@ -1005,8 +1009,31 @@ export function StorefrontFooterSection({
         className="max-w-7xl mx-auto pt-6 flex flex-col @sm:flex-row items-center justify-between gap-4 text-[11px] text-center @sm:text-left"
         style={{ color: palette.textMuted }}
       >
-        <p>© {new Date().getFullYear()} {businessName}. All rights reserved.</p>
-        <p>Instant Inventory Lock · Verified E-Commerce Storefront</p>
+        <div>
+          <p>
+            © {new Date().getFullYear()} {businessName}
+            {customDomain ? ` · ${customDomain}` : ""}. All rights reserved.
+          </p>
+          {policiesAndPixels?.returnPolicyText && (
+            <p className="text-[10px] mt-0.5 opacity-80">
+              Returns: {policiesAndPixels.returnPolicyText} ·{" "}
+              {policiesAndPixels.shippingSlaText}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {policiesAndPixels?.metaPixelId && (
+            <span className="px-2 py-0.5 rounded border text-[9px] font-mono">
+              Meta Pixel: {policiesAndPixels.metaPixelId}
+            </span>
+          )}
+          {policiesAndPixels?.tiktokPixelId && (
+            <span className="px-2 py-0.5 rounded border text-[9px] font-mono">
+              TikTok Pixel: {policiesAndPixels.tiktokPixelId}
+            </span>
+          )}
+          <span>Instant Inventory Lock · Verified E-Commerce Storefront</span>
+        </div>
       </div>
     </footer>
   );

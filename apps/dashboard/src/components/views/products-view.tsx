@@ -1,18 +1,33 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import type { ProductItem, ResellerMirror, SupplierProfile, PlatformRole } from "@/lib/types";
+import React, { useState, useEffect, useRef } from "react";
+import type {
+  BookingCatalogRules,
+  DiscountItem,
+  ProductItem,
+  ResellerMirror,
+  SupplierProfile,
+  PlatformRole,
+  VendorProfile,
+  VendorState,
+} from "@/lib/types";
 import { isResellerRole, isVendorRole } from "@/lib/types";
 import { PlusIcon } from "../icons";
 import { ProductEditorModal, buildStructuredSku } from "./product-editor-modal";
 import { EmptyState } from "../ui/empty-state";
-import { resolveImageUrl } from "@/lib/api";
+import { api, resolveImageUrl } from "@/lib/api";
+import { PromotionsStudioModal } from "../modals/promotions-studio-modal";
+import { SocialFlyerQrModal } from "../modals/social-flyer-qr-modal";
 
 interface ProductsViewProps {
   products: ProductItem[];
+  discounts?: DiscountItem[];
+  vendor?: VendorProfile;
+  bookingCatalogRules?: BookingCatalogRules;
   suppliers?: SupplierProfile[];
   resellerMirrors?: ResellerMirror[];
   workspaceRole?: PlatformRole;
+  onStateChange?: (state: VendorState) => void;
   initialTab?:
     | "all"
     | "my-inventory"
@@ -90,9 +105,13 @@ const INITIAL_RESELLING: ResellingItem[] = [];
 
 export function ProductsView({
   products,
+  discounts = [],
+  vendor,
+  bookingCatalogRules,
   suppliers = [],
   resellerMirrors = [],
   workspaceRole = "growth",
+  onStateChange,
   initialTab = "my-inventory",
   initialEditResellSku = null,
   onConsumeEditResellSku,
@@ -116,12 +135,30 @@ export function ProductsView({
   const [resellingList, setResellingList] =
     useState<ResellingItem[]>(INITIAL_RESELLING);
 
-  // Wholesale Catalog & Category Rules State
-  const [allCatalogBookable, setAllCatalogBookable] = useState(false);
-  const [selectedBookableCategories, setSelectedBookableCategories] = useState<string[]>([]);
+  // Promotions & Flyer Modals + CSV Import Ref
+  const [showPromotionsModal, setShowPromotionsModal] = useState(false);
+  const [showFlyerModal, setShowFlyerModal] = useState(false);
+  const [flyerTargetProduct, setFlyerTargetProduct] = useState<ProductItem | null>(null);
+  const [importingCsv, setImportingCsv] = useState(false);
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Wholesale Catalog & Category Rules State (Hydrated from PostgreSQL)
+  const [allCatalogBookable, setAllCatalogBookable] = useState(
+    bookingCatalogRules?.allCatalogBookable ?? false
+  );
+  const [selectedBookableCategories, setSelectedBookableCategories] = useState<string[]>(
+    bookingCatalogRules?.selectedBookableCategories ?? []
+  );
   const [bookableProductOverrides, setBookableProductOverrides] = useState<
     Record<string, { isBookable: boolean; moq: number; depositPercent: number }>
   >({});
+
+  useEffect(() => {
+    if (bookingCatalogRules) {
+      setAllCatalogBookable(bookingCatalogRules.allCatalogBookable);
+      setSelectedBookableCategories(bookingCatalogRules.selectedBookableCategories ?? []);
+    }
+  }, [bookingCatalogRules]);
 
   // Categories for wholesale configuration
   const allCategories = React.useMemo(() => {
@@ -133,23 +170,114 @@ export function ProductsView({
   }, [products]);
 
   const toggleCategoryBookable = (cat: string) => {
-    setSelectedBookableCategories((prev) =>
-      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
-    );
+    setSelectedBookableCategories((prev) => {
+      const next = prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat];
+      void api
+        .updateBookingCatalogRules({ selectedBookableCategories: next })
+        .then((res) => onStateChange?.(res.state))
+        .catch(() => {});
+      return next;
+    });
   };
 
   const toggleProductBookable = (skuCode: string) => {
-    setBookableProductOverrides((prev) => {
-      const current = prev[skuCode]?.isBookable ?? false;
-      return {
-        ...prev,
-        [skuCode]: {
-          isBookable: !current,
-          moq: prev[skuCode]?.moq || 10,
-          depositPercent: prev[skuCode]?.depositPercent || 30,
+    const prod = products.find((p) => p.skuCode === skuCode);
+    const current =
+      bookableProductOverrides[skuCode]?.isBookable ??
+      prod?.customFields?.isBookable === "true";
+    const nextBookable = !current;
+    setBookableProductOverrides((prev) => ({
+      ...prev,
+      [skuCode]: {
+        isBookable: nextBookable,
+        moq: prev[skuCode]?.moq || 10,
+        depositPercent: prev[skuCode]?.depositPercent || 30,
+      },
+    }));
+    if (prod && onUpdateProduct) {
+      void onUpdateProduct(skuCode, {
+        customFields: {
+          ...(prod.customFields ?? {}),
+          isBookable: nextBookable ? "true" : "false",
         },
-      };
-    });
+      });
+    }
+  };
+
+  const handleExportCatalogCsv = () => {
+    const headers = [
+      "SKU",
+      "Name",
+      "Category",
+      "PriceNaira",
+      "CompareAtPriceNaira",
+      "StockTotal",
+      "ProductType",
+      "ImageURL",
+      "Description",
+    ];
+    const rows = products.map((p) => [
+      `"${p.skuCode}"`,
+      `"${(p.name || "").replace(/"/g, '""')}"`,
+      `"${(p.category || "General").replace(/"/g, '""')}"`,
+      p.basePriceNaira,
+      p.customFields?.compareAtPriceNaira || "",
+      p.stockTotal,
+      p.customFields?.productType || "PHYSICAL",
+      `"${p.primaryImageUrl || ""}"`,
+      `"${(p.description || "").replace(/"/g, '""')}"`,
+    ]);
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `caterlog-products-${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportCatalogCsv = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportingCsv(true);
+    try {
+      const text = await file.text();
+      const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (lines.length < 2) return;
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i]!
+          .split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+          .map((c) => c.replace(/^"|"$/g, "").trim());
+        const [skuCol, nameCol, catCol, priceCol, compareCol, stockCol, typeCol, imgCol, descCol] =
+          cols;
+        if (!nameCol || !priceCol) continue;
+        const customFields: Record<string, string> = {};
+        if (compareCol && Number(compareCol) > Number(priceCol)) {
+          customFields.compareAtPriceNaira = String(Number(compareCol));
+        }
+        if (typeCol === "DIGITAL" || typeCol === "PHYSICAL") {
+          customFields.productType = typeCol;
+        }
+        await onAddProduct({
+          skuCode: skuCol || undefined,
+          name: nameCol,
+          category: catCol || "General",
+          priceNaira: Number(priceCol) || 5000,
+          stockTotal: Number(stockCol) || 10,
+          primaryImageUrl: imgCol || undefined,
+          description: descCol || undefined,
+          customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+        });
+      }
+    } finally {
+      setImportingCsv(false);
+      e.target.value = "";
+    }
   };
 
   useEffect(() => {
@@ -1292,7 +1420,14 @@ export function ProductsView({
           <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => {
-                setAllCatalogBookable((prev) => !prev);
+                setAllCatalogBookable((prev) => {
+                  const next = !prev;
+                  void api
+                    .updateBookingCatalogRules({ allCatalogBookable: next })
+                    .then((res) => onStateChange?.(res.state))
+                    .catch(() => {});
+                  return next;
+                });
               }}
               className={`px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-2xs cursor-pointer active:scale-95 ${
                 allCatalogBookable
@@ -1453,11 +1588,46 @@ export function ProductsView({
             Manage your digital inventory and live WhatsApp catalog.
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-center">
-          <div className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50/80 border border-emerald-200/60 rounded-lg text-emerald-800 text-xs font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>WhatsApp Catalog Live Sync</span>
-          </div>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+          <input
+            type="file"
+            ref={csvFileInputRef}
+            accept=".csv"
+            className="hidden"
+            onChange={handleImportCatalogCsv}
+          />
+          <button
+            type="button"
+            disabled={importingCsv}
+            onClick={() => csvFileInputRef.current?.click()}
+            className="px-3 py-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg text-gray-700 text-xs font-semibold cursor-pointer shadow-2xs"
+          >
+            {importingCsv ? "Importing..." : "↑ Import CSV"}
+          </button>
+          <button
+            type="button"
+            onClick={handleExportCatalogCsv}
+            className="px-3 py-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg text-gray-700 text-xs font-semibold cursor-pointer shadow-2xs"
+          >
+            ↓ Export CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFlyerTargetProduct(products[0] ?? null);
+              setShowFlyerModal(true);
+            }}
+            className="px-3 py-2 bg-white hover:bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-bold cursor-pointer shadow-2xs"
+          >
+            🎨 Flyer &amp; QR Kit
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPromotionsModal(true)}
+            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg text-amber-900 text-xs font-bold cursor-pointer shadow-2xs"
+          >
+            ⚡ Flash Sales &amp; Promos
+          </button>
           <button
             onClick={() => {
               setEditingProduct(null);
@@ -1723,29 +1893,49 @@ export function ProductsView({
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="font-bold text-emerald-800 text-sm">
-                        {(() => {
-                          const variantPrices =
-                            p.variants
-                              ?.map((v) => v.priceNaira)
-                              .filter(
-                                (pr): pr is number =>
-                                  typeof pr === "number" && pr > 0,
-                              ) || [];
-                          if (variantPrices.length > 0) {
-                            const minP = Math.min(...variantPrices);
-                            const maxP = Math.max(...variantPrices);
-                            if (minP !== maxP) {
-                              return `₦${minP.toLocaleString()} - ₦${maxP.toLocaleString()}`;
+                    <div className="flex items-center gap-1.5">
+                      <div className="text-right">
+                        {p.customFields?.compareAtPriceNaira &&
+                          Number(p.customFields.compareAtPriceNaira) > p.basePriceNaira && (
+                            <div className="text-[10px] line-through text-gray-400">
+                              ₦{Number(p.customFields.compareAtPriceNaira).toLocaleString()}
+                            </div>
+                          )}
+                        <div className="font-bold text-emerald-800 text-sm">
+                          {(() => {
+                            const variantPrices =
+                              p.variants
+                                ?.map((v) => v.priceNaira)
+                                .filter(
+                                  (pr): pr is number =>
+                                    typeof pr === "number" && pr > 0,
+                                ) || [];
+                            if (variantPrices.length > 0) {
+                              const minP = Math.min(...variantPrices);
+                              const maxP = Math.max(...variantPrices);
+                              if (minP !== maxP) {
+                                return `₦${minP.toLocaleString()} - ₦${maxP.toLocaleString()}`;
+                              }
                             }
-                          }
-                          return (
-                            p.basePriceFormatted ||
-                            `₦${p.basePriceNaira.toLocaleString()}`
-                          );
-                        })()}
+                            return (
+                              p.basePriceFormatted ||
+                              `₦${p.basePriceNaira.toLocaleString()}`
+                            );
+                          })()}
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        title="Generate Social Flyer & QR Card"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFlyerTargetProduct(p);
+                          setShowFlyerModal(true);
+                        }}
+                        className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1 hover:bg-emerald-50 rounded-lg text-emerald-700 transition-all cursor-pointer text-xs"
+                      >
+                        🎨
+                      </button>
                       {onDeleteProduct && (
                         <button
                           type="button"
@@ -1867,6 +2057,26 @@ export function ProductsView({
           return true;
         }}
       />
+
+      {/* Promotions, Coupons & Strike-Through Flash Sales Studio Popup */}
+      <PromotionsStudioModal
+        isOpen={showPromotionsModal}
+        onClose={() => setShowPromotionsModal(false)}
+        products={products}
+        discounts={discounts}
+        onStateChange={onStateChange}
+      />
+
+      {/* Social Flyer, Story Card & Printable QR Generator Popup */}
+      {vendor && (
+        <SocialFlyerQrModal
+          isOpen={showFlyerModal}
+          onClose={() => setShowFlyerModal(false)}
+          vendor={vendor}
+          products={products}
+          initialProduct={flyerTargetProduct}
+        />
+      )}
     </div>
   );
 }

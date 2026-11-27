@@ -1,12 +1,23 @@
 import React, { useState, useEffect } from "react";
-import type { ProductItem, OrderItem, PaymentLinkItem } from "@/lib/types";
+import type {
+  ProductItem,
+  OrderItem,
+  PaymentLinkItem,
+  ShippingZoneItem,
+  DiscountItem,
+  VendorState,
+} from "@/lib/types";
+import { ManualOrderCreatorModal } from "../modals/manual-order-creator-modal";
 
 interface PaymentLinksViewProps {
   products: ProductItem[];
   orders: OrderItem[];
+  shippingZones?: ShippingZoneItem[];
+  discounts?: DiscountItem[];
   paymentLinks?: PaymentLinkItem[];
   vendorName: string;
   initialCustomerName?: string;
+  onStateChange?: (state: VendorState) => void;
   onCreatePaymentLink?: (input: {
     customerName?: string;
     productSku?: string;
@@ -19,13 +30,17 @@ interface PaymentLinksViewProps {
 export function PaymentLinksView({
   products,
   orders,
+  shippingZones = [],
+  discounts = [],
   paymentLinks = [],
   vendorName,
   initialCustomerName = "",
+  onStateChange,
   onCreatePaymentLink,
   onDeletePaymentLink,
 }: PaymentLinksViewProps) {
   const [customerName, setCustomerName] = useState(initialCustomerName);
+  const [showMultiItemInvoiceModal, setShowMultiItemInvoiceModal] = useState(false);
 
   useEffect(() => {
     if (initialCustomerName) {
@@ -98,7 +113,14 @@ export function PaymentLinksView({
             Generate a secure checkout link with dynamic Monnify virtual account for your customers.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowMultiItemInvoiceModal(true)}
+            className="bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-900 font-bold text-xs py-2.5 px-3.5 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+          >
+            <span>🧾 Multi-Item POS / DM Invoice</span>
+          </button>
           <button
             onClick={handleShareWhatsApp}
             className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold text-xs py-2.5 px-3.5 rounded-xl flex items-center gap-1.5 transition-colors"
@@ -427,6 +449,19 @@ export function PaymentLinksView({
           </table>
         </div>
       </div>
+
+      <ManualOrderCreatorModal
+        isOpen={showMultiItemInvoiceModal}
+        onClose={() => setShowMultiItemInvoiceModal(false)}
+        products={products}
+        shippingZones={shippingZones}
+        discounts={discounts}
+        vendorName={vendorName}
+        initialCustomerName={customerName}
+        onOrderCreated={(_order, nextState) => {
+          onStateChange?.(nextState);
+        }}
+      />
     </div>
   );
 }

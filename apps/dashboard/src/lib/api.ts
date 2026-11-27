@@ -297,9 +297,144 @@ export const api = {
     code: string;
     type: Discount["type"];
     value: number;
+    minOrderNaira?: number;
+    maxUses?: number | null;
+    expiresAt?: string;
   }): Promise<VendorState> {
     return request<VendorState>("/api/v1/vendor/discounts", {
       method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  applyFlashSale(input: {
+    action: "APPLY" | "CLEAR";
+    discountPercent?: number;
+    scope: "ALL" | "CATEGORY" | "PRODUCTS";
+    targetCategory?: string;
+    targetSkus?: string[];
+    label?: string;
+  }): Promise<{ status: string; affectedCount: number; state: VendorState }> {
+    return request("/api/v1/vendor/products/flash-sale", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  createManualOrder(input: {
+    customerName: string;
+    customerPhone: string;
+    customerEmail?: string;
+    salesChannel?: import("./types").SalesChannel;
+    paymentStatus: "PAID_OFFLINE" | "AWAITING_PAYMENT";
+    paymentMethod?: "POS_TERMINAL" | "CASH" | "BANK_TRANSFER" | "MONNIFY_INVOICE";
+    shippingZoneId?: string;
+    shippingZoneName?: string;
+    customShippingFeeNaira?: number;
+    discountCode?: string;
+    customDiscountNaira?: number;
+    deliveryAddress?: string;
+    notes?: string;
+    items: Array<{
+      productSku?: string;
+      productId?: string;
+      variantId?: string;
+      variantSku?: string;
+      quantity: number;
+      customUnitPriceNaira?: number;
+    }>;
+  }): Promise<{
+    status: string;
+    order: Order;
+    receipt: PublicOrderReceipt;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/orders/manual", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  upsertCustomer(input: {
+    whatsappPhone: string;
+    name: string;
+    email?: string;
+    defaultAddress?: string;
+    notes?: string;
+    tags?: string[];
+    segmentOverride?: "VIP" | "Repeat" | "New";
+  }): Promise<{
+    status: string;
+    customer: import("./types").CustomerRecordItem;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/customers", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  sendCustomerBroadcast(input: {
+    segment: "ALL" | "VIP" | "Repeat" | "New" | "PENDING_ORDERS";
+    channel: "WHATSAPP" | "INSTAGRAM" | "SMS";
+    messageText: string;
+    includePromoCode?: string;
+    includeStoreLink?: boolean;
+  }): Promise<{
+    status: string;
+    recipientCount: number;
+    segment: string;
+    channel: string;
+    deliveredAt: string;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/customers/broadcast", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  saveWholesaleBooking(
+    input: Partial<import("./types").WholesaleBookingItem> & {
+      productSku: string;
+      clientName: string;
+      clientPhone: string;
+      quantity: number;
+    }
+  ): Promise<{
+    status: string;
+    booking: import("./types").WholesaleBookingItem;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/bookings", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  updateWholesaleBookingStatus(
+    idOrRef: string,
+    input: Partial<import("./types").WholesaleBookingItem>
+  ): Promise<{
+    status: string;
+    booking: import("./types").WholesaleBookingItem;
+    state: VendorState;
+  }> {
+    return request(`/api/v1/vendor/bookings/${encodeURIComponent(idOrRef)}`, {
+      method: "PATCH",
+      ...jsonBody(input),
+    });
+  },
+
+  updateBookingCatalogRules(
+    input: Partial<import("./types").BookingCatalogRules>
+  ): Promise<{
+    status: string;
+    rules: import("./types").BookingCatalogRules;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/bookings/rules", {
+      method: "PATCH",
       ...jsonBody(input),
     });
   },
@@ -624,9 +759,15 @@ export const api = {
   async onboardVendor(input: {
     phone?: string;
     businessName: string;
+    email?: string;
+    password?: string;
+    passkeyPin?: string;
+    slug?: string;
+    baseState?: string;
+    baseCity?: string;
     role?: PlatformRole | "vendor" | "supplier";
     isExistingBusiness?: boolean;
-    catalogSelection?: "mirror" | "custom";
+    catalogSelection?: "mirror" | "custom" | "social";
     cacNumber?: string;
     skipOtp?: boolean;
   }): Promise<{
@@ -1118,6 +1259,118 @@ export const api = {
       method: "PUT",
       ...jsonBody({ config, roleOrPlan }),
     });
+  },
+
+  async loginWithCredentials(input: {
+    email?: string;
+    phone?: string;
+    password?: string;
+    passkeyPin?: string;
+  }): Promise<{
+    authenticated: boolean;
+    token: string;
+    vendor: VendorState["vendor"];
+    state: VendorState;
+  }> {
+    const res = await request<{
+      authenticated: boolean;
+      token: string;
+      vendor: VendorState["vendor"];
+      state: VendorState;
+    }>("/api/v1/auth/login", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+    if (res.token) {
+      setStoredSessionToken(res.token);
+    }
+    return res;
+  },
+
+  syncSocialAccount(input: {
+    platform: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
+    connected: boolean;
+    handleOrPhone: string;
+    businessAssetId?: string;
+    businessPortfolioName?: string;
+    syncCatalogToSocial?: boolean;
+    importSocialBuyersToCrm?: boolean;
+    copilotAutoReply?: boolean;
+    importSampleProductsFromSocial?: boolean;
+  }): Promise<{
+    status: string;
+    socialAccount: import("./types").SocialAccountSync;
+    importedProductsCount: number;
+    syncedCustomersCount: number;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/social-accounts/sync", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+  },
+
+  updateFeatureFlags(
+    input: Partial<import("./types").VendorFeatureFlags>
+  ): Promise<{
+    status: string;
+    featureFlags: import("./types").VendorFeatureFlags;
+    state: VendorState;
+  }> {
+    return request("/api/v1/vendor/features", {
+      method: "PATCH",
+      ...jsonBody(input),
+    });
+  },
+
+  setupGoogleAuthenticator(input?: {
+    email?: string;
+    businessName?: string;
+    forceNew?: boolean;
+  }): Promise<{
+    status: string;
+    secret: string;
+    formattedSecret: string;
+    issuer: string;
+    accountLabel: string;
+    otpauthUrl: string;
+    currentCode: string;
+    totpEnabled: boolean;
+  }> {
+    return request("/api/v1/auth/totp/setup", {
+      method: "POST",
+      ...jsonBody(input ?? {}),
+    });
+  },
+
+  async verifyGoogleAuthenticator(input: {
+    code: string;
+    secret?: string;
+    email?: string;
+    purpose?: "LOGIN" | "SIGNUP" | "SETTINGS";
+  }): Promise<{
+    verified: boolean;
+    authenticated?: boolean;
+    token?: string;
+    totpEnabled?: boolean;
+    vendor?: VendorState["vendor"];
+    state: VendorState;
+  }> {
+    const res = await request<{
+      verified: boolean;
+      authenticated?: boolean;
+      token?: string;
+      totpEnabled?: boolean;
+      vendor?: VendorState["vendor"];
+      state: VendorState;
+    }>("/api/v1/auth/totp/verify", {
+      method: "POST",
+      ...jsonBody(input),
+    });
+    if (res.token) {
+      setStoredSessionToken(res.token);
+    }
+    return res;
   },
 };
 

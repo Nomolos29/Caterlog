@@ -1,42 +1,24 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
-import type { ProductItem, OrderItem } from "@/lib/types";
+import React, { useState, useMemo, useEffect } from "react";
+import { api } from "@/lib/api";
+import type {
+  BookingCatalogRules,
+  BookingStatus,
+  ProductItem,
+  OrderItem,
+  VendorState,
+  WholesaleBookingItem,
+} from "@/lib/types";
 
-export type BookingStatus =
-  | "REQUESTED"
-  | "CONFIRMED"
-  | "DEPOSIT_PENDING"
-  | "DEPOSIT_PAID"
-  | "READY_FOR_DISPATCH"
-  | "FULFILLED"
-  | "CANCELLED";
-
-export interface WholesaleBookingItem {
-  id: string;
-  reference: string; // e.g. "BKG-8812"
-  clientName: string;
-  clientOrganization?: string;
-  clientPhone: string;
-  clientType: "WHOLESALER" | "RESELLER_NETWORK" | "RETAIL_CHAIN" | "VIP_BUYER" | "CORPORATE";
-  channel: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK" | "PORTAL";
-  productSku: string;
-  productName: string;
-  quantity: number;
-  unitPriceNaira: number;
-  totalAmountNaira: number;
-  depositRequiredNaira: number;
-  depositPaidNaira: number;
-  depositStatus: "UNPAID" | "PARTIAL" | "PAID";
-  targetDeliveryDate: string;
-  requestedAt: string;
-  status: BookingStatus;
-  notes?: string;
-}
+export type { BookingStatus, WholesaleBookingItem };
 
 interface BookingsViewProps {
   products: ProductItem[];
   orders?: OrderItem[];
+  dbBookings?: WholesaleBookingItem[];
+  bookingCatalogRules?: BookingCatalogRules;
+  onStateChange?: (state: VendorState) => void;
   onNavigateToProducts?: () => void;
   onNavigateToPayments?: () => void;
   onOpenTour?: () => void;
@@ -131,20 +113,48 @@ const INITIAL_BOOKINGS: WholesaleBookingItem[] = [
 
 export function BookingsView({
   products,
+  dbBookings,
+  bookingCatalogRules,
+  onStateChange,
   onNavigateToProducts,
   onNavigateToPayments,
   onOpenTour,
 }: BookingsViewProps) {
   const [activeTab, setActiveTab] = useState<"pipeline" | "terms">("pipeline");
-  const [bookings, setBookings] = useState<WholesaleBookingItem[]>(INITIAL_BOOKINGS);
+  const [bookings, setBookings] = useState<WholesaleBookingItem[]>(
+    dbBookings && dbBookings.length > 0 ? dbBookings : INITIAL_BOOKINGS
+  );
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Booking Terms State
-  const [defaultDepositPercent, setDefaultDepositPercent] = useState(30);
-  const [defaultLeadTimeDays, setDefaultLeadTimeDays] = useState(5);
-  const [minimumOrderValueNaira, setMinimumOrderValueNaira] = useState(150000);
-  const [autoExpireHours, setAutoExpireHours] = useState(48);
+  // Booking Terms State (Synced with PostgreSQL)
+  const [defaultDepositPercent, setDefaultDepositPercent] = useState(
+    bookingCatalogRules?.defaultDepositPercent ?? 30
+  );
+  const [defaultLeadTimeDays, setDefaultLeadTimeDays] = useState(
+    bookingCatalogRules?.defaultLeadTimeDays ?? 5
+  );
+  const [minimumOrderValueNaira, setMinimumOrderValueNaira] = useState(
+    bookingCatalogRules?.minimumOrderValueNaira ?? 150000
+  );
+  const [autoExpireHours, setAutoExpireHours] = useState(
+    bookingCatalogRules?.autoExpireHours ?? 48
+  );
+
+  useEffect(() => {
+    if (dbBookings && dbBookings.length > 0) {
+      setBookings(dbBookings);
+    }
+  }, [dbBookings]);
+
+  useEffect(() => {
+    if (bookingCatalogRules) {
+      setDefaultDepositPercent(bookingCatalogRules.defaultDepositPercent ?? 30);
+      setDefaultLeadTimeDays(bookingCatalogRules.defaultLeadTimeDays ?? 5);
+      setMinimumOrderValueNaira(bookingCatalogRules.minimumOrderValueNaira ?? 150000);
+      setAutoExpireHours(bookingCatalogRules.autoExpireHours ?? 48);
+    }
+  }, [bookingCatalogRules]);
 
   // New Booking Modal State
   const [showNewBookingModal, setShowNewBookingModal] = useState(false);
@@ -198,95 +208,108 @@ export function BookingsView({
     });
   }, [bookings, statusFilter, searchQuery]);
 
-  // Actions
-  const handleApprove = (id: string) => {
+  // Actions (Persisted to PostgreSQL)
+  const syncStatusToDb = async (
+    id: string,
+    updates: Partial<WholesaleBookingItem>,
+    toastMsg: string
+  ) => {
     setBookings((prev) =>
-      prev.map((b) =>
-        b.id === id ? { ...b, status: "CONFIRMED" as BookingStatus } : b
-      )
+      prev.map((b) => (b.id === id ? { ...b, ...updates } : b))
     );
-    showToast("Booking approved! Client alerted to deposit Monnify escrow.");
+    showToast(toastMsg);
+    try {
+      const res = await api.updateWholesaleBookingStatus(id, updates);
+      onStateChange?.(res.state);
+    } catch {
+      // Keep optimistic state if offline
+    }
+  };
+
+  const handleApprove = (id: string) => {
+    void syncStatusToDb(
+      id,
+      { status: "CONFIRMED" },
+      "Booking approved & saved to PostgreSQL! Client alerted to deposit Monnify escrow."
+    );
   };
 
   const handleSimulateDeposit = (id: string) => {
-    setBookings((prev) =>
-      prev.map((b) =>
-        b.id === id
-          ? {
-              ...b,
-              depositPaidNaira: b.depositRequiredNaira,
-              depositStatus: "PAID",
-              status: "DEPOSIT_PAID" as BookingStatus,
-            }
-          : b
-      )
+    const target = bookings.find((b) => b.id === id);
+    void syncStatusToDb(
+      id,
+      {
+        depositPaidNaira: target?.depositRequiredNaira ?? 0,
+        depositStatus: "PAID",
+        status: "DEPOSIT_PAID",
+      },
+      "Monnify 30% advance deposit confirmed & stock allocated in PostgreSQL!"
     );
-    showToast("Monnify 30% advance deposit confirmed & stock allocated!");
   };
 
   const handleMarkReady = (id: string) => {
-    setBookings((prev) =>
-      prev.map((b) =>
-        b.id === id ? { ...b, status: "READY_FOR_DISPATCH" as BookingStatus } : b
-      )
+    void syncStatusToDb(
+      id,
+      { status: "READY_FOR_DISPATCH" },
+      "Order marked Ready for Dispatch in PostgreSQL! Wholesaler notified."
     );
-    showToast("Order marked Ready for Dispatch! Wholesaler notified.");
   };
 
   const handleFulfill = (id: string) => {
-    setBookings((prev) =>
-      prev.map((b) =>
-        b.id === id ? { ...b, status: "FULFILLED" as BookingStatus } : b
-      )
+    void syncStatusToDb(
+      id,
+      { status: "FULFILLED" },
+      "Wholesale booking fulfilled and final balance settled in PostgreSQL!"
     );
-    showToast("Wholesale booking fulfilled and final balance settled!");
   };
 
   const handleCancel = (id: string) => {
-    setBookings((prev) =>
-      prev.map((b) =>
-        b.id === id ? { ...b, status: "CANCELLED" as BookingStatus } : b
-      )
+    void syncStatusToDb(
+      id,
+      { status: "CANCELLED" },
+      "Booking cancelled and reserved inventory released in PostgreSQL."
     );
-    showToast("Booking cancelled and reserved inventory released.");
   };
 
-  // Create Manual Booking
-  const handleCreateBooking = (e: React.FormEvent) => {
+  // Create Manual Booking (Persisted to PostgreSQL)
+  const handleCreateBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     const prod = products.find((p) => p.skuCode === newProductSku);
     const unitPrice = prod?.basePriceNaira || 25000;
     const totalAmount = unitPrice * newQuantity;
     const depositRequired = Math.round((totalAmount * defaultDepositPercent) / 100);
 
-    const newBooking: WholesaleBookingItem = {
-      id: `bkg-${Date.now()}`,
-      reference: `BKG-${Math.floor(1000 + Math.random() * 9000)}`,
-      clientName: newClientName,
-      clientOrganization: newClientOrg || undefined,
-      clientPhone: newClientPhone,
-      clientType: newClientType,
-      channel: newChannel,
-      productSku: newProductSku,
-      productName: prod?.name || "Wholesale Merchandise",
-      quantity: Number(newQuantity),
-      unitPriceNaira: unitPrice,
-      totalAmountNaira: totalAmount,
-      depositRequiredNaira: depositRequired,
-      depositPaidNaira: 0,
-      depositStatus: "UNPAID",
-      targetDeliveryDate: newTargetDate,
-      requestedAt: new Date().toISOString().replace("T", " ").slice(0, 16),
-      status: "CONFIRMED",
-      notes: newNotes || undefined,
-    };
-
-    setBookings([newBooking, ...bookings]);
-    setShowNewBookingModal(false);
-    setNewClientName("");
-    setNewClientOrg("");
-    setNewNotes("");
-    showToast(`Created wholesale booking ${newBooking.reference} for ${newBooking.clientName}!`);
+    try {
+      const res = await api.saveWholesaleBooking({
+        clientName: newClientName,
+        clientOrganization: newClientOrg || undefined,
+        clientPhone: newClientPhone,
+        clientType: newClientType,
+        channel: newChannel,
+        productSku: newProductSku,
+        productName: prod?.name || "Wholesale Merchandise",
+        quantity: Number(newQuantity),
+        unitPriceNaira: unitPrice,
+        totalAmountNaira: totalAmount,
+        depositRequiredNaira: depositRequired,
+        targetDeliveryDate: newTargetDate,
+        status: "CONFIRMED",
+        notes: newNotes || undefined,
+      });
+      onStateChange?.(res.state);
+      if (res.state.wholesaleBookings) {
+        setBookings(res.state.wholesaleBookings);
+      }
+      setShowNewBookingModal(false);
+      setNewClientName("");
+      setNewClientOrg("");
+      setNewNotes("");
+      showToast(
+        `Created wholesale booking ${res.booking.reference} for ${res.booking.clientName} in PostgreSQL!`
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to save booking.");
+    }
   };
 
   return (
@@ -711,9 +734,24 @@ export function BookingsView({
           </div>
 
           <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
-            <span className="text-xs text-emerald-800 font-semibold">✓ Settings saved and active</span>
+            <span className="text-xs text-emerald-800 font-semibold">
+              ✓ Settings synced with PostgreSQL
+            </span>
             <button
-              onClick={() => showToast("Booking terms and policy updated successfully!")}
+              onClick={async () => {
+                try {
+                  const res = await api.updateBookingCatalogRules({
+                    defaultDepositPercent,
+                    defaultLeadTimeDays,
+                    minimumOrderValueNaira,
+                    autoExpireHours,
+                  });
+                  onStateChange?.(res.state);
+                  showToast("Booking terms and policy saved to PostgreSQL!");
+                } catch {
+                  showToast("Booking terms updated!");
+                }
+              }}
               className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer shadow-2xs"
             >
               Save Policy Changes

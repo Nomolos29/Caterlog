@@ -62,16 +62,34 @@ export function StorefrontProductQuickViewModal({
   const [selectedColor, setSelectedColor] = useState<string>(swatches[0]?.label ?? "");
   const [quantity, setQuantity] = useState(1);
 
+  const galleryList = useMemo(() => {
+    if (product.customFields?.galleryUrls) {
+      try {
+        const parsed = JSON.parse(product.customFields.galleryUrls);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((u) => resolveStorefrontImageUrl(String(u))).filter(Boolean);
+        }
+      } catch {}
+    }
+    const primary =
+      resolveStorefrontImageUrl(product.primaryImageUrl) ||
+      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80";
+    return [primary];
+  }, [product]);
+
+  const [activeImageIdx, setActiveImageIdx] = useState(0);
+
   const unitPriceNaira = selectedVariant ? selectedVariant.priceNaira : product.basePriceNaira;
+  const compareAtNaira = product.customFields?.compareAtPriceNaira
+    ? Number(product.customFields.compareAtPriceNaira)
+    : 0;
   const availableStock = selectedVariant
     ? (selectedVariant.availableStock ?? selectedVariant.stock)
     : product.availableStock;
   const isOutOfStock = availableStock <= 0;
   const ratingInfo = computeSyntheticRating(product);
 
-  const imageUrl =
-    resolveStorefrontImageUrl(product.primaryImageUrl) ||
-    "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800&q=80";
+  const imageUrl = galleryList[activeImageIdx] || galleryList[0]!;
 
   return (
     <div
@@ -97,14 +115,34 @@ export function StorefrontProductQuickViewModal({
         </button>
 
         <div
-          className="@md:col-span-6 aspect-square @md:aspect-auto flex items-center justify-center p-4 @sm:p-6"
+          className="@md:col-span-6 aspect-square @md:aspect-auto flex flex-col items-center justify-center p-4 @sm:p-6 gap-3"
           style={{ backgroundColor: palette.sectionAltBg }}
         >
           <img
             src={imageUrl}
             alt={product.name}
-            className="w-full h-full max-h-72 @md:max-h-96 object-cover rounded-xl shadow-sm"
+            className="w-full h-full max-h-72 @md:max-h-88 object-cover rounded-xl shadow-sm"
           />
+          {galleryList.length > 1 && (
+            <div className="flex items-center gap-2 overflow-x-auto max-w-full py-1">
+              {galleryList.map((thumb, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setActiveImageIdx(idx)}
+                  className={`w-12 h-12 rounded-lg overflow-hidden border-2 shrink-0 cursor-pointer transition-all ${
+                    activeImageIdx === idx ? "scale-105 shadow-xs" : "opacity-60 hover:opacity-100"
+                  }`}
+                  style={{
+                    borderColor:
+                      activeImageIdx === idx ? theme.accentColor : palette.borderSubtle,
+                  }}
+                >
+                  <img src={thumb} alt="" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="@md:col-span-6 p-5 @sm:p-8 flex flex-col justify-between space-y-5">
@@ -140,9 +178,21 @@ export function StorefrontProductQuickViewModal({
               />
             </div>
 
-            <p className="text-2xl font-black mb-3" style={{ color: theme.accentColor }}>
-              ₦{unitPriceNaira.toLocaleString()}
-            </p>
+            <div className="flex items-baseline gap-2.5 mb-3">
+              <p className="text-2xl font-black" style={{ color: theme.accentColor }}>
+                ₦{unitPriceNaira.toLocaleString()}
+              </p>
+              {compareAtNaira > unitPriceNaira && (
+                <span className="text-sm line-through opacity-55">
+                  ₦{compareAtNaira.toLocaleString()}
+                </span>
+              )}
+              {product.customFields?.productType === "DIGITAL" && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 uppercase">
+                  ⚡ Instant Digital Delivery
+                </span>
+              )}
+            </div>
 
             <p className="text-xs leading-relaxed mb-4" style={{ color: palette.textSecondary }}>
               {product.description ||

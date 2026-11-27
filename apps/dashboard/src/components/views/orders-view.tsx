@@ -4,18 +4,25 @@ import React, { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type {
   CourierShipmentReceipt,
+  DiscountItem,
   OrderItem,
   OrderWaybill,
   PlatformRole,
+  ProductItem,
   ShipbubbleCourierQuoteItem,
+  ShippingZoneItem,
   VendorProfile,
   VendorState,
 } from "@/lib/types";
-import { FilterIcon, ExportIcon } from "../icons";
+import { FilterIcon, ExportIcon, PlusIcon } from "../icons";
 import { EmptyState } from "../ui/empty-state";
+import { ManualOrderCreatorModal } from "../modals/manual-order-creator-modal";
 
 interface OrdersViewProps {
   orders: OrderItem[];
+  products?: ProductItem[];
+  shippingZones?: ShippingZoneItem[];
+  discounts?: DiscountItem[];
   selectedOrder: OrderItem | null;
   vendor?: VendorProfile;
   workspaceRole?: PlatformRole;
@@ -32,6 +39,9 @@ interface OrdersViewProps {
 
 export function OrdersView({
   orders,
+  products = [],
+  shippingZones = [],
+  discounts = [],
   selectedOrder,
   vendor,
   workspaceRole = "growth",
@@ -46,6 +56,7 @@ export function OrdersView({
   onOpenTour,
 }: OrdersViewProps) {
   const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
+  const [showManualOrderModal, setShowManualOrderModal] = useState(false);
 
   useEffect(() => {
     if (initialStatusFilter) {
@@ -1663,7 +1674,14 @@ export function OrdersView({
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Orders</h1>
           <p className="text-sm text-gray-500 mt-0.5">Manage and track your business sales and fulfillment.</p>
         </div>
-        <div data-tour="orders-header-actions" className="flex items-center gap-2 self-start sm:self-center">
+        <div data-tour="orders-header-actions" className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+          <button
+            onClick={() => setShowManualOrderModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
+          >
+            <PlusIcon className="w-3.5 h-3.5" />
+            <span>Record Sale / Create Invoice</span>
+          </button>
           {onOpenTour && (
             <button
               onClick={onOpenTour}
@@ -1921,6 +1939,19 @@ export function OrdersView({
           </div>
         </div>
       )}
+
+      {/* Manual Order & POS Invoice Creator Standalone Popup */}
+      <ManualOrderCreatorModal
+        isOpen={showManualOrderModal}
+        onClose={() => setShowManualOrderModal(false)}
+        products={products}
+        shippingZones={shippingZones}
+        discounts={discounts}
+        vendorName={vendor?.businessName || "Caterlog Store"}
+        onOrderCreated={(_order, nextState) => {
+          onStateChange?.(nextState);
+        }}
+      />
     </div>
   );
 }

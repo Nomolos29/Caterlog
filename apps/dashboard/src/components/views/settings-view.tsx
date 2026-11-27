@@ -15,10 +15,14 @@ import type {
   PlatformInvoiceItem,
   SubscriptionPlanId,
   BillingCycle,
+  VendorFeatureFlags,
+  SocialAccountSync,
 } from "@/lib/types";
 import { isResellerRole, isVendorRole } from "@/lib/types";
 import { api } from "@/lib/api";
 import { BillingSubscriptionView } from "./billing-subscription-view";
+import { SocialSyncWizardModal } from "../modals/social-sync-wizard-modal";
+import { GoogleAuthenticatorLinkingModal } from "../modals/google-authenticator-modal";
 
 export type SettingsTabId =
   | "notifications"
@@ -27,6 +31,7 @@ export type SettingsTabId =
   | "detail"
   | "shipping"
   | "billing"
+  | "features"
   | "general";
 
 interface SettingsViewProps {
@@ -355,7 +360,72 @@ export function SettingsView({
   );
   const [showIgModal, setShowIgModal] = useState(false);
   const [showFbModal, setShowFbModal] = useState(false);
+  const [activeSocialWizard, setActiveSocialWizard] = useState<
+    "WHATSAPP" | "INSTAGRAM" | "FACEBOOK" | null
+  >(null);
   const [channelToast, setChannelToast] = useState<string | null>(null);
+
+  // Feature Controls & Action Confirmation Modal State
+  const defaultFlags: VendorFeatureFlags = {
+    webCheckoutEnabled: vendor.featureFlags?.webCheckoutEnabled ?? true,
+    guestCheckoutEnabled: vendor.featureFlags?.guestCheckoutEnabled ?? true,
+    liveStockCountdownEnabled: vendor.featureFlags?.liveStockCountdownEnabled ?? true,
+    vacationModeEnabled: vendor.featureFlags?.vacationModeEnabled ?? false,
+    whatsappCopilotEnabled: vendor.featureFlags?.whatsappCopilotEnabled ?? vendor.copilotMode !== "MANUAL",
+    instagramDmCopilotEnabled: vendor.featureFlags?.instagramDmCopilotEnabled ?? true,
+    facebookMessengerCopilotEnabled: vendor.featureFlags?.facebookMessengerCopilotEnabled ?? true,
+    autoHoldStockOnChatCheckout: vendor.featureFlags?.autoHoldStockOnChatCheckout ?? true,
+    marketBoostDiscoveryEnabled: vendor.featureFlags?.marketBoostDiscoveryEnabled ?? true,
+    autoApproveResellerMirrors: vendor.featureFlags?.autoApproveResellerMirrors ?? true,
+    interstateMirroringEnabled: vendor.featureFlags?.interstateMirroringEnabled ?? false,
+    requirePasskeyForWithdrawals: vendor.featureFlags?.requirePasskeyForWithdrawals ?? true,
+    requireSmsOtpOnNewDevice: vendor.featureFlags?.requireSmsOtpOnNewDevice ?? true,
+  };
+  const [featureFlags, setFeatureFlags] = useState<VendorFeatureFlags>(defaultFlags);
+  const [featureConfirmModal, setFeatureConfirmModal] = useState<{
+    key: keyof VendorFeatureFlags;
+    nextValue: boolean;
+    title: string;
+    description: string;
+    impact: string;
+    requiresPasskey?: boolean;
+  } | null>(null);
+  const [confirmPasskeyInput, setConfirmPasskeyInput] = useState("");
+  const [featureToast, setFeatureToast] = useState<string | null>(null);
+  const [savingFeatureKey, setSavingFeatureKey] = useState<string | null>(null);
+  const [showTotpModal, setShowTotpModal] = useState(false);
+
+  useEffect(() => {
+    if (vendor.featureFlags) {
+      setFeatureFlags((prev) => ({
+        ...prev,
+        ...vendor.featureFlags,
+      }));
+    }
+  }, [vendor.featureFlags]);
+
+  const applyFeatureToggle = async (key: keyof VendorFeatureFlags, nextValue: boolean) => {
+    setSavingFeatureKey(key);
+    const optimistic = { ...featureFlags, [key]: nextValue };
+    setFeatureFlags(optimistic);
+    try {
+      const res = await api.updateFeatureFlags({ [key]: nextValue });
+      if (res.featureFlags) {
+        setFeatureFlags(res.featureFlags);
+      }
+      if (onStateChange && res.state) {
+        onStateChange(res.state);
+      }
+      setFeatureToast(`✓ Feature "${key}" updated & synced with PostgreSQL`);
+      setTimeout(() => setFeatureToast(null), 3000);
+    } catch {
+      // Keep local state
+    } finally {
+      setSavingFeatureKey(null);
+      setFeatureConfirmModal(null);
+      setConfirmPasskeyInput("");
+    }
+  };
 
   useEffect(() => {
     if (vendor.instagramConnected !== undefined) setInstagramConnected(vendor.instagramConnected);
@@ -502,7 +572,8 @@ export function SettingsView({
   /* -------------------------------------------------------------------------- */
   const renderTabStrip = () => {
     const tabs: Array<{ id: SettingsTabId; label: string }> = [
-      { id: "setup", label: "Sales co-pilot" },
+      { id: "setup", label: "Sales co-pilot & Socials" },
+      { id: "features", label: "Feature Controls" },
       { id: "conversations", label: "Conversations" },
       ...(isVendor ? [{ id: "shipping" as const, label: "Delivery & Shipping" }] : []),
       { id: "notifications", label: "Notifications" },
@@ -527,6 +598,436 @@ export function SettingsView({
       </div>
     );
   };
+
+  /* -------------------------------------------------------------------------- */
+  /* Settings · Feature Controls & Confirmation Modals                          */
+  /* -------------------------------------------------------------------------- */
+  if (activeTab === "features") {
+    const featureGroups: Array<{
+      groupTitle: string;
+      groupDesc: string;
+      icon: string;
+      items: Array<{
+        key: keyof VendorFeatureFlags;
+        label: string;
+        desc: string;
+        badge?: string;
+        confirmOnDisable?: boolean;
+        confirmOnEnable?: boolean;
+        requiresPasskey?: boolean;
+        impactText: string;
+      }>;
+    }> = [
+      {
+        groupTitle: "Storefront & Web Checkout Controls",
+        groupDesc:
+          "Manage how buyers browse and pay on your standalone web storefront and brand website.",
+        icon: "🛍️",
+        items: [
+          {
+            key: "webCheckoutEnabled",
+            label: "Standard Web Checkout (Monnify Escrow / Card / Bank Transfer)",
+            desc: "Allows customers to complete checkout directly on your website with instant virtual NUBAN generation and automatic database sync.",
+            badge: "Core Storefront",
+            confirmOnDisable: true,
+            impactText:
+              "Turning off Standard Web Checkout will temporarily prevent customers from placing new orders on your web storefront until re-enabled.",
+          },
+          {
+            key: "guestCheckoutEnabled",
+            label: "Frictionless Guest Checkout",
+            desc: "Let shoppers buy without creating a password—automatically upserting their profile into your PostgreSQL Customers CRM.",
+            impactText: "Updates guest checkout behavior across your live storefront.",
+          },
+          {
+            key: "liveStockCountdownEnabled",
+            label: "Real-Time Stock & Reservation Badges",
+            desc: "Show live remaining unit counts on product cards so shoppers see real-time inventory availability.",
+            impactText: "Toggles live inventory badges on your storefront product cards.",
+          },
+          {
+            key: "vacationModeEnabled",
+            label: "Storefront Vacation / Maintenance Mode",
+            desc: "Temporarily pause new order intake on your storefront while keeping your catalog visible in browse-only mode.",
+            badge: "Confirmation Required",
+            confirmOnEnable: true,
+            impactText:
+              "Enabling Vacation Mode pauses new customer checkouts on your website and notifies WhatsApp/Instagram shoppers that fulfillment is paused.",
+          },
+        ],
+      },
+      {
+        groupTitle: "AI Sales Co-Pilot & Omnichannel Automation",
+        groupDesc:
+          "Control automated DM replies, inventory holds, and order capture across WhatsApp, Instagram, and Facebook.",
+        icon: "🤖",
+        items: [
+          {
+            key: "whatsappCopilotEnabled",
+            label: "WhatsApp Business AI Sales Co-Pilot",
+            desc: "Automatically replies to product inquiries, checks stock, and issues payment accounts on WhatsApp.",
+            confirmOnDisable: true,
+            impactText:
+              "Disabling WhatsApp AI Co-Pilot switches your WhatsApp channel to Manual Mode—all customer chats will wait for your human reply.",
+          },
+          {
+            key: "instagramDmCopilotEnabled",
+            label: "Instagram DM & Story Reply Automation",
+            desc: "Captures orders from Instagram DMs and tagged product inquiries automatically.",
+            impactText: "Updates Instagram Direct automation status in PostgreSQL.",
+          },
+          {
+            key: "facebookMessengerCopilotEnabled",
+            label: "Facebook Page Messenger Co-Pilot",
+            desc: "Handles Click-to-Messenger ads and Facebook Shop inquiries 24/7.",
+            impactText: "Updates Facebook Page Messenger automation status.",
+          },
+          {
+            key: "autoHoldStockOnChatCheckout",
+            label: "Auto-Hold Inventory During Chat Checkout",
+            desc: "Reserves stock for the configured hold window as soon as a buyer receives a virtual account number.",
+            impactText: "Changes stock reservation hold behavior for chat orders.",
+          },
+        ],
+      },
+      ...(isVendor
+        ? [
+            {
+              groupTitle: "B2B Wholesale & Market Boost Controls",
+              groupDesc:
+                "Included in your vendor tier. Control how resellers and dropshippers discover and mirror your catalog.",
+              icon: "🚀",
+              items: [
+                {
+                  key: "marketBoostDiscoveryEnabled" as keyof VendorFeatureFlags,
+                  label: "Market Boost Supplier Directory Visibility",
+                  desc: "Makes your wholesale profile and selected visible products discoverable to verified resellers.",
+                  badge: "Included in Tier",
+                  confirmOnDisable: true,
+                  impactText:
+                    "Pausing Market Boost Discovery hides your profile from new resellers in the Wholesale Directory (existing connected resellers remain linked).",
+                },
+                {
+                  key: "autoApproveResellerMirrors" as keyof VendorFeatureFlags,
+                  label: "Auto-Approve Verified Reseller Mirror Requests",
+                  desc: "Allow verified resellers in your covered states/LGAs to mirror your visible products immediately.",
+                  impactText: "Updates reseller mirror approval rules.",
+                },
+                {
+                  key: "interstateMirroringEnabled" as keyof VendorFeatureFlags,
+                  label: "Allow Interstate Reseller Mirroring",
+                  desc: "Let resellers outside your base state mirror and sell your wholesale inventory.",
+                  confirmOnEnable: true,
+                  impactText:
+                    "Enabling Interstate Mirroring allows resellers outside your base state to mirror your catalog and route interstate orders to your dispatch desk.",
+                },
+              ],
+            },
+          ]
+        : []),
+      {
+        groupTitle: "Account Security & Step-Up Guardrails",
+        groupDesc:
+          "Protect payouts, bank modifications, and new device sign-ins with your 6-digit passkey and SMS OTP.",
+        icon: "🔒",
+        items: [
+          {
+            key: "requirePasskeyForWithdrawals",
+            label: "Require 6-Digit Security Passkey for Withdrawals & Bank Edits",
+            desc: "Enforces your 6-digit passkey modal before any payout withdrawal or settlement bank modification.",
+            badge: "Security Guard",
+            confirmOnDisable: true,
+            requiresPasskey: true,
+            impactText:
+              "Disabling the 6-digit passkey requirement lowers financial step-up protection on wallet withdrawals.",
+          },
+          {
+            key: "requireSmsOtpOnNewDevice",
+            label: "Require Phone SMS / Authenticator OTP on New Device Login",
+            desc: "Sends a 6-digit carrier SMS / Authenticator code (never WhatsApp) when signing in from an unrecognized device.",
+            confirmOnDisable: true,
+            impactText: "Updates 2FA SMS verification enforcement on new browser sessions.",
+          },
+        ],
+      },
+    ];
+
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto w-full pb-24">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              Feature Controls &amp; Guardrails
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Toggle platform capabilities on or off in real time. Critical changes prompt a confirmation modal before syncing to PostgreSQL.
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold self-start sm:self-center">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Synced with PostgreSQL</span>
+          </span>
+        </div>
+
+        {renderTabStrip()}
+
+        {featureToast && (
+          <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center justify-between">
+            <span>{featureToast}</span>
+            <button
+              type="button"
+              onClick={() => setFeatureToast(null)}
+              className="text-emerald-700 font-bold cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-6">
+          {featureGroups.map((group) => (
+            <div
+              key={group.groupTitle}
+              className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4"
+            >
+              <div className="border-b border-gray-100 pb-3 flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-base shrink-0">
+                  {group.icon}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">{group.groupTitle}</h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">{group.groupDesc}</p>
+                </div>
+              </div>
+
+              <div className="divide-y divide-gray-100">
+                {group.items.map((item) => {
+                  const isOn = Boolean(featureFlags[item.key]);
+                  const isSaving = savingFeatureKey === item.key;
+
+                  const handleToggleClick = () => {
+                    const nextVal = !isOn;
+                    const needsModal =
+                      (item.confirmOnDisable && !nextVal) ||
+                      (item.confirmOnEnable && nextVal) ||
+                      item.requiresPasskey;
+
+                    if (needsModal) {
+                      setFeatureConfirmModal({
+                        key: item.key,
+                        nextValue: nextVal,
+                        title: `${nextVal ? "Enable" : "Disable"} ${item.label}?`,
+                        description: item.desc,
+                        impact: item.impactText,
+                        requiresPasskey: item.requiresPasskey,
+                      });
+                    } else {
+                      void applyFeatureToggle(item.key, nextVal);
+                    }
+                  };
+
+                  return (
+                    <div
+                      key={item.key}
+                      className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1 max-w-2xl">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-gray-900">{item.label}</span>
+                          {item.badge && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              {item.badge}
+                            </span>
+                          )}
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              isOn
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-gray-100 text-gray-500"
+                            }`}
+                          >
+                            {isOn ? "Active" : "Off"}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">{item.desc}</p>
+                      </div>
+
+                      <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={handleToggleClick}
+                          className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
+                            isOn ? "bg-[#0d5c3a]" : "bg-gray-300"
+                          }`}
+                        >
+                          <div
+                            className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                              isOn ? "translate-x-6" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Google Authenticator Linking Card */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-center text-lg shrink-0">
+              🔐
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-gray-900">
+                  Google Authenticator App (RFC 6238 TOTP)
+                </h3>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    vendor.totpEnabled
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {vendor.totpEnabled ? "✓ Linked & Active" : "Ready to Link"}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Link Google Authenticator or Authy via QR code / Base32 setup key for 30-second offline 6-digit security codes.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowTotpModal(true)}
+            className="px-4 py-2.5 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-bold shadow-xs shrink-0 cursor-pointer"
+          >
+            {vendor.totpEnabled ? "Manage / Re-Link Authenticator →" : "Link Google Authenticator →"}
+          </button>
+        </div>
+
+        {/* Action Confirmation & Security Alert Modal */}
+        {featureConfirmModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 animate-backdrop-fade">
+            <div className="bg-white rounded-[28px] border border-slate-200/90 max-w-md w-full p-6 space-y-4 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] animate-popup-spring text-xs">
+              <div className="flex items-start justify-between border-b border-gray-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold ${
+                      featureConfirmModal.nextValue
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : "bg-amber-50 text-amber-700 border border-amber-200"
+                    }`}
+                  >
+                    {featureConfirmModal.nextValue ? "⚡" : "⚠️"}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-sm">
+                      {featureConfirmModal.title}
+                    </h3>
+                    <p className="text-[11px] text-gray-400">
+                      Action Confirmation · Database Sync Guard
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFeatureConfirmModal(null);
+                    setConfirmPasskeyInput("");
+                  }}
+                  className="text-gray-400 hover:text-gray-600 font-bold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-amber-50/70 border border-amber-200 text-amber-950 space-y-1">
+                <div className="font-bold text-[11px] uppercase tracking-wider text-amber-800">
+                  Live Store Impact
+                </div>
+                <p className="text-xs leading-relaxed">{featureConfirmModal.impact}</p>
+              </div>
+
+              {featureConfirmModal.requiresPasskey && (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1.5">
+                    ENTER 6-DIGIT SECURITY PASSKEY TO CONFIRM
+                  </label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={confirmPasskeyInput}
+                    onChange={(e) =>
+                      setConfirmPasskeyInput(e.target.value.replace(/\D/g, "").slice(0, 6))
+                    }
+                    placeholder="••••••"
+                    className="w-full px-3.5 py-2.5 text-center font-mono font-bold text-base tracking-[0.4em] border border-gray-300 rounded-xl bg-gray-50"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFeatureConfirmModal(null);
+                    setConfirmPasskeyInput("");
+                  }}
+                  className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    Boolean(featureConfirmModal.requiresPasskey) &&
+                    confirmPasskeyInput.length !== 6
+                  }
+                  onClick={() =>
+                    void applyFeatureToggle(
+                      featureConfirmModal.key,
+                      featureConfirmModal.nextValue
+                    )
+                  }
+                  className={`px-5 py-2 text-white font-bold rounded-xl shadow-xs cursor-pointer disabled:opacity-50 ${
+                    featureConfirmModal.nextValue
+                      ? "bg-[#0d5c3a] hover:bg-[#0b4b2f]"
+                      : "bg-amber-600 hover:bg-amber-700"
+                  }`}
+                >
+                  Confirm &amp; Sync to DB
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showTotpModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 animate-backdrop-fade">
+            <GoogleAuthenticatorLinkingModal
+              email={vendor.email || `${vendor.slug}@caterlog.store`}
+              businessName={vendor.businessName}
+              purpose="SETTINGS"
+              onClose={() => setShowTotpModal(false)}
+              onVerified={() => {
+                setShowTotpModal(false);
+                setFeatureToast("✓ Google Authenticator linked & synced with PostgreSQL!");
+                setTimeout(() => setFeatureToast(null), 4000);
+              }}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   /* -------------------------------------------------------------------------- */
   /* Settings · Billing & Subscription                                          */
@@ -2011,8 +2512,7 @@ export function SettingsView({
                   Cloud API + Status pHash photo matching &amp; dual-access vendor keywords.
                 </p>
               </div>
-              <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between text-[11px]">
-                <span className="text-emerald-800 font-mono truncate">?src=wa_chat</span>
+              <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between gap-2 text-[11px]">
                 <button
                   onClick={() => {
                     navigator.clipboard?.writeText(`https://caterlog.store/${vendor.slug}?src=wa_chat`);
@@ -2022,6 +2522,12 @@ export function SettingsView({
                   className="font-semibold text-emerald-800 hover:underline cursor-pointer"
                 >
                   Copy UTM Link
+                </button>
+                <button
+                  onClick={() => setActiveSocialWizard("WHATSAPP")}
+                  className="px-2.5 py-1 bg-white border border-gray-200 hover:bg-gray-50 text-xs font-semibold rounded-lg text-gray-700 shadow-2xs cursor-pointer"
+                >
+                  Sync Wizard
                 </button>
               </div>
             </div>
@@ -2068,10 +2574,10 @@ export function SettingsView({
                   Copy IG Link
                 </button>
                 <button
-                  onClick={() => setShowIgModal(true)}
+                  onClick={() => setActiveSocialWizard("INSTAGRAM")}
                   className="px-2.5 py-1 bg-white border border-gray-200 hover:bg-gray-50 text-xs font-semibold rounded-lg text-gray-700 shadow-2xs cursor-pointer"
                 >
-                  {instagramConnected ? "Configure" : "Connect IG"}
+                  {instagramConnected ? "Sync Wizard" : "Connect IG"}
                 </button>
               </div>
             </div>
@@ -2118,10 +2624,10 @@ export function SettingsView({
                   Copy FB Link
                 </button>
                 <button
-                  onClick={() => setShowFbModal(true)}
+                  onClick={() => setActiveSocialWizard("FACEBOOK")}
                   className="px-2.5 py-1 bg-white border border-gray-200 hover:bg-gray-50 text-xs font-semibold rounded-lg text-gray-700 shadow-2xs cursor-pointer"
                 >
-                  {facebookConnected ? "Configure" : "Connect Page"}
+                  {facebookConnected ? "Sync Wizard" : "Connect Page"}
                 </button>
               </div>
             </div>
@@ -2538,6 +3044,35 @@ export function SettingsView({
               </div>
             </div>
           </div>
+        )}
+
+        {activeSocialWizard && (
+          <SocialSyncWizardModal
+            platform={activeSocialWizard}
+            businessName={vendor.businessName}
+            initialData={vendor.socialAccounts?.[activeSocialWizard]}
+            defaultPhoneOrHandle={
+              activeSocialWizard === "WHATSAPP"
+                ? vendor.whatsappPhone
+                : activeSocialWizard === "INSTAGRAM"
+                  ? instagramHandleInput
+                  : facebookPageInput
+            }
+            onClose={() => setActiveSocialWizard(null)}
+            onSynced={(res) => {
+              if (res.socialAccount.platform === "INSTAGRAM") {
+                setInstagramConnected(res.socialAccount.connected);
+                setInstagramHandleInput(res.socialAccount.handleOrPhone);
+              } else if (res.socialAccount.platform === "FACEBOOK") {
+                setFacebookConnected(res.socialAccount.connected);
+                setFacebookPageInput(res.socialAccount.handleOrPhone);
+              }
+              setChannelToast(
+                `✓ ${res.socialAccount.platform} synced with PostgreSQL (${res.socialAccount.handleOrPhone})`
+              );
+              setTimeout(() => setChannelToast(null), 4000);
+            }}
+          />
         )}
 
         {/* Sticky Bottom Bar */}

@@ -141,6 +141,15 @@ export interface StorefrontSectionVisibility {
   showSocialNewsletter: boolean;
 }
 
+export interface StorefrontPoliciesAndPixels {
+  metaPixelId?: string;
+  tiktokPixelId?: string;
+  googleAnalyticsId?: string;
+  returnPolicyText?: string;
+  shippingSlaText?: string;
+  pickupInstructionsText?: string;
+}
+
 export interface StorefrontConfig {
   presetId: string;
   mode: StorefrontMode;
@@ -161,6 +170,7 @@ export interface StorefrontConfig {
   visibility: StorefrontSectionVisibility;
   copy: StorefrontCopyConfig;
   customDomain?: string;
+  policiesAndPixels?: StorefrontPoliciesAndPixels;
 }
 
 export interface StorefrontPresetDefinition {
@@ -991,6 +1001,17 @@ export function resolveVendorStorefrontConfig(
         ? { heroSubtitle: `Welcome to ${businessName}` }
         : {}),
       ...(incoming.copy ?? {}),
+    },
+    customDomain: incoming.customDomain ?? basePreset.customDomain,
+    policiesAndPixels: {
+      returnPolicyText:
+        "7-day hassle-free exchange or refund on unworn items in original packaging.",
+      shippingSlaText:
+        "Same-day dispatch in Lagos for orders paid before 3:00 PM WAT; 24–72 hrs nationwide.",
+      pickupInstructionsText:
+        "Free in-store pickup available Monday–Saturday (10:00 AM – 5:30 PM).",
+      ...(basePreset.policiesAndPixels ?? {}),
+      ...(incoming.policiesAndPixels ?? {}),
     },
   };
 }

@@ -461,8 +461,128 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         });
       }
 
-      // 1c. Vendor WhatsApp 6-Digit OTP / Magic Link Request (`POST /api/v1/auth/whatsapp-otp` or `POST /api/v1/auth/request-otp`)
-      if (req.method === "POST" && (path === "/api/v1/auth/whatsapp-otp" || path === "/api/v1/auth/request-otp")) {
+      // 1c-login. Secure Email+Password or 6-Digit Passkey Login (`POST /api/v1/auth/login`)
+      if (req.method === "POST" && path === "/api/v1/auth/login") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+          email?: string;
+          phone?: string;
+          password?: string;
+          passkeyPin?: string;
+        };
+        const result = await engine.verifyEmailOrPasskeyLogin(body);
+        await engine.flushPersistence();
+
+        const sessionResult = engine.createVendorSession({
+          phone: result.vendor.whatsappPhone,
+          email: body.email?.trim() || result.vendor.email || `${result.vendor.slug}@caterlog.store`,
+          ipAddress: req.socket.remoteAddress,
+          userAgent: req.headers["user-agent"],
+        });
+        const token = sessionResult.token;
+
+        res.setHeader(
+          "Set-Cookie",
+          `caterlog_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`
+        );
+
+        return sendJson(res, 200, {
+          authenticated: true,
+          token,
+          sessionToken: token,
+          session: sessionResult.session,
+          vendor: {
+            id: result.vendor.id,
+            slug: result.vendor.slug,
+            businessName: result.vendor.businessName,
+            email: result.vendor.email,
+            role: result.vendor.role ?? "reseller",
+            whatsappPhone: result.vendor.whatsappPhone,
+          },
+          state: engine.serializeState(),
+        });
+      }
+
+      // 1c-totp-setup. Google Authenticator (TOTP) Provisioning (`POST /api/v1/auth/totp/setup`)
+      if (req.method === "POST" && path === "/api/v1/auth/totp/setup") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+          email?: string;
+          businessName?: string;
+          forceNew?: boolean;
+        };
+        const setup = engine.setupGoogleAuthenticator(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "provisioned",
+          ...setup,
+        });
+      }
+
+      // 1c-totp-verify. Google Authenticator (TOTP) 6-Digit Code Verification (`POST /api/v1/auth/totp/verify`)
+      if (req.method === "POST" && path === "/api/v1/auth/totp/verify") {
+        const rawBody = await readRawBody(req);
+        const body = (rawBody ? JSON.parse(rawBody) : {}) as {
+          code?: string;
+          secret?: string;
+          email?: string;
+          purpose?: "LOGIN" | "SIGNUP" | "SETTINGS";
+        };
+        if (!body.code || body.code.trim().replace(/\D/g, "").length !== 6) {
+          throw new HttpError(400, "Please enter the 6-digit code from your Google Authenticator app.");
+        }
+        const isValid = engine.verifyGoogleAuthenticatorCode(body.code, body.secret);
+        if (!isValid) {
+          throw new HttpError(
+            401,
+            "Invalid 6-digit Google Authenticator code. Make sure your device clock is synced and try the current 30-second code."
+          );
+        }
+        await engine.flushPersistence();
+
+        if (body.purpose === "LOGIN") {
+          const sessionResult = engine.createVendorSession({
+            phone: engine.vendor.whatsappPhone,
+            email: body.email?.trim() || engine.vendor.email || `${engine.vendor.slug}@caterlog.store`,
+            ipAddress: req.socket.remoteAddress,
+            userAgent: req.headers["user-agent"],
+          });
+          const token = sessionResult.token;
+          res.setHeader(
+            "Set-Cookie",
+            `caterlog_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 86400}`
+          );
+          return sendJson(res, 200, {
+            verified: true,
+            authenticated: true,
+            token,
+            sessionToken: token,
+            vendor: {
+              id: engine.vendor.id,
+              slug: engine.vendor.slug,
+              businessName: engine.vendor.businessName,
+              email: engine.vendor.email,
+              role: engine.vendor.role ?? "reseller",
+              whatsappPhone: engine.vendor.whatsappPhone,
+            },
+            state: engine.serializeState(),
+          });
+        }
+
+        return sendJson(res, 200, {
+          verified: true,
+          totpEnabled: true,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 1c. Vendor Phone SMS / Authenticator 6-Digit OTP Request (`POST /api/v1/auth/sms-otp` or `POST /api/v1/auth/request-otp`)
+      if (
+        req.method === "POST" &&
+        (path === "/api/v1/auth/sms-otp" ||
+          path === "/api/v1/auth/whatsapp-otp" ||
+          path === "/api/v1/auth/request-otp")
+      ) {
         const rawBody = await readRawBody(req);
         const body = (rawBody ? JSON.parse(rawBody) : {}) as {
           phone?: string;
@@ -685,20 +805,32 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         const body = (rawBody ? JSON.parse(rawBody) : {}) as {
           phone?: string;
           businessName?: string;
+          email?: string;
+          password?: string;
+          passkeyPin?: string;
+          slug?: string;
+          baseState?: string;
+          baseCity?: string;
           role?: "reseller" | "starter" | "growth" | "pro" | "vendor" | "supplier";
           isExistingBusiness?: boolean;
-          catalogSelection?: "mirror" | "custom";
+          catalogSelection?: "mirror" | "custom" | "social";
           cacNumber?: string;
           skipOtp?: boolean;
         };
 
-        if (!body.phone && !body.businessName) {
-          throw new HttpError(400, "Please provide your WhatsApp phone number and store name.");
+        if (!body.phone && !body.businessName && !body.email) {
+          throw new HttpError(400, "Please provide your store name and email or phone number.");
         }
 
         const updatedVendor = engine.onboardVendorProfile({
-          businessName: body.businessName || "My WhatsApp Store",
+          businessName: body.businessName || "My Caterlog Store",
           whatsappPhone: body.phone || engine.vendor.whatsappPhone,
+          email: body.email,
+          password: body.password,
+          passkeyPin: body.passkeyPin,
+          slug: body.slug,
+          baseState: body.baseState,
+          baseCity: body.baseCity,
           role: body.role,
           isExistingBusiness: body.isExistingBusiness,
           catalogSelection: body.catalogSelection,
@@ -1296,6 +1428,48 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         return sendJson(res, 200, engine.serializeState());
       }
 
+      // 8a-3. Dashboard REST API: Step-by-Step Social Business Connection & Catalog Sync (`POST /api/v1/vendor/social-accounts/sync`)
+      if (req.method === "POST" && path === "/api/v1/vendor/social-accounts/sync") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          platform: "WHATSAPP" | "INSTAGRAM" | "FACEBOOK";
+          connected: boolean;
+          handleOrPhone: string;
+          businessAssetId?: string;
+          businessPortfolioName?: string;
+          syncCatalogToSocial?: boolean;
+          importSocialBuyersToCrm?: boolean;
+          copilotAutoReply?: boolean;
+          importSampleProductsFromSocial?: boolean;
+        };
+        if (!body.platform) {
+          throw new HttpError(400, "Social platform (WHATSAPP, INSTAGRAM, or FACEBOOK) is required.");
+        }
+        const syncResult = await engine.connectAndSyncSocialAccount(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "synced",
+          ...syncResult,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 8a-4. Dashboard REST API: Update Feature Toggles (`PATCH /api/v1/vendor/features`)
+      if (
+        (req.method === "PATCH" || req.method === "PUT" || req.method === "POST") &&
+        path === "/api/v1/vendor/features"
+      ) {
+        const body = JSON.parse(await readRawBody(req)) as Partial<
+          import("./runtime-types.ts").RuntimeFeatureFlags
+        >;
+        const featureFlags = engine.updateFeatureFlags(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "updated",
+          featureFlags,
+          state: engine.serializeState(),
+        });
+      }
+
       // 8b. Dashboard REST API: Secure Fund Withdrawal (`POST /api/v1/vendor/withdraw`)
       if (req.method === "POST" && path === "/api/v1/vendor/withdraw") {
         const body = JSON.parse(await readRawBody(req)) as {
@@ -1855,6 +2029,9 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           code: string;
           type: "PERCENTAGE" | "FLAT_KOBO";
           value: number; // percentage e.g. 10, or Naira e.g. 5000
+          minOrderNaira?: number;
+          maxUses?: number | null;
+          expiresAt?: string;
         };
         const koboOrBps =
           body.type === "PERCENTAGE"
@@ -1864,9 +2041,39 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
           code: body.code,
           type: body.type,
           value: koboOrBps,
+          minOrderKobo:
+            body.minOrderNaira !== undefined && Number(body.minOrderNaira) > 0
+              ? nairaToKobo(body.minOrderNaira)
+              : 0n,
+          maxUses:
+            body.maxUses !== undefined
+              ? body.maxUses === null || Number(body.maxUses) <= 0
+                ? null
+                : Math.round(Number(body.maxUses))
+              : undefined,
+          expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
         });
         await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
+      }
+
+      // 13b. Dashboard REST API: Apply or Clear Strike-Through Flash Sale (`POST /api/v1/vendor/products/flash-sale`)
+      if (req.method === "POST" && path === "/api/v1/vendor/products/flash-sale") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          action: "APPLY" | "CLEAR";
+          discountPercent?: number;
+          scope: "ALL" | "CATEGORY" | "PRODUCTS";
+          targetCategory?: string;
+          targetSkus?: string[];
+          label?: string;
+        };
+        const result = engine.applyFlashSale(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "updated",
+          affectedCount: result.affectedCount,
+          state: engine.serializeState(),
+        });
       }
 
       // 14. Dashboard REST API: Deactivate Discount (`DELETE /api/v1/vendor/discounts/:code`)
@@ -1878,6 +2085,113 @@ export function createCaterlogApiServer(engine = new CaterlogStage1Engine()) {
         }
         await engine.flushPersistence();
         return sendJson(res, 200, engine.serializeState());
+      }
+
+      // 14b. Dashboard REST API: Manual Order & POS Invoice Creator (`POST /api/v1/vendor/orders/manual`)
+      if (req.method === "POST" && path === "/api/v1/vendor/orders/manual") {
+        const body = JSON.parse(await readRawBody(req)) as Parameters<
+          typeof engine.createManualVendorOrder
+        >[0];
+        const created = await engine.createManualVendorOrder(body);
+        await engine.flushPersistence();
+        return sendJson(res, 201, {
+          status: "created",
+          order: created.order,
+          receipt: created.receipt,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 14c. Dashboard REST API: Upsert Customer Profile & Notes (`POST /api/v1/vendor/customers`)
+      if (req.method === "POST" && path === "/api/v1/vendor/customers") {
+        const body = JSON.parse(await readRawBody(req)) as {
+          whatsappPhone: string;
+          name: string;
+          email?: string;
+          defaultAddress?: string;
+          notes?: string;
+          tags?: string[];
+          segmentOverride?: "VIP" | "Repeat" | "New";
+        };
+        if (!body.whatsappPhone || !body.name) {
+          throw new HttpError(400, "Customer name and WhatsApp phone number are required.");
+        }
+        const customer = engine.upsertCustomerRecord(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "saved",
+          customer,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 14d. Dashboard REST API: Send Segment Broadcast Campaign (`POST /api/v1/vendor/customers/broadcast`)
+      if (req.method === "POST" && path === "/api/v1/vendor/customers/broadcast") {
+        const body = JSON.parse(await readRawBody(req)) as Parameters<
+          typeof engine.sendCustomerSegmentBroadcast
+        >[0];
+        const result = await engine.sendCustomerSegmentBroadcast(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "dispatched",
+          ...result,
+          state: engine.serializeState(),
+        });
+      }
+
+      // 14e. Dashboard REST API: Wholesale Bookings & Catalog Rules (`GET/POST/PATCH /api/v1/vendor/bookings`)
+      if (req.method === "GET" && path === "/api/v1/vendor/bookings") {
+        return sendJson(res, 200, {
+          bookings: engine.getWholesaleBookings(),
+          rules: engine.getBookingCatalogRules(),
+        });
+      }
+
+      if (req.method === "POST" && path === "/api/v1/vendor/bookings") {
+        const body = JSON.parse(await readRawBody(req)) as Parameters<
+          typeof engine.saveWholesaleBooking
+        >[0];
+        const booking = engine.saveWholesaleBooking(body);
+        await engine.flushPersistence();
+        return sendJson(res, 201, {
+          status: "saved",
+          booking,
+          state: engine.serializeState(),
+        });
+      }
+
+      if (
+        (req.method === "PATCH" || req.method === "PUT") &&
+        path === "/api/v1/vendor/bookings/rules"
+      ) {
+        const body = JSON.parse(await readRawBody(req)) as Partial<
+          import("./runtime-types.ts").RuntimeBookingCatalogRules
+        >;
+        const rules = engine.updateBookingCatalogRules(body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "updated",
+          rules,
+          state: engine.serializeState(),
+        });
+      }
+
+      if (
+        (req.method === "PATCH" || req.method === "PUT") &&
+        path.startsWith("/api/v1/vendor/bookings/") &&
+        path !== "/api/v1/vendor/bookings/rules"
+      ) {
+        const idOrRef = decodeURIComponent(path.replace("/api/v1/vendor/bookings/", ""));
+        const body = JSON.parse(await readRawBody(req)) as Partial<
+          import("./runtime-types.ts").RuntimeWholesaleBooking
+        >;
+        const booking = engine.updateWholesaleBookingStatus(idOrRef, body);
+        await engine.flushPersistence();
+        return sendJson(res, 200, {
+          status: "updated",
+          booking,
+          state: engine.serializeState(),
+        });
       }
 
       // 15. Dashboard REST API: Mark Order Dispatched (`POST /api/v1/vendor/orders/:code/dispatch`)
