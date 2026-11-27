@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import type {
   DiscountItem,
@@ -244,14 +245,16 @@ export function ManualOrderCreatorModal({
         ? `${window.location.origin}/track/${order.shortCode}`
         : receipt.trackUrl;
 
-    return (
+    if (typeof document === "undefined") return null;
+
+    return createPortal(
       <div
-        className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-backdrop-fade"
+        className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-backdrop-fade"
         onClick={onClose}
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className="bg-white rounded-[28px] max-w-lg w-full p-6 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border border-slate-200/80 space-y-6 animate-popup-spring"
+          className="bg-white rounded-none sm:rounded-[28px] max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] p-5 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border-0 sm:border border-slate-200/80 space-y-6 overflow-y-auto animate-popup-spring"
         >
           <div className="text-center space-y-2">
             <div className="w-16 h-16 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center text-3xl mx-auto shadow-xs">
@@ -344,19 +347,22 @@ export function ManualOrderCreatorModal({
             </button>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-backdrop-fade"
+      className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-backdrop-fade"
       onClick={onClose}
     >
       <form
         onSubmit={handleSubmit}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-[28px] max-w-3xl w-full my-6 p-6 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border border-slate-200/80 space-y-6 max-h-[92vh] overflow-y-auto animate-popup-spring"
+        className="bg-white rounded-none sm:rounded-[28px] max-w-3xl w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] p-4 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border-0 sm:border border-slate-200/80 space-y-6 overflow-y-auto animate-popup-spring"
       >
         {/* Header */}
         <div className="flex items-start justify-between border-b border-gray-100 pb-4">
@@ -722,6 +728,7 @@ export function ManualOrderCreatorModal({
           </div>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body
   );
 }

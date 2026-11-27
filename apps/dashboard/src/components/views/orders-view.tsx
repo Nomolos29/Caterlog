@@ -16,6 +16,7 @@ import type {
 } from "@/lib/types";
 import { FilterIcon, ExportIcon, PlusIcon } from "../icons";
 import { EmptyState } from "../ui/empty-state";
+import { TableActionMenu } from "../ui/table-action-menu";
 import { ManualOrderCreatorModal } from "../modals/manual-order-creator-modal";
 
 interface OrdersViewProps {
@@ -228,6 +229,7 @@ export function OrdersView({
     PAID: orders.filter((o) => o.status === "PAID").length,
     PROCESSING: orders.filter((o) => o.status === "PROCESSING").length,
     OUT_FOR_DELIVERY: orders.filter((o) => o.status === "OUT_FOR_DELIVERY" || o.status === "FULFILLED").length,
+    EXPIRED: orders.filter((o) => o.status === "EXPIRED").length,
   };
 
   const handleDispatchSubmit = async () => {
@@ -1084,8 +1086,8 @@ export function OrdersView({
 
         {/* 1-Click Instant Refund Modal */}
         {showRefundModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+          <div className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+            <div className="bg-white rounded-none sm:rounded-[28px] max-w-md w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-6 space-y-4 shadow-2xl animate-popup-spring">
               <div className="flex justify-between items-center border-b pb-3">
                 <div>
                   <h3 className="font-bold text-gray-900 text-sm">
@@ -1158,8 +1160,8 @@ export function OrdersView({
 
         {/* Dispatch Order Modal */}
         {showDispatchModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+          <div className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+            <div className="bg-white rounded-none sm:rounded-[28px] max-w-md w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-6 space-y-4 shadow-2xl animate-popup-spring">
               <div className="flex justify-between items-center border-b pb-3">
                 <div>
                   <h3 className="font-bold text-gray-900 text-sm">Dispatch Order #{selectedOrder.shortCode}</h3>
@@ -1230,8 +1232,8 @@ export function OrdersView({
 
         {/* Shipbubble Multi-Courier Rate Shopping & Booking Modal */}
         {showShipbubbleModal && (
-          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl my-8">
+          <div className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+            <div className="bg-white rounded-none sm:rounded-[28px] max-w-2xl w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-5 sm:p-6 space-y-5 shadow-2xl animate-popup-spring">
               <div className="flex justify-between items-start border-b border-gray-100 pb-4">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1495,8 +1497,8 @@ export function OrdersView({
 
         {/* Official Shipping Courier Receipt Modal */}
         {showCourierReceiptModal && activeCourierReceipt && (
-          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-white rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl my-8 border border-gray-200">
+          <div className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+            <div className="bg-white rounded-none sm:rounded-[28px] max-w-xl w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-5 sm:p-6 space-y-5 shadow-2xl border-0 sm:border border-gray-200 animate-popup-spring">
               <div className="flex items-start justify-between border-b-2 border-dashed border-gray-200 pb-4">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1718,6 +1720,7 @@ export function OrdersView({
           { id: "PAID", label: `Paid (${counts.PAID})` },
           { id: "PROCESSING", label: `Processing (${counts.PROCESSING})` },
           { id: "OUT_FOR_DELIVERY", label: `Fulfilled / Shipped (${counts.OUT_FOR_DELIVERY})` },
+          { id: "EXPIRED", label: `Expired (${counts.EXPIRED})` },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -1793,18 +1796,18 @@ export function OrdersView({
       ) : (
         <div data-tour="orders-table-wrapper" className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[680px]">
-              <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+            <table className="w-full text-left text-xs min-w-[760px]">
+              <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                 <tr>
-                  <th className="py-3.5 px-5">Order ID</th>
-                  <th className="py-3.5 px-5">Customer</th>
-                  <th className="py-3.5 px-5">Product</th>
-                  <th className="py-3.5 px-5">Amount</th>
-                  <th className="py-3.5 px-5">Status</th>
-                  <th className="py-3.5 px-5 text-right">Actions</th>
+                  <th className="py-3.5 px-5 whitespace-nowrap">Order ID</th>
+                  <th className="py-3.5 px-5 whitespace-nowrap">Customer</th>
+                  <th className="py-3.5 px-5 whitespace-nowrap">Product</th>
+                  <th className="py-3.5 px-5 whitespace-nowrap">Amount</th>
+                  <th className="py-3.5 px-5 whitespace-nowrap">Status</th>
+                  <th className="py-3.5 px-5 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 text-gray-700">
+              <tbody className="divide-y divide-gray-100 text-gray-700 whitespace-nowrap">
                 {filteredOrders.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-12 text-center text-gray-400">
@@ -1824,64 +1827,91 @@ export function OrdersView({
                     <tr
                       key={o.id}
                       onClick={() => onSelectOrder(o)}
-                      className="hover:bg-gray-50 cursor-pointer transition-colors"
+                      className="hover:bg-gray-50 cursor-pointer transition-colors whitespace-nowrap"
                     >
-                      <td className="py-3.5 px-5">
-                        <span className="font-mono font-bold text-gray-900">{o.shortCode}</span>
+                      <td className="py-3.5 px-5 whitespace-nowrap">
+                        <span className="font-mono font-bold text-gray-900 whitespace-nowrap">{o.shortCode}</span>
                       </td>
-                      <td className="py-3.5 px-5">
-                        <div className="font-semibold text-gray-900">{o.customerName}</div>
-                        <div className="text-[11px] text-gray-400">{o.customerPhone}</div>
+                      <td className="py-3.5 px-5 whitespace-nowrap">
+                        <div className="font-semibold text-gray-900 whitespace-nowrap">{o.customerName}</div>
+                        <div className="text-[11px] text-gray-400 whitespace-nowrap">{o.customerPhone}</div>
                         {o.deliveryAddress ? (
-                          <div className="text-[11px] text-emerald-800 font-medium truncate max-w-[220px]" title={o.deliveryAddress}>
+                          <div className="text-[11px] text-emerald-800 font-medium whitespace-nowrap" title={o.deliveryAddress}>
                             📍 {o.deliveryAddress}
                           </div>
                         ) : (
-                          <div className="text-[10px] text-gray-400">
-                            🚚 {o.shippingZoneName || "Zone"}
+                          <div className="text-[10px] text-gray-400 whitespace-nowrap">
+                            🚚 {o.shippingZoneName || "Standard Delivery"}
                           </div>
                         )}
                       </td>
-                      <td className="py-3.5 px-5">
-                        <div className="font-medium text-gray-900">{o.productName}</div>
+                      <td className="py-3.5 px-5 whitespace-nowrap">
+                        <div className="font-medium text-gray-900 whitespace-nowrap">{o.productName}</div>
                         {o.variantName ? (
-                          <div className="text-[11px] font-semibold text-emerald-700">
+                          <div className="text-[11px] font-semibold text-emerald-700 whitespace-nowrap">
                             {o.variantName} {o.variantSku ? `(${o.variantSku})` : ""} · {o.quantity} unit(s)
                           </div>
                         ) : o.items && o.items.length > 1 ? (
-                          <div className="text-[11px] font-medium text-emerald-700">
+                          <div className="text-[11px] font-medium text-emerald-700 whitespace-nowrap">
                             🛒 {o.items.length} cart items · {o.quantity} unit(s) total
                           </div>
                         ) : (
-                          <div className="text-[11px] text-gray-400">{o.quantity} unit(s)</div>
+                          <div className="text-[11px] text-gray-400 whitespace-nowrap">{o.quantity} unit(s)</div>
                         )}
                       </td>
-                      <td className="py-3.5 px-5 font-bold text-gray-900">
+                      <td className="py-3.5 px-5 font-bold text-gray-900 whitespace-nowrap">
                         {o.totalAmountFormatted || `₦${o.totalAmountNaira.toLocaleString()}`}
                       </td>
-                      <td className="py-3.5 px-5">
+                      <td className="py-3.5 px-5 whitespace-nowrap">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            o.status === "PAID"
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap inline-block ${
+                            o.status === "PAID" || o.status === "FULFILLED"
                               ? "bg-emerald-100 text-emerald-800"
-                              : o.status === "PENDING_PAYMENT"
+                              : o.status === "PENDING_PAYMENT" || o.status === "PARTIALLY_PAID"
                               ? "bg-amber-100 text-amber-800"
+                              : o.status === "EXPIRED" || o.status === "REFUNDED"
+                              ? "bg-rose-100 text-rose-800"
                               : "bg-blue-100 text-blue-800"
                           }`}
                         >
-                          {o.status}
+                          {o.status.replace(/_/g, " ")}
                         </span>
                       </td>
-                      <td className="py-3.5 px-5 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelectOrder(o);
-                          }}
-                          className="px-3 py-1 border border-gray-300 hover:border-emerald-600 hover:bg-emerald-50 text-gray-700 hover:text-emerald-700 text-xs font-semibold rounded-lg shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95"
-                        >
-                          View detail →
-                        </button>
+                      <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                        <TableActionMenu
+                          items={[
+                            {
+                              label: "View Order Detail",
+                              icon: "👁️",
+                              variant: "emerald",
+                              onClick: () => onSelectOrder(o),
+                            },
+                            ...(o.status === "PENDING_PAYMENT" && onSimulateTransfer
+                              ? [
+                                  {
+                                    label: `Simulate ₦${o.totalAmountNaira.toLocaleString()} Transfer`,
+                                    icon: "⚡",
+                                    variant: "emerald" as const,
+                                    onClick: () => void onSimulateTransfer(o.shortCode, o.totalAmountNaira),
+                                  },
+                                ]
+                              : []),
+                            {
+                              label: "Open Live Customer Tracker",
+                              icon: "🔗",
+                              onClick: () => window.open(`/track/${o.shortCode}`, "_blank"),
+                            },
+                            {
+                              label: "Chat Buyer on WhatsApp",
+                              icon: "💬",
+                              onClick: () =>
+                                window.open(
+                                  `https://wa.me/${o.customerPhone.replace(/\+/g, "")}`,
+                                  "_blank"
+                                ),
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))
@@ -1915,6 +1945,7 @@ export function OrdersView({
                   <option value="PENDING_PAYMENT">Pending</option>
                   <option value="PROCESSING">Processing</option>
                   <option value="OUT_FOR_DELIVERY">Fulfilled / Shipped</option>
+                  <option value="EXPIRED">Expired</option>
                 </select>
               </div>
             </div>

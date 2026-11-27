@@ -1,5 +1,13 @@
 import React, { useState, useMemo } from "react";
-import { SearchIcon, BellIcon, MenuIcon } from "./icons";
+import {
+  SearchIcon,
+  BellIcon,
+  MenuIcon,
+  WhatsAppBadgeIcon,
+  InstagramBadgeIcon,
+  FacebookMessengerBadgeIcon,
+  SparklesIcon,
+} from "./icons";
 import type {
   VendorProfile,
   OrderItem,
@@ -199,71 +207,46 @@ export function TopNav({
   return (
     <>
       <header className="h-14 bg-white border-b border-gray-100 px-4 sm:px-8 flex items-center justify-between sticky top-0 z-20">
-        {/* Left: Mobile Hamburger & Breadcrumb */}
-        <div className="flex items-center gap-3">
+        {/* Left: Mobile Hamburger & Breadcrumb (Breadcrumb hidden on mobile) */}
+        <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onOpenMobileNav}
-            className="p-1.5 -ml-1 text-gray-500 hover:text-gray-800 rounded-lg hover:bg-gray-100 lg:hidden"
+            className="p-1.5 -ml-1 text-gray-500 hover:text-gray-800 rounded-lg hover:bg-gray-100 lg:hidden shrink-0"
             title="Open navigation menu"
           >
             <MenuIcon className="w-5 h-5" />
           </button>
 
-          <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
-            <span className="font-semibold text-gray-900 hidden sm:inline">
+          <div className="hidden sm:flex items-center gap-2 text-xs text-gray-500 font-medium min-w-0">
+            <span className="font-semibold text-gray-900">
               Caterlog
             </span>
-            <span className="text-gray-300 hidden sm:inline">/</span>
-            <span className="truncate max-w-[160px] sm:max-w-none">
+            <span className="text-gray-300">/</span>
+            <span className="truncate">
               {breadcrumb}
             </span>
           </div>
         </div>
 
         {/* Right Controls */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* View-Aware Platform Tour Guide Trigger */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* View-Aware Platform Tour Guide Trigger (Hidden on mobile header) */}
           {onOpenTour && (
             <button
               onClick={() => onOpenTour(currentView)}
               data-tour="top-tour-guide"
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 transition-all cursor-pointer shadow-2xs active:scale-95 group"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 transition-all cursor-pointer shadow-2xs active:scale-95 group whitespace-nowrap"
               title={`Learn how this screen (${breadcrumb}) works`}
             >
               <span className="text-sm group-hover:rotate-12 transition-transform">
                 🧭
               </span>
-              <span className="hidden md:inline font-bold">Guide</span>
+              <span className="font-bold">Guide</span>
               <span className="hidden xl:inline text-emerald-800 font-normal">
                 · {breadcrumb.split("/")[0].trim()}
               </span>
             </button>
           )}
-
-          {/* Toggle Omnichannel Simulator Live Test Drawer */}
-          <button
-            onClick={onOpenSimulator}
-            data-tour="top-simulator-btn"
-            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer shadow-2xs active:scale-95 ${
-              simulatorOpen
-                ? "bg-emerald-50 text-emerald-900 border-emerald-400 ring-2 ring-emerald-200/50"
-                : "bg-gradient-to-r from-emerald-50 via-pink-50 to-blue-50 hover:from-emerald-100 hover:via-pink-100 hover:to-blue-100 text-gray-800 border-gray-200"
-            }`}
-            title="Open Omnichannel Live Simulator (WhatsApp, Instagram & Facebook)"
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-500 animate-pulse" : "bg-amber-400"}`}
-            />
-            <span className="hidden md:inline font-bold">
-              Omnichannel Simulator
-            </span>
-            <span className="md:hidden inline font-semibold">Simulator</span>
-            <div className="hidden sm:flex items-center gap-1 ml-0.5 text-[10px] text-gray-500">
-              <span>🟢</span>
-              <span>📸</span>
-              <span>🔵</span>
-            </div>
-          </button>
 
           {/* Quick Search Button */}
           <button
@@ -465,10 +448,82 @@ export function TopNav({
         </div>
       </header>
 
+      {/* Floating Bottom-Right Omnichannel Simulator Dock */}
+      {onOpenSimulator && !simulatorOpen && (
+        <button
+          type="button"
+          onClick={onOpenSimulator}
+          data-tour="top-simulator-btn"
+          aria-label="Open Omnichannel Live Simulator"
+          title="Open Omnichannel Live Simulator (WhatsApp, Instagram & Facebook)"
+          className="fixed bottom-5 right-5 sm:bottom-6 sm:right-6 z-40 group flex items-center gap-3 p-1.5 sm:pr-4 rounded-full bg-white/95 backdrop-blur-xl border border-emerald-200/90 shadow-[0_18px_45px_-10px_rgba(13,92,58,0.28),0_4px_14px_-2px_rgba(15,23,42,0.08)] hover:shadow-[0_22px_50px_-8px_rgba(13,92,58,0.38)] hover:border-emerald-400 transition-all duration-300 cursor-pointer active:scale-95"
+        >
+          {/* Primary Emerald Chat & AI Co-Pilot Orb */}
+          <div className="relative w-11 h-11 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#0d5c3a] via-[#0f6b43] to-[#00c068] text-white flex items-center justify-center shadow-inner shrink-0 group-hover:scale-105 transition-transform">
+            <svg
+              className="w-5 h-5 text-white drop-shadow-2xs"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.1"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+              <path d="M9.5 11.5h.01" />
+              <path d="M12.5 11.5h.01" />
+              <path d="M15.5 11.5h.01" />
+            </svg>
+
+            {/* Sparkle Badge Top-Left */}
+            <span className="absolute -top-0.5 -left-0.5 w-4 h-4 rounded-full bg-white text-[#0d5c3a] shadow-xs flex items-center justify-center">
+              <SparklesIcon className="w-2.5 h-2.5 text-[#0d5c3a]" />
+            </span>
+
+            {/* Live Connection Status Dot Bottom-Right */}
+            <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center">
+              {connected && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00c068] opacity-75" />
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2.5 w-2.5 ring-2 ring-white ${
+                  connected ? "bg-[#00c068]" : "bg-amber-400"
+                }`}
+              />
+            </span>
+          </div>
+
+          {/* Desktop / Tablet Label + Overlapping Vector Channel Stack */}
+          <div className="hidden sm:flex items-center gap-2.5">
+            <div className="text-left leading-tight">
+              <div className="text-[11px] font-extrabold text-gray-900 tracking-tight group-hover:text-[#0d5c3a] transition-colors">
+                Live Simulator
+              </div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-700">
+                Co-Pilot Test Desk
+              </div>
+            </div>
+
+            {/* Overlapping Vector Channel Avatars (WhatsApp, Instagram, Messenger) */}
+            <div className="flex items-center -space-x-1.5 pl-1">
+              <span className="w-6 h-6 rounded-full bg-[#075E54] text-white ring-2 ring-white flex items-center justify-center shadow-2xs">
+                <WhatsAppBadgeIcon className="w-3 h-3" />
+              </span>
+              <span className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-500 via-pink-500 to-purple-600 text-white ring-2 ring-white flex items-center justify-center shadow-2xs">
+                <InstagramBadgeIcon className="w-3 h-3" />
+              </span>
+              <span className="w-6 h-6 rounded-full bg-[#0084FF] text-white ring-2 ring-white flex items-center justify-center shadow-2xs">
+                <FacebookMessengerBadgeIcon className="w-3 h-3" />
+              </span>
+            </div>
+          </div>
+        </button>
+      )}
+
       {/* Quick Search Palette Modal */}
       {searchOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-black/40 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/25 backdrop-blur-md">
+          <div className="bg-white rounded-none sm:rounded-[28px] shadow-2xl border-0 sm:border border-gray-200 max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[85dvh] flex flex-col overflow-hidden animate-popup-spring">
             <div className="p-4 border-b border-gray-100 flex items-center gap-3">
               <SearchIcon className="w-5 h-5 text-gray-400" />
               <input

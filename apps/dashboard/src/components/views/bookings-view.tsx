@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
+import { TableActionMenu } from "../ui/table-action-menu";
 import type {
   BookingCatalogRules,
   BookingStatus,
@@ -21,6 +23,7 @@ interface BookingsViewProps {
   onStateChange?: (state: VendorState) => void;
   onNavigateToProducts?: () => void;
   onNavigateToPayments?: () => void;
+  onNavigateToLegalSettings?: () => void;
   onOpenTour?: () => void;
 }
 
@@ -116,45 +119,22 @@ export function BookingsView({
   dbBookings,
   bookingCatalogRules,
   onStateChange,
-  onNavigateToProducts,
-  onNavigateToPayments,
+  onNavigateToLegalSettings,
   onOpenTour,
 }: BookingsViewProps) {
-  const [activeTab, setActiveTab] = useState<"pipeline" | "terms">("pipeline");
   const [bookings, setBookings] = useState<WholesaleBookingItem[]>(
     dbBookings && dbBookings.length > 0 ? dbBookings : INITIAL_BOOKINGS
   );
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Booking Terms State (Synced with PostgreSQL)
-  const [defaultDepositPercent, setDefaultDepositPercent] = useState(
-    bookingCatalogRules?.defaultDepositPercent ?? 30
-  );
-  const [defaultLeadTimeDays, setDefaultLeadTimeDays] = useState(
-    bookingCatalogRules?.defaultLeadTimeDays ?? 5
-  );
-  const [minimumOrderValueNaira, setMinimumOrderValueNaira] = useState(
-    bookingCatalogRules?.minimumOrderValueNaira ?? 150000
-  );
-  const [autoExpireHours, setAutoExpireHours] = useState(
-    bookingCatalogRules?.autoExpireHours ?? 48
-  );
+  const defaultDepositPercent = bookingCatalogRules?.defaultDepositPercent ?? 30;
 
   useEffect(() => {
     if (dbBookings && dbBookings.length > 0) {
       setBookings(dbBookings);
     }
   }, [dbBookings]);
-
-  useEffect(() => {
-    if (bookingCatalogRules) {
-      setDefaultDepositPercent(bookingCatalogRules.defaultDepositPercent ?? 30);
-      setDefaultLeadTimeDays(bookingCatalogRules.defaultLeadTimeDays ?? 5);
-      setMinimumOrderValueNaira(bookingCatalogRules.minimumOrderValueNaira ?? 150000);
-      setAutoExpireHours(bookingCatalogRules.autoExpireHours ?? 48);
-    }
-  }, [bookingCatalogRules]);
 
   // New Booking Modal State
   const [showNewBookingModal, setShowNewBookingModal] = useState(false);
@@ -325,35 +305,35 @@ export function BookingsView({
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
               Wholesale &amp; Reseller Bookings
             </h1>
-            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-              Pro Concierge ($20)
+            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-[#0d5c3a] border border-emerald-200">
+              Advance Bulk Pipeline
             </span>
           </div>
           <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-            Allow wholesale clients and reseller networks to request advance bulk bookings, lock inventory with Monnify escrow deposits, and manage lead-time fulfillment.
+            Track bulk bookings, verify Monnify advance escrow deposits, and coordinate wholesale fulfillment.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {onNavigateToProducts && (
+        <div className="flex flex-wrap items-center gap-2">
+          {onNavigateToLegalSettings && (
             <button
-              onClick={onNavigateToProducts}
-              className="text-xs font-semibold px-3.5 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-              title="Configure bookable products and categories in Products"
+              type="button"
+              onClick={onNavigateToLegalSettings}
+              className="text-xs font-semibold px-3.5 py-2.5 rounded-xl bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap"
+              title="Configure Wholesale Booking Policy & Legal Terms in Settings"
             >
-              <span>🛍️</span>
-              <span className="hidden sm:inline">Product Bookability Settings →</span>
-              <span className="sm:hidden">SKU Settings →</span>
+              <span>⚖️</span>
+              <span>Legal &amp; Booking Policies</span>
             </button>
           )}
           {onOpenTour && (
             <button
               onClick={onOpenTour}
-              className="text-xs font-semibold px-3.5 py-2.5 rounded-xl bg-purple-50 border border-purple-300 text-purple-950 hover:bg-purple-100 transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+              className="text-xs font-semibold px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 hover:bg-emerald-100 transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap"
               title="Learn how Wholesale Bookings &amp; Monnify Escrow work"
             >
               <span>🧭</span>
@@ -363,7 +343,7 @@ export function BookingsView({
           )}
           <button
             onClick={() => setShowNewBookingModal(true)}
-            className="text-xs font-semibold px-4 py-2.5 rounded-xl bg-[#0d5c3a] text-white hover:bg-[#0b4b2f] transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+            className="text-xs font-semibold px-4 py-2.5 rounded-xl bg-[#0d5c3a] text-white hover:bg-[#0b4b2f] transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap"
           >
             <span>+ New Wholesale Booking</span>
           </button>
@@ -419,177 +399,171 @@ export function BookingsView({
         </div>
       </div>
 
-      {/* Main Tab Strip */}
-      <div data-tour="bookings-tabs" className="flex border-b border-gray-200 text-xs font-semibold gap-6 overflow-x-auto pb-0.5 items-center justify-between">
-        <div className="flex gap-6">
+      {/* Booking Status Tabs (Replacing old Pipeline/Policy tabs) */}
+      <div
+        data-tour="bookings-tabs"
+        className="flex border-b border-gray-200 text-xs font-semibold gap-5 sm:gap-6 overflow-x-auto no-scrollbar whitespace-nowrap"
+      >
+        {[
+          { id: "ALL", label: `All Bookings (${bookings.length})` },
+          {
+            id: "REQUESTED",
+            label: `Requested (${bookings.filter((b) => b.status === "REQUESTED").length})`,
+          },
+          {
+            id: "CONFIRMED",
+            label: `Confirmed (${bookings.filter((b) => b.status === "CONFIRMED").length})`,
+          },
+          {
+            id: "DEPOSIT_PAID",
+            label: `Deposit Paid (${bookings.filter((b) => b.status === "DEPOSIT_PAID").length})`,
+          },
+          {
+            id: "READY_FOR_DISPATCH",
+            label: `Ready for Dispatch (${bookings.filter((b) => b.status === "READY_FOR_DISPATCH").length})`,
+          },
+          {
+            id: "FULFILLED",
+            label: `Fulfilled (${bookings.filter((b) => b.status === "FULFILLED").length})`,
+          },
+          {
+            id: "CANCELLED",
+            label: `Cancelled (${bookings.filter((b) => b.status === "CANCELLED").length})`,
+          },
+        ].map((tab) => (
           <button
-            onClick={() => setActiveTab("pipeline")}
-            className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer ${
-              activeTab === "pipeline"
-                ? "border-emerald-600 text-emerald-700 font-bold"
+            key={tab.id}
+            type="button"
+            onClick={() => setStatusFilter(tab.id)}
+            className={`pb-3 border-b-2 whitespace-nowrap transition-all cursor-pointer ${
+              statusFilter === tab.id
+                ? "border-[#0d5c3a] text-[#0d5c3a] font-bold"
                 : "border-transparent text-gray-500 hover:text-gray-900"
             }`}
           >
-            Active Bookings Pipeline ({bookings.length})
+            {tab.label}
           </button>
-
-          <button
-            onClick={() => setActiveTab("terms")}
-            className={`pb-2.5 border-b-2 whitespace-nowrap transition-all cursor-pointer ${
-              activeTab === "terms"
-                ? "border-emerald-600 text-emerald-700 font-bold"
-                : "border-transparent text-gray-500 hover:text-gray-900"
-            }`}
-          >
-            Wholesale Booking Policy &amp; Terms
-          </button>
-        </div>
-
-        {onNavigateToProducts && (
-          <button
-            onClick={onNavigateToProducts}
-            className="pb-2.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-          >
-            <span>🛍️ Configure Bookable Products in Catalog</span>
-            <span>→</span>
-          </button>
-        )}
+        ))}
       </div>
 
-      {/* TAB 1: BOOKINGS PIPELINE */}
-      {activeTab === "pipeline" && (
-        <div className="space-y-4">
-          {/* Filter Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-gray-100 shadow-2xs">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 px-1">
-                Status:
-              </span>
-              {[
-                { id: "ALL", label: "All Bookings" },
-                { id: "REQUESTED", label: "Requested" },
-                { id: "CONFIRMED", label: "Confirmed" },
-                { id: "DEPOSIT_PAID", label: "Deposit Paid" },
-                { id: "READY_FOR_DISPATCH", label: "Ready" },
-                { id: "FULFILLED", label: "Fulfilled" },
-              ].map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setStatusFilter(s.id)}
-                  className={`px-3 py-1 rounded-xl font-semibold transition-all cursor-pointer ${
-                    statusFilter === s.id
-                      ? "bg-gray-900 text-white shadow-2xs"
-                      : "bg-gray-50 text-gray-600 hover:bg-gray-100"
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search reference, client, SKU..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="text-xs bg-gray-50 border border-gray-200 rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500 w-full sm:w-64"
-              />
-            </div>
+      {/* Bookings Pipeline & Table */}
+      <div className="space-y-4">
+        {/* Search Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-gray-100 shadow-2xs">
+          <div className="relative flex-1 max-w-md">
+            <input
+              type="text"
+              placeholder="Search booking reference, client name, organization, or SKU..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="text-xs bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2 focus:outline-none focus:border-emerald-500 w-full"
+            />
           </div>
+          <div className="text-xs text-gray-500 whitespace-nowrap">
+            Showing <strong className="text-gray-900">{filteredBookings.length}</strong> of{" "}
+            <strong className="text-gray-900">{bookings.length}</strong> bookings
+          </div>
+        </div>
 
-          {/* Bookings Table Card */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs min-w-[840px]">
-                <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+        {/* Bookings Table Card */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[860px]">
+              <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                <tr>
+                  <th className="py-3 px-5 whitespace-nowrap">Ref / Client</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Channel</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Booked Item &amp; Qty</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Total Value</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Deposit Status</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Target Date</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Status</th>
+                  <th className="py-3 px-5 text-right whitespace-nowrap">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 whitespace-nowrap">
+                {filteredBookings.length === 0 ? (
                   <tr>
-                    <th className="py-3 px-5">Ref / Client</th>
-                    <th className="py-3 px-4">Channel</th>
-                    <th className="py-3 px-4">Booked Item &amp; Qty</th>
-                    <th className="py-3 px-4">Total Value</th>
-                    <th className="py-3 px-4">Deposit Status</th>
-                    <th className="py-3 px-4">Target Date</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-5 text-right">Actions</th>
+                    <td colSpan={8} className="py-12 text-center text-gray-400">
+                      <div className="flex flex-col items-center justify-center">
+                        <span className="text-3xl mb-2">📋</span>
+                        <span className="text-sm font-bold text-gray-800">No bookings match this status tab</span>
+                        <span className="text-xs text-gray-400 mt-0.5">
+                          Click &ldquo;+ New Wholesale Booking&rdquo; to record a bulk reservation.
+                        </span>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredBookings.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="py-12 text-center text-gray-400">
-                        <div className="flex flex-col items-center justify-center">
-                          <span className="text-3xl mb-2">📋</span>
-                          <span className="text-sm font-bold text-gray-800">No bookings match this filter</span>
-                          <span className="text-xs text-gray-400 mt-0.5">Click &ldquo;+ New Wholesale Booking&rdquo; to add a bulk booking manually.</span>
-                        </div>
+                ) : (
+                  filteredBookings.map((b) => (
+                    <tr key={b.id} className="hover:bg-gray-50/60 transition-colors whitespace-nowrap">
+                      <td className="py-3.5 px-5 whitespace-nowrap">
+                        <div className="font-bold text-gray-900 text-xs font-mono whitespace-nowrap">{b.reference}</div>
+                        <div className="font-semibold text-gray-800 mt-0.5 whitespace-nowrap">{b.clientName}</div>
+                        {b.clientOrganization && (
+                          <div className="text-[10px] text-gray-400 whitespace-nowrap">{b.clientOrganization}</div>
+                        )}
+                        <div className="text-[10px] text-gray-400 whitespace-nowrap">{b.clientPhone}</div>
                       </td>
-                    </tr>
-                  ) : (
-                    filteredBookings.map((b) => (
-                      <tr key={b.id} className="hover:bg-gray-50/60 transition-colors">
-                        <td className="py-3.5 px-5">
-                          <div className="font-bold text-gray-900 text-xs font-mono">{b.reference}</div>
-                          <div className="font-semibold text-gray-800 mt-0.5">{b.clientName}</div>
-                          {b.clientOrganization && (
-                            <div className="text-[10px] text-gray-400 truncate">{b.clientOrganization}</div>
-                          )}
-                          <div className="text-[10px] text-gray-400">{b.clientPhone}</div>
-                        </td>
 
-                        <td className="py-3.5 px-4">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${
                             b.channel === "WHATSAPP"
                               ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                               : b.channel === "INSTAGRAM"
                               ? "bg-pink-50 text-pink-700 border-pink-200"
                               : "bg-blue-50 text-blue-700 border-blue-200"
-                          }`}>
-                            <span>{b.channel === "WHATSAPP" ? "🟢" : b.channel === "INSTAGRAM" ? "📸" : "🔵"}</span>
-                            <span>{b.channel}</span>
-                          </span>
-                        </td>
+                          }`}
+                        >
+                          <span>{b.channel === "WHATSAPP" ? "🟢" : b.channel === "INSTAGRAM" ? "📸" : "🔵"}</span>
+                          <span>{b.channel}</span>
+                        </span>
+                      </td>
 
-                        <td className="py-3.5 px-4">
-                          <div className="font-bold text-gray-900">{b.productName}</div>
-                          <div className="text-[10px] text-gray-400 font-mono">
-                            {b.productSku} · ₦{b.unitPriceNaira.toLocaleString()} / unit
-                          </div>
-                          <span className="inline-block mt-1 font-bold text-xs bg-gray-100 text-gray-800 px-2 py-0.5 rounded">
-                            Qty: {b.quantity} units
-                          </span>
-                        </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="font-bold text-gray-900 whitespace-nowrap">{b.productName}</div>
+                        <div className="text-[10px] text-gray-400 font-mono whitespace-nowrap">
+                          {b.productSku} · ₦{b.unitPriceNaira.toLocaleString()} / unit
+                        </div>
+                        <span className="inline-block mt-1 font-bold text-xs bg-gray-100 text-gray-800 px-2 py-0.5 rounded whitespace-nowrap">
+                          Qty: {b.quantity} units
+                        </span>
+                      </td>
 
-                        <td className="py-3.5 px-4">
-                          <div className="font-extrabold text-gray-900 text-xs">
-                            ₦{b.totalAmountNaira.toLocaleString()}
-                          </div>
-                          <div className="text-[10px] text-gray-500">
-                            Req: ₦{b.depositRequiredNaira.toLocaleString()}
-                          </div>
-                        </td>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="font-extrabold text-gray-900 text-xs whitespace-nowrap">
+                          ₦{b.totalAmountNaira.toLocaleString()}
+                        </div>
+                        <div className="text-[10px] text-gray-500 whitespace-nowrap">
+                          Req: ₦{b.depositRequiredNaira.toLocaleString()}
+                        </div>
+                      </td>
 
-                        <td className="py-3.5 px-4">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
                             b.depositStatus === "PAID"
                               ? "bg-emerald-100 text-emerald-800"
                               : b.depositStatus === "PARTIAL"
                               ? "bg-amber-100 text-amber-800"
                               : "bg-rose-50 text-rose-700 border border-rose-200"
-                          }`}>
-                            {b.depositStatus === "PAID" ? "✓ Deposit Paid" : "Unpaid Deposit"}
-                          </span>
-                          <div className="text-[10px] text-gray-400 mt-0.5">
-                            ₦{b.depositPaidNaira.toLocaleString()} paid
-                          </div>
-                        </td>
+                          }`}
+                        >
+                          {b.depositStatus === "PAID" ? "✓ Deposit Paid" : "Unpaid Deposit"}
+                        </span>
+                        <div className="text-[10px] text-gray-400 mt-0.5 whitespace-nowrap">
+                          ₦{b.depositPaidNaira.toLocaleString()} paid
+                        </div>
+                      </td>
 
-                        <td className="py-3.5 px-4 font-semibold text-gray-700">
-                          {b.targetDeliveryDate}
-                        </td>
+                      <td className="py-3.5 px-4 font-semibold text-gray-700 whitespace-nowrap">
+                        {b.targetDeliveryDate}
+                      </td>
 
-                        <td className="py-3.5 px-4">
-                          <span className={`inline-block px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider ${
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span
+                          className={`inline-block px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider whitespace-nowrap ${
                             b.status === "REQUESTED"
                               ? "bg-amber-100 text-amber-900 border border-amber-300"
                               : b.status === "CONFIRMED"
@@ -601,169 +575,93 @@ export function BookingsView({
                               : b.status === "FULFILLED"
                               ? "bg-gray-100 text-gray-700"
                               : "bg-rose-50 text-rose-800"
-                          }`}>
-                            {b.status.replace(/_/g, " ")}
-                          </span>
-                        </td>
+                          }`}
+                        >
+                          {b.status.replace(/_/g, " ")}
+                        </span>
+                      </td>
 
-                        <td className="py-3.5 px-5 text-right space-x-1.5 whitespace-nowrap">
-                          {b.status === "REQUESTED" && (
-                            <button
-                              onClick={() => handleApprove(b.id)}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] cursor-pointer"
-                            >
-                              Approve
-                            </button>
-                          )}
-
-                          {(b.status === "CONFIRMED" || (b.status === "REQUESTED" && b.depositStatus === "UNPAID")) && (
-                            <button
-                              onClick={() => handleSimulateDeposit(b.id)}
-                              className="px-2.5 py-1 rounded-lg bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold text-[11px] cursor-pointer"
-                            >
-                              Simulate Deposit ₦
-                            </button>
-                          )}
-
-                          {b.status === "DEPOSIT_PAID" && (
-                            <button
-                              onClick={() => handleMarkReady(b.id)}
-                              className="px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-800 text-white font-bold text-[11px] cursor-pointer"
-                            >
-                              Mark Ready
-                            </button>
-                          )}
-
-                          {b.status === "READY_FOR_DISPATCH" && (
-                            <button
-                              onClick={() => handleFulfill(b.id)}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[11px] cursor-pointer"
-                            >
-                              Fulfill &amp; Settle
-                            </button>
-                          )}
-
-                          {b.status !== "FULFILLED" && b.status !== "CANCELLED" && (
-                            <button
-                              onClick={() => handleCancel(b.id)}
-                              className="px-2 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-rose-50 hover:text-rose-700 text-[11px] cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                      <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                        <TableActionMenu
+                          items={[
+                            ...(b.status === "REQUESTED"
+                              ? [
+                                  {
+                                    label: "Approve Booking Request",
+                                    icon: "✅",
+                                    variant: "emerald" as const,
+                                    onClick: () => handleApprove(b.id),
+                                  },
+                                ]
+                              : []),
+                            ...(b.status === "CONFIRMED" ||
+                            (b.status === "REQUESTED" && b.depositStatus === "UNPAID")
+                              ? [
+                                  {
+                                    label: `Confirm Deposit (₦${b.depositRequiredNaira.toLocaleString()})`,
+                                    icon: "💳",
+                                    variant: "emerald" as const,
+                                    onClick: () => handleSimulateDeposit(b.id),
+                                  },
+                                ]
+                              : []),
+                            ...(b.status === "DEPOSIT_PAID"
+                              ? [
+                                  {
+                                    label: "Mark Ready for Dispatch",
+                                    icon: "📦",
+                                    variant: "emerald" as const,
+                                    onClick: () => handleMarkReady(b.id),
+                                  },
+                                ]
+                              : []),
+                            ...(b.status === "READY_FOR_DISPATCH"
+                              ? [
+                                  {
+                                    label: "Fulfill & Settle Balance",
+                                    icon: "🚚",
+                                    variant: "emerald" as const,
+                                    onClick: () => handleFulfill(b.id),
+                                  },
+                                ]
+                              : []),
+                            {
+                              label: "Chat Wholesaler on WhatsApp",
+                              icon: "💬",
+                              onClick: () =>
+                                window.open(
+                                  `https://wa.me/${b.clientPhone.replace(/\+/g, "")}`,
+                                  "_blank"
+                                ),
+                            },
+                            ...(b.status !== "FULFILLED" && b.status !== "CANCELLED"
+                              ? [
+                                  {
+                                    label: "Cancel Booking",
+                                    icon: "🛑",
+                                    variant: "danger" as const,
+                                    onClick: () => handleCancel(b.id),
+                                  },
+                                ]
+                              : []),
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
+      </div>
 
-
-
-      {/* TAB 3: BOOKING TERMS & POLICY */}
-      {activeTab === "terms" && (
-        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-2xs space-y-6 max-w-3xl">
-          <div>
-            <h2 className="text-base font-bold text-gray-900">Wholesale Advance Booking Policy</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Set standard terms for wholesale orders, escrow deposit requirements, and cancellation rules.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-700">Default Booking Deposit %</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={10}
-                  max={100}
-                  value={defaultDepositPercent}
-                  onChange={(e) => setDefaultDepositPercent(Number(e.target.value))}
-                  className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-bold w-28 focus:outline-none focus:border-emerald-500"
-                />
-                <span className="text-xs text-gray-500">% via Monnify Dynamic Account</span>
-              </div>
-              <p className="text-[11px] text-gray-400">Standard for Nigerian wholesale importers is 30%.</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-700">Standard Turnaround / Lead Time (Days)</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={60}
-                  value={defaultLeadTimeDays}
-                  onChange={(e) => setDefaultLeadTimeDays(Number(e.target.value))}
-                  className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-bold w-28 focus:outline-none focus:border-emerald-500"
-                />
-                <span className="text-xs text-gray-500">Business days</span>
-              </div>
-              <p className="text-[11px] text-gray-400">Target time to prepare and dispatch wholesale booking.</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-700">Minimum Order Value for Bookings (₦)</label>
-              <input
-                type="number"
-                step={10000}
-                value={minimumOrderValueNaira}
-                onChange={(e) => setMinimumOrderValueNaira(Number(e.target.value))}
-                className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-bold w-full focus:outline-none focus:border-emerald-500"
-              />
-              <p className="text-[11px] text-gray-400">Orders below this amount are routed through immediate retail checkout.</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-700">Auto-Expiry for Unpaid Deposits (Hours)</label>
-              <input
-                type="number"
-                min={12}
-                max={168}
-                value={autoExpireHours}
-                onChange={(e) => setAutoExpireHours(Number(e.target.value))}
-                className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 font-bold w-full focus:outline-none focus:border-emerald-500"
-              />
-              <p className="text-[11px] text-gray-400">Held reservations are cancelled and stock returned if deposit is not received.</p>
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-gray-100 flex items-center justify-between">
-            <span className="text-xs text-emerald-800 font-semibold">
-              ✓ Settings synced with PostgreSQL
-            </span>
-            <button
-              onClick={async () => {
-                try {
-                  const res = await api.updateBookingCatalogRules({
-                    defaultDepositPercent,
-                    defaultLeadTimeDays,
-                    minimumOrderValueNaira,
-                    autoExpireHours,
-                  });
-                  onStateChange?.(res.state);
-                  showToast("Booking terms and policy saved to PostgreSQL!");
-                } catch {
-                  showToast("Booking terms updated!");
-                }
-              }}
-              className="bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer shadow-2xs"
-            >
-              Save Policy Changes
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* NEW BOOKING MODAL */}
-      {showNewBookingModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-2xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
+      {/* NEW BOOKING MODAL (Viewport-Centered & Full-Screen on Mobile) */}
+      {showNewBookingModal &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 bg-slate-900/25 backdrop-blur-md z-50 flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-backdrop-fade">
+            <div className="bg-white rounded-none sm:rounded-[28px] max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-5 sm:p-6 shadow-2xl space-y-4 animate-popup-spring">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 className="font-bold text-base text-gray-900">Create Wholesale Booking</h3>
               <button
@@ -892,7 +790,8 @@ export function BookingsView({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

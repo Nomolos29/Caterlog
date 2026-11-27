@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import type { OrderItem, VendorProfile, PayoutWithdrawalItem, SettlementSplitRuleItem } from "@/lib/types";
 import { EmptyState } from "../ui/empty-state";
+import { TableActionMenu } from "../ui/table-action-menu";
 import { api } from "@/lib/api";
 
 interface PaymentsViewProps {
@@ -1596,18 +1597,19 @@ export function PaymentsView({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs min-w-[640px]">
-                <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+              <table className="w-full text-left text-xs min-w-[740px]">
+                <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                   <tr>
-                    <th className="px-5 py-3">Order / Paid</th>
-                    <th className="px-4 py-3">Supplier</th>
-                    <th className="px-4 py-3">Rep Gross / Net</th>
-                    <th className="px-4 py-3">Fee · Nia</th>
-                    <th className="px-4 py-3">Customer</th>
-                    <th className="px-5 py-3">Settlement</th>
+                    <th className="px-5 py-3 whitespace-nowrap">Order / Paid</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Supplier</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Rep Gross / Net</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Fee · Nia</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Customer</th>
+                    <th className="px-4 py-3 whitespace-nowrap">Settlement</th>
+                    <th className="px-5 py-3 text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 text-gray-700">
+                <tbody className="divide-y divide-gray-100 text-gray-700 whitespace-nowrap">
                   {filteredTransactions.map((tx) => (
                     <tr
                       key={tx.id}
@@ -1615,29 +1617,28 @@ export function PaymentsView({
                         setSelectedOrderCode(tx.orderCode);
                         setActiveTab("detail");
                       }}
-                      className={`cursor-pointer transition-colors ${
+                      className={`cursor-pointer transition-colors whitespace-nowrap ${
                         tx.repSettlement === "Rep failed"
                           ? "hover:bg-amber-50/40 bg-amber-50/10"
                           : "hover:bg-gray-50"
                       }`}
                     >
-                      <td className="px-5 py-3.5">
-                        <div className="font-semibold text-emerald-800 flex items-center gap-1">
+                      <td className="px-5 py-3.5 whitespace-nowrap">
+                        <div className="font-semibold text-emerald-800 flex items-center gap-1 whitespace-nowrap">
                           <span>{tx.orderCode}</span>
-                          <span>↗</span>
                         </div>
-                        <div className="text-[11px] text-gray-400">
+                        <div className="text-[11px] text-gray-400 whitespace-nowrap">
                           ₦{tx.amount.toLocaleString()} · {tx.gatewayRef}
                         </div>
                       </td>
-                      <td className="px-4 py-3.5 font-medium text-gray-900">
+                      <td className="px-4 py-3.5 font-medium text-gray-900 whitespace-nowrap">
                         {tx.supplierGross > 0 ? `₦${tx.supplierGross.toLocaleString()}` : "—"}
                       </td>
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5 whitespace-nowrap">
                         {tx.repGross > 0 ? (
                           <>
-                            <div className="text-gray-900 font-medium">₦{tx.repGross.toLocaleString()}</div>
-                            <div className="text-[11px] text-emerald-700 font-semibold">
+                            <div className="text-gray-900 font-medium whitespace-nowrap">₦{tx.repGross.toLocaleString()}</div>
+                            <div className="text-[11px] text-emerald-700 font-semibold whitespace-nowrap">
                               ₦{tx.repNet.toLocaleString()}
                             </div>
                           </>
@@ -1645,10 +1646,10 @@ export function PaymentsView({
                           <span className="text-gray-400">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3.5 text-gray-500">₦{tx.fee}</td>
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5 text-gray-500 whitespace-nowrap">₦{tx.fee}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap inline-block ${
                             tx.customerStatus === "Paid"
                               ? "bg-emerald-100 text-emerald-800"
                               : "bg-rose-100 text-rose-800"
@@ -1657,22 +1658,22 @@ export function PaymentsView({
                           {tx.customerStatus}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td className="px-4 py-3.5 whitespace-nowrap">
                         {tx.supplierSettlement === "Both settled" ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap inline-block">
                             Both settled
                           </span>
                         ) : tx.supplierSettlement === "Not created" ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600 whitespace-nowrap inline-block">
                             Not created
                           </span>
                         ) : (
-                          <div className="flex flex-col gap-1 items-start">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap">
                               {tx.supplierSettlement}
                             </span>
                             <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium border whitespace-nowrap ${
                                 tx.repSettlement === "Settled"
                                   ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                                   : "bg-rose-50 text-rose-800 border-rose-200"
@@ -1682,6 +1683,30 @@ export function PaymentsView({
                             </span>
                           </div>
                         )}
+                      </td>
+                      <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                        <TableActionMenu
+                          items={[
+                            {
+                              label: "Inspect Split Allocation",
+                              icon: "🧾",
+                              variant: "emerald",
+                              onClick: () => {
+                                setSelectedOrderCode(tx.orderCode);
+                                setActiveTab("detail");
+                              },
+                            },
+                            ...(onNavigateToOrder
+                              ? [
+                                  {
+                                    label: `Open Order ${tx.orderCode}`,
+                                    icon: "📦",
+                                    onClick: () => onNavigateToOrder(tx.orderCode),
+                                  },
+                                ]
+                              : []),
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -1757,8 +1782,8 @@ export function PaymentsView({
 
       {/* 6-Digit PIN Fund Withdrawal Modal */}
       {showWithdrawModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-gray-100 animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="bg-white rounded-none sm:rounded-[28px] max-w-md w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-6 space-y-5 shadow-2xl border-0 sm:border border-gray-100 animate-popup-spring">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm">

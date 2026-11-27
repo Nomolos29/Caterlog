@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import type { ProductItem, VendorProfile } from "@/lib/types";
 import { resolveImageUrl } from "@/lib/api";
 
@@ -113,14 +114,16 @@ export function SocialFlyerQrModal({
     }
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-backdrop-fade"
+      className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-backdrop-fade"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-[28px] max-w-4xl w-full my-6 p-6 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border border-slate-200/80 space-y-6 max-h-[92vh] overflow-y-auto animate-popup-spring"
+        className="bg-white rounded-none sm:rounded-[28px] max-w-4xl w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] p-4 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border-0 sm:border border-slate-200/80 space-y-6 overflow-y-auto animate-popup-spring"
       >
         {/* Header */}
         <div className="flex items-start justify-between border-b border-gray-100 pb-4">
@@ -410,6 +413,7 @@ export function SocialFlyerQrModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

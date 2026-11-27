@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import type {
   MarketBoostListing,
   ProductItem,
@@ -124,6 +125,9 @@ export function MarketBoostView({
   const [ruleTargetResellers, setRuleTargetResellers] = useState<string[]>([]);
   const [customResellerInput, setCustomResellerInput] = useState("");
   const [previewReseller, setPreviewReseller] = useState<string>("ALL_RESELLERS");
+  const [previewMarkupPct, setPreviewMarkupPct] = useState<number>(25);
+  const [previewSearch, setPreviewSearch] = useState<string>("");
+  const [previewCategoryFilter, setPreviewCategoryFilter] = useState<string>("ALL");
 
   const [draftSaved, setDraftSaved] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
@@ -507,6 +511,392 @@ export function MarketBoostView({
     }
     return activeCats.size;
   }, [mirroredCategories, products, effectiveMirroredSkus]);
+
+  const renderFullDirectoryPreviewModal = () => {
+    if (!showDirPreviewModal || typeof document === "undefined") return null;
+
+    const previewPool = mirroredProducts.length > 0 ? mirroredProducts : products;
+    const previewCategories = Array.from(
+      new Set(previewPool.map((p) => (p.category || "General").trim() || "General"))
+    );
+    const filteredPreviewProducts = previewPool.filter((p) => {
+      const cat = (p.category || "General").trim() || "General";
+      if (previewCategoryFilter !== "ALL" && cat !== previewCategoryFilter) return false;
+      if (previewSearch.trim()) {
+        const q = previewSearch.toLowerCase();
+        return (
+          p.name.toLowerCase().includes(q) ||
+          p.skuCode.toLowerCase().includes(q) ||
+          cat.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+
+    const activeDiscountRules = wholesaleDiscountRules.filter((r) => r.isActive);
+
+    return createPortal(
+      <div
+        onClick={() => setShowDirPreviewModal(false)}
+        className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-backdrop-fade"
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="bg-white rounded-none sm:rounded-[28px] max-w-5xl w-full h-[100dvh] sm:h-auto sm:max-h-[92dvh] flex flex-col shadow-2xl border-0 sm:border border-gray-200 overflow-hidden animate-popup-spring"
+        >
+          {/* Top Modal Header */}
+          <div className="px-5 sm:px-7 py-4 border-b border-gray-200 bg-gray-50/80 flex items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-extrabold text-gray-900 truncate">
+                    Live Reseller Directory &amp; Wholesale Showroom Preview
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-[#0d5c3a] whitespace-nowrap">
+                    {listingPublished ? "Published Live" : "Draft Preview"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-500 truncate">
+                  Exactly how verified Nigerian resellers see and mirror your wholesale catalog in the Network directory
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowDirPreviewModal(false)}
+              className="w-8 h-8 rounded-full bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 flex items-center justify-center text-sm font-bold cursor-pointer shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Scrollable Showroom Body */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-7 space-y-6">
+            {/* 1. Supplier Hero Banner */}
+            <div className="rounded-2xl bg-gradient-to-br from-[#0d5c3a] via-[#0b4b2f] to-emerald-950 text-white p-5 sm:p-6 shadow-md relative overflow-hidden">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
+                <div className="space-y-2.5 max-w-2xl">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-white/15 backdrop-blur-xs text-emerald-100 text-[10px] font-extrabold uppercase tracking-wider">
+                      ✓ Verified Market Boost Supplier
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 text-[10px] font-bold">
+                      {category}
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-white/10 text-white text-[10px] font-semibold">
+                      {getVisibilityBadge().label}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-white text-[#0d5c3a] font-black text-lg flex items-center justify-center shrink-0 shadow-sm">
+                      {(businessName || "S").slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white">
+                        {businessName}
+                      </h2>
+                      <div className="text-xs text-emerald-100/90 flex flex-wrap items-center gap-2 mt-0.5">
+                        <span>📍 {location}</span>
+                        <span>•</span>
+                        <span>🚚 {fulfillment}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-emerald-50/90 leading-relaxed">
+                    {description}
+                  </p>
+                </div>
+
+                {/* Key Wholesale Terms Pill Box */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-2.5 shrink-0 bg-white/10 backdrop-blur-xs border border-white/15 rounded-2xl p-3.5 text-xs">
+                  <div className="p-2 rounded-xl bg-black/15">
+                    <div className="text-[10px] text-emerald-200 uppercase font-bold">Starting Cost</div>
+                    <div className="text-base font-extrabold text-white mt-0.5">{liveStartingPrice}</div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-black/15">
+                    <div className="text-[10px] text-emerald-200 uppercase font-bold">Minimum MOQ</div>
+                    <div className="text-base font-extrabold text-white mt-0.5">{moq}</div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-black/15">
+                    <div className="text-[10px] text-emerald-200 uppercase font-bold">Mirrored SKUs</div>
+                    <div className="text-base font-extrabold text-white mt-0.5">
+                      {previewPool.length} items
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-black/15">
+                    <div className="text-[10px] text-emerald-200 uppercase font-bold">Live Stock</div>
+                    <div className="text-base font-extrabold text-emerald-300 mt-0.5">
+                      {liveTotalStock.toLocaleString()} units
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Interactive Reseller Profit & Markup Simulator Bar */}
+            <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 text-xs">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-[#0d5c3a] text-white">
+                    Interactive Reseller Margin Simulator
+                  </span>
+                  {activeDiscountRules.length > 0 && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      {activeDiscountRules.length} Active Wholesale Discount Rule{activeDiscountRules.length === 1 ? "" : "s"} Applied
+                    </span>
+                  )}
+                </div>
+                <p className="text-gray-600 text-[11px]">
+                  Test how a reseller views your wholesale costs and calculates their instant Monnify split profit per unit.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-200">
+                  <span className="text-[11px] font-semibold text-gray-500 whitespace-nowrap">Viewing as:</span>
+                  <select
+                    value={previewReseller}
+                    onChange={(e) => setPreviewReseller(e.target.value)}
+                    className="text-xs font-bold text-gray-900 bg-transparent focus:outline-none cursor-pointer"
+                  >
+                    <option value="ALL_RESELLERS">Standard Network Reseller</option>
+                    {networkResellers.map((rName) => (
+                      <option key={rName} value={rName}>
+                        {rName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-200">
+                  <span className="text-[11px] font-semibold text-gray-500 whitespace-nowrap">
+                    Reseller Markup:
+                  </span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={80}
+                    step={5}
+                    value={previewMarkupPct}
+                    onChange={(e) => setPreviewMarkupPct(Number(e.target.value))}
+                    className="w-24 accent-[#0d5c3a] cursor-pointer"
+                  />
+                  <span className="font-mono font-extrabold text-[#0d5c3a] text-xs">
+                    +{previewMarkupPct}%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Territory Coverage & Fulfillment Terms Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200 space-y-1.5">
+                <div className="font-bold text-gray-900 flex items-center justify-between">
+                  <span>🗺️ Geographic Mirroring Eligibility</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getVisibilityBadge().color}`}>
+                    {allowInterstate ? "Interstate Open" : "Local State Only"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-600 leading-relaxed">
+                  {shippingScope === "LOCAL_STATE"
+                    ? `Only resellers operating within ${vendorState}${targetSpecificLgas && coveredLgas.length > 0 ? ` (${coveredLgas.join(", ")})` : ""} can mirror this catalog.`
+                    : shippingScope === "SELECTED_STATES"
+                      ? `Approved for resellers across ${coveredStates.length} states: ${coveredStates.join(", ")}.`
+                      : "Open to verified resellers across all 36 States and FCT Abuja."}
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200 space-y-1.5">
+                <div className="font-bold text-gray-900 flex items-center justify-between">
+                  <span>📦 Supplier Dispatch &amp; Split Escrow Policy</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    Monnify Auto-Split
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-600 leading-relaxed">
+                  {deliveryNote} When a reseller&apos;s customer pays, your wholesale cost settles to your subaccount while the reseller&apos;s +{previewMarkupPct}% markup routes to theirs.
+                </p>
+              </div>
+            </div>
+
+            {/* 4. Filter & Category Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
+                <button
+                  type="button"
+                  onClick={() => setPreviewCategoryFilter("ALL")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${
+                    previewCategoryFilter === "ALL"
+                      ? "bg-[#0d5c3a] text-white shadow-2xs"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  All Mirrored Items ({previewPool.length})
+                </button>
+                {previewCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setPreviewCategoryFilter(cat)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${
+                      previewCategoryFilter === cat
+                        ? "bg-[#0d5c3a] text-white shadow-2xs"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="text"
+                placeholder="Search mirrored SKU or product..."
+                value={previewSearch}
+                onChange={(e) => setPreviewSearch(e.target.value)}
+                className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs bg-white focus:outline-none focus:border-emerald-600 w-full sm:w-64"
+              />
+            </div>
+
+            {/* 5. Mirrored Wholesale Product Cards Grid */}
+            {filteredPreviewProducts.length === 0 ? (
+              <div className="p-10 text-center bg-gray-50 rounded-2xl border border-gray-200 text-xs text-gray-500">
+                No products match your search in this preview.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredPreviewProducts.map((prod) => {
+                  const pricing = computeEffectiveWholesalePrice(prod, previewReseller);
+                  const suggestedRetail = Math.round(
+                    pricing.netNaira * (1 + previewMarkupPct / 100)
+                  );
+                  const resellerProfit = Math.max(0, suggestedRetail - pricing.netNaira);
+
+                  return (
+                    <div
+                      key={prod.id}
+                      className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-2xs hover:shadow-md transition-all flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="h-40 bg-gray-100 relative overflow-hidden flex items-center justify-center border-b border-gray-100">
+                          {prod.primaryImageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={resolveImageUrl(prod.primaryImageUrl)}
+                              alt={prod.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-3xl">📦</span>
+                          )}
+                          <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-full bg-gray-900/80 backdrop-blur-xs text-white text-[10px] font-mono font-bold">
+                            {prod.skuCode}
+                          </span>
+                          <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
+                            {prod.availableStock} in stock
+                          </span>
+                          {pricing.discountNaira > 0 && (
+                            <span className="absolute bottom-2 left-2.5 px-2 py-0.5 rounded-md bg-amber-400 text-gray-950 text-[10px] font-extrabold">
+                              -₦{pricing.discountNaira.toLocaleString()} Wholesale Rule
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="p-4 space-y-2.5 text-xs">
+                          <div>
+                            <div className="text-[10px] font-bold uppercase text-emerald-700">
+                              {prod.category || "General"}
+                            </div>
+                            <h4 className="font-bold text-gray-900 text-sm truncate" title={prod.name}>
+                              {prod.name}
+                            </h4>
+                          </div>
+
+                          <div className="bg-gray-50 rounded-xl p-2.5 border border-gray-100 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500 text-[11px]">Supplier Wholesale Cost:</span>
+                              <div className="flex items-center gap-1.5">
+                                {pricing.discountNaira > 0 && (
+                                  <span className="text-[10px] line-through text-gray-400">
+                                    ₦{pricing.baseNaira.toLocaleString()}
+                                  </span>
+                                )}
+                                <span className="font-extrabold text-gray-900">
+                                  ₦{pricing.netNaira.toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500 text-[11px]">
+                                Reseller Retail (+{previewMarkupPct}%):
+                              </span>
+                              <span className="font-bold text-gray-800">
+                                ₦{suggestedRetail.toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between pt-1 border-t border-gray-200/70">
+                              <span className="text-emerald-800 font-bold text-[11px]">
+                                Reseller Profit / Unit:
+                              </span>
+                              <span className="font-extrabold text-[#0d5c3a]">
+                                +₦{resellerProfit.toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="px-4 pb-4">
+                        <div className="w-full py-2 px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-[#0d5c3a] font-bold text-xs text-center">
+                          ✓ Ready for 1-Click Reseller Mirror
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Modal Action Footer */}
+          <div className="px-5 sm:px-7 py-3.5 border-t border-gray-200 bg-gray-50 flex flex-wrap items-center justify-between gap-3 shrink-0 text-xs">
+            <span className="text-gray-500 text-[11px]">
+              Showing <strong>{filteredPreviewProducts.length}</strong> mirrored products ·{" "}
+              {mirroredProducts.length === 0
+                ? "Previewing all catalog items (select specific items in Listing Setup)"
+                : "Synced with your Market Boost selection"}
+            </span>
+            <div className="flex items-center gap-2">
+              {activeTab !== "setup" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDirPreviewModal(false);
+                    setActiveTab("setup");
+                  }}
+                  className="px-4 py-2 rounded-xl border border-gray-300 bg-white hover:bg-gray-100 text-gray-800 font-semibold cursor-pointer"
+                >
+                  Edit Visible Products
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowDirPreviewModal(false)}
+                className="px-5 py-2 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold cursor-pointer shadow-2xs"
+              >
+                Close Full Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
 
   /* -------------------------------------------------------------------------- */
   /* Screen 14: Market Boost · Listing setup                                    */
@@ -1747,39 +2137,7 @@ export function MarketBoostView({
         )}
 
         {/* Directory Preview Modal */}
-        {showDirPreviewModal && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="font-bold text-gray-900 text-sm">Directory Card Preview</h3>
-                <button onClick={() => setShowDirPreviewModal(false)} className="text-gray-400 hover:text-gray-600">
-                  ✕
-                </button>
-              </div>
-              <div className="border border-gray-200 rounded-xl p-5 space-y-3 bg-gray-50/50">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="text-base font-bold text-gray-900">{businessName}</div>
-                    <div className="text-xs text-gray-500">{location} · {category}</div>
-                  </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                    Verified
-                  </span>
-                </div>
-                <p className="text-xs text-gray-700">{description}</p>
-                <div className="text-xs font-semibold text-emerald-700">
-                  {startingPrice} starting wholesale price · {moq} MOQ
-                </div>
-              </div>
-              <button
-                onClick={() => setShowDirPreviewModal(false)}
-                className="w-full py-2 bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg hover:bg-gray-200"
-              >
-                Close Preview
-              </button>
-            </div>
-          </div>
-        )}
+        {renderFullDirectoryPreviewModal()}
       </div>
     );
   }
@@ -2080,11 +2438,11 @@ export function MarketBoostView({
 
       {/* Modals for Reseller & Preview */}
       {showResellerModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden">
+          <div className="bg-white rounded-none sm:rounded-[28px] max-w-md w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-6 space-y-4 shadow-2xl animate-popup-spring">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-gray-900 text-sm">Reseller: Nia Stores</h3>
-              <button onClick={() => setShowResellerModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowResellerModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
                 ✕
               </button>
             </div>
@@ -2097,7 +2455,7 @@ export function MarketBoostView({
             </div>
             <button
               onClick={() => setShowResellerModal(false)}
-              className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-lg"
+              className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-lg cursor-pointer"
             >
               Close
             </button>
@@ -2105,56 +2463,7 @@ export function MarketBoostView({
         </div>
       )}
 
-      {showDirPreviewModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl">
-            <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-gray-900 text-sm">Directory Card Preview</h3>
-              <button onClick={() => setShowDirPreviewModal(false)} className="text-gray-400 hover:text-gray-600">
-                ✕
-              </button>
-            </div>
-            <div className="border border-gray-200 rounded-xl p-5 space-y-3 bg-gray-50/50">
-              <div className="flex justify-between items-start">
-                <div>
-                  <div className="text-base font-bold text-gray-900">{businessName}</div>
-                  <div className="text-xs text-gray-500">{location} · {category}</div>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                    Verified
-                  </span>
-                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getVisibilityBadge().color}`}>
-                    {getVisibilityBadge().label}
-                  </span>
-                </div>
-              </div>
-              <p className="text-xs text-gray-700">{description}</p>
-              <div className="p-2.5 rounded-lg bg-white border border-gray-200 text-xs space-y-1">
-                <div className="font-semibold text-gray-900">Geographic Fulfillment Scope:</div>
-                <div className="text-gray-600 text-[11px]">
-                  {shippingScope === "LOCAL_STATE" ? (
-                    <span>📍 Restricted to <strong>{vendorState}</strong> only. Interstate mirroring is disabled.</span>
-                  ) : shippingScope === "SELECTED_STATES" ? (
-                    <span>🗺️ Delivers to <strong>{coveredStates.length} States:</strong> {coveredStates.join(", ")}</span>
-                  ) : (
-                    <span>🌐 Nationwide fulfillment across all 36 States + FCT.</span>
-                  )}
-                </div>
-              </div>
-              <div className="text-xs font-semibold text-emerald-700">
-                {startingPrice} starting wholesale price · {moq} MOQ
-              </div>
-            </div>
-            <button
-              onClick={() => setShowDirPreviewModal(false)}
-              className="w-full py-2 bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg hover:bg-gray-200"
-            >
-              Close Preview
-            </button>
-          </div>
-        </div>
-      )}
+      {renderFullDirectoryPreviewModal()}
     </div>
   );
 }

@@ -71,6 +71,8 @@ export function ChatDrawer({
   const [activeSocialChannel, setActiveSocialChannel] = useState<"WHATSAPP" | "INSTAGRAM" | "FACEBOOK">("WHATSAPP");
   // Frame Mode: Side Drawer vs Smartphone Device Mockup
   const [frameMode, setFrameMode] = useState<"drawer" | "phone">("drawer");
+  // Mobile Controls Collapse State so chat messages have room on mobile phones
+  const [mobileControlsExpanded, setMobileControlsExpanded] = useState(false);
   // Thread Filter: Active channel only vs All omnichannel messages
   const [threadFilter, setThreadFilter] = useState<"ACTIVE_CHANNEL" | "ALL_CHANNELS">("ACTIVE_CHANNEL");
 
@@ -308,14 +310,22 @@ export function ChatDrawer({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Mobile Persona / Controls Toggle */}
+            <button
+              type="button"
+              onClick={() => setMobileControlsExpanded((prev) => !prev)}
+              className="sm:hidden px-2 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap"
+            >
+              {mobileControlsExpanded ? "▴ Hide Setup" : "⚙️ Persona"}
+            </button>
+
             {/* Device / Frame Mode Toggle */}
             <button
               onClick={() => setFrameMode((m) => (m === "drawer" ? "phone" : "drawer"))}
-              className="px-2 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/90 text-[11px] font-semibold transition-colors cursor-pointer"
+              className="hidden sm:inline-flex px-2 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/90 text-[11px] font-semibold transition-colors cursor-pointer"
               title={frameMode === "drawer" ? "Switch to Smartphone Device Frame" : "Switch to Slide-over Drawer"}
             >
-              <span className="sm:hidden">{frameMode === "drawer" ? "📱" : "📑"}</span>
-              <span className="hidden sm:inline">{frameMode === "drawer" ? "📱 Phone Frame" : "📑 Drawer"}</span>
+              <span>{frameMode === "drawer" ? "📱 Phone Frame" : "📑 Drawer"}</span>
             </button>
 
             {/* Close Button */}
@@ -401,8 +411,12 @@ export function ChatDrawer({
           </div>
         )}
 
-        {/* Identity & Persona Bar */}
-        <div className="flex items-center justify-between pt-1 border-t border-gray-200/60 text-xs">
+        {/* Identity & Persona Bar (Collapsible on Mobile for maximum chat height) */}
+        <div
+          className={`${
+            mobileControlsExpanded ? "flex" : "hidden sm:flex"
+          } items-center justify-between pt-1 border-t border-gray-200/60 text-xs`}
+        >
           {activeChannel === "BUYER_SHOP_WA" ? (
             <div className="w-full space-y-1.5">
               <div className="flex items-center justify-between">
@@ -1059,21 +1073,21 @@ export function ChatDrawer({
       />
 
       {frameMode === "drawer" ? (
-        /* Slide-over Drawer Mode */
-        <div className="fixed inset-y-0 right-0 h-[100dvh] w-full sm:max-w-md bg-white border-l border-gray-200 shadow-2xl z-50 flex flex-col justify-between overflow-hidden animate-in slide-in-from-right duration-200">
+        /* Slide-over Drawer Mode (Full-screen on mobile) */
+        <div className="fixed inset-0 sm:inset-y-0 sm:left-auto sm:right-0 h-[100dvh] w-full sm:max-w-md bg-white sm:border-l border-gray-200 shadow-2xl z-50 flex flex-col justify-between overflow-hidden animate-in slide-in-from-right duration-200">
           {simulatorContent}
         </div>
       ) : (
-        /* Realistic Smartphone Device Mockup Mode */
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 pointer-events-none">
-          <div className="pointer-events-auto relative w-full max-w-[390px] h-[94dvh] sm:h-[780px] sm:max-h-[92vh] bg-black rounded-[32px] sm:rounded-[48px] p-2 sm:p-3 shadow-2xl ring-8 sm:ring-12 ring-gray-900/40 border border-gray-700 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+        /* Realistic Smartphone Device Mockup Mode (Full-screen on mobile, phone bezel on desktop) */
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 pointer-events-none">
+          <div className="pointer-events-auto relative w-full sm:max-w-[390px] h-[100dvh] sm:h-[780px] sm:max-h-[92dvh] bg-white sm:bg-black rounded-none sm:rounded-[48px] p-0 sm:p-3 shadow-2xl sm:ring-12 ring-gray-900/40 sm:border border-gray-700 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             {/* Phone Notch / Dynamic Island */}
             <div className="hidden sm:flex absolute top-4 left-1/2 -translate-x-1/2 w-28 h-5 bg-black rounded-full z-20 items-center justify-center">
               <span className="w-2.5 h-2.5 rounded-full bg-gray-950 border border-gray-800" />
             </div>
 
             {/* Status Bar */}
-            <div className="h-6 bg-black text-white text-[10px] font-semibold px-5 sm:px-6 flex items-center justify-between shrink-0 select-none z-10">
+            <div className="hidden sm:flex h-6 bg-black text-white text-[10px] font-semibold px-6 items-center justify-between shrink-0 select-none z-10">
               <span>9:41</span>
               <div className="flex items-center gap-1.5 text-[9px]">
                 <span>5G</span>
@@ -1083,13 +1097,13 @@ export function ChatDrawer({
             </div>
 
             {/* Viewport Frame */}
-            <div className="flex-1 min-h-0 rounded-[24px] sm:rounded-[36px] overflow-hidden flex flex-col relative border border-gray-800">
+            <div className="flex-1 min-h-0 rounded-none sm:rounded-[36px] overflow-hidden flex flex-col relative sm:border border-gray-800">
               {simulatorContent}
             </div>
 
             {/* Home Indicator Bar */}
-            <div className="h-4 flex items-center justify-center shrink-0">
-              <div className="w-28 sm:w-32 h-1 bg-gray-500 rounded-full" />
+            <div className="hidden sm:flex h-4 items-center justify-center shrink-0">
+              <div className="w-32 h-1 bg-gray-500 rounded-full" />
             </div>
           </div>
         </div>

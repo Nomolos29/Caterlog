@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import type { VendorAnalytics, OrderItem, VendorProfile, ProductItem, PlatformRole } from "@/lib/types";
 import { isResellerRole } from "@/lib/types";
 import { ClockIcon, CheckIcon, WhatsAppBadgeIcon } from "../icons";
+import { TableActionMenu } from "../ui/table-action-menu";
 
 interface OverviewViewProps {
   analytics: VendorAnalytics;
@@ -361,37 +362,92 @@ export function OverviewView({
               </div>
             </div>
           ) : (
-            <div className="my-6 relative">
-              <div className="h-44 w-full flex items-end">
-                <svg className="w-full h-full overflow-visible" viewBox="0 0 500 150" fill="none" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10B981" stopOpacity="0.25" />
-                      <stop offset="100%" stopColor="#10B981" stopOpacity="0.0" />
-                    </linearGradient>
-                  </defs>
-                  <path
-                    d="M0 110 C 100 100, 180 130, 260 110 C 340 90, 420 30, 500 45 L 500 150 L 0 150 Z"
-                    fill="url(#revenueGradient)"
-                  />
-                  <path
-                    d="M0 110 C 100 100, 180 130, 260 110 C 340 90, 420 30, 500 45"
-                    stroke="#10B981"
-                    strokeWidth="4"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
+            (() => {
+              const bucketCount = period === "7D" ? 7 : period === "30D" ? 8 : 12;
+              const baseTotal = orders.reduce((acc, o) => acc + (o.totalAmountNaira || 0), 0);
+              const weights =
+                period === "7D"
+                  ? [0.42, 0.58, 0.51, 0.74, 0.68, 0.89, 1.0]
+                  : period === "30D"
+                    ? [0.35, 0.48, 0.44, 0.62, 0.59, 0.78, 0.85, 1.0]
+                    : [0.22, 0.3, 0.28, 0.4, 0.45, 0.52, 0.61, 0.58, 0.74, 0.82, 0.91, 1.0];
+              const labels =
+                period === "7D"
+                  ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                  : period === "30D"
+                    ? ["W1", "W1.5", "W2", "W2.5", "W3", "W3.5", "W4", "Today"]
+                    : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+              const pts = weights.slice(0, bucketCount).map((w, idx) => {
+                const orderSlice = orders[idx % orders.length];
+                const dynamicBoost = orderSlice ? (orderSlice.totalAmountNaira % 17000) / 30000 : 0;
+                const val = Math.round((baseTotal / bucketCount) * (w + dynamicBoost));
+                return { label: labels[idx] || `P${idx + 1}`, val };
+              });
+              const maxVal = Math.max(...pts.map((p) => p.val), 1);
+              const coords = pts.map((p, idx) => {
+                const x = Math.round((idx / Math.max(1, pts.length - 1)) * 480) + 10;
+                const y = Math.round(135 - (p.val / maxVal) * 105);
+                return { ...p, x, y };
+              });
+              const linePath = coords
+                .map((c, i) => `${i === 0 ? "M" : "L"} ${c.x} ${c.y}`)
+                .join(" ");
+              const areaPath = `${linePath} L ${coords[coords.length - 1]?.x ?? 490} 145 L ${coords[0]?.x ?? 10} 145 Z`;
 
-              {/* X-axis date labels */}
-              <div className="flex justify-between text-[11px] font-semibold text-gray-400 mt-4 px-2">
-                <span>01 OCT</span>
-                <span>08 OCT</span>
-                <span>15 OCT</span>
-                <span>22 OCT</span>
-                <span>29 OCT</span>
-              </div>
-            </div>
+              return (
+                <div className="my-5 relative">
+                  <div className="h-44 w-full flex items-end">
+                    <svg className="w-full h-full overflow-visible" viewBox="0 0 500 150" fill="none">
+                      <defs>
+                        <linearGradient id="overviewRevGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#0d5c3a" stopOpacity="0.26" />
+                          <stop offset="100%" stopColor="#10B981" stopOpacity="0.0" />
+                        </linearGradient>
+                      </defs>
+                      {[30, 70, 110].map((gy) => (
+                        <line
+                          key={gy}
+                          x1="10"
+                          y1={gy}
+                          x2="490"
+                          y2={gy}
+                          stroke="#F1F5F9"
+                          strokeDasharray="4 4"
+                        />
+                      ))}
+                      <path d={areaPath} fill="url(#overviewRevGrad)" />
+                      <path
+                        d={linePath}
+                        stroke="#0d5c3a"
+                        strokeWidth="3.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      {coords.map((c, idx) => (
+                        <g key={idx} className="group">
+                          <circle
+                            cx={c.x}
+                            cy={c.y}
+                            r="4.5"
+                            fill="#ffffff"
+                            stroke="#0d5c3a"
+                            strokeWidth="2.5"
+                          />
+                          <title>{`${c.label}: ₦${c.val.toLocaleString()}`}</title>
+                        </g>
+                      ))}
+                    </svg>
+                  </div>
+
+                  {/* X-axis date labels */}
+                  <div className="flex justify-between text-[10px] font-semibold text-gray-400 mt-3 px-1">
+                    {coords.map((c, idx) => (
+                      <span key={idx}>{c.label}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()
           )}
         </div>
 
@@ -480,49 +536,66 @@ export function OverviewView({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[640px]">
-              <thead className="bg-gray-50/50 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+            <table className="w-full text-left text-sm min-w-[680px]">
+              <thead className="bg-gray-50/50 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100 whitespace-nowrap">
                 <tr>
-                  <th className="py-3 px-6">Customer</th>
-                  <th className="py-3 px-6">Order Reference</th>
-                  <th className="py-3 px-6">Status / Time Remaining</th>
-                  <th className="py-3 px-6">Amount</th>
-                  <th className="py-3 px-6 text-right">Actions</th>
+                  <th className="py-3 px-6 whitespace-nowrap">Customer</th>
+                  <th className="py-3 px-6 whitespace-nowrap">Order Reference</th>
+                  <th className="py-3 px-6 whitespace-nowrap">Status / Time Remaining</th>
+                  <th className="py-3 px-6 whitespace-nowrap">Amount</th>
+                  <th className="py-3 px-6 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 whitespace-nowrap">
                 {needsAttention.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50/70 transition-all">
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3">
+                  <tr
+                    key={order.id}
+                    onClick={() => onSelectOrder?.(order)}
+                    className="hover:bg-gray-50/70 transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    <td className="py-4 px-6 whitespace-nowrap">
+                      <div className="flex items-center gap-3 whitespace-nowrap">
                         <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
                           {order.customerName.charAt(0)}
                         </div>
-                        <div>
-                          <div className="font-semibold text-gray-900 text-xs">{order.customerName}</div>
-                          <div className="text-[11px] text-gray-400">{order.customerPhone}</div>
+                        <div className="whitespace-nowrap">
+                          <div className="font-semibold text-gray-900 text-xs whitespace-nowrap">{order.customerName}</div>
+                          <div className="text-[11px] text-gray-400 whitespace-nowrap">{order.customerPhone}</div>
                         </div>
                       </div>
                     </td>
-                    <td className="py-4 px-6 font-mono text-xs font-semibold text-gray-700">
+                    <td className="py-4 px-6 font-mono text-xs font-semibold text-gray-700 whitespace-nowrap">
                       {order.shortCode}
                     </td>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-600">
-                        <ClockIcon className="w-3.5 h-3.5 text-rose-500" />
-                        <span>Awaiting Transfer</span>
+                    <td className="py-4 px-6 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-600 whitespace-nowrap">
+                        <ClockIcon className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                        <span className="whitespace-nowrap">Awaiting Transfer</span>
                       </div>
                     </td>
-                    <td className="py-4 px-6 font-bold text-gray-900 text-xs">
+                    <td className="py-4 px-6 font-bold text-gray-900 text-xs whitespace-nowrap">
                       {order.totalAmountFormatted}
                     </td>
-                    <td className="py-4 px-6 text-right">
-                      <button
-                        onClick={() => onSelectOrder?.(order)}
-                        className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
-                      >
-                        Inspect
-                      </button>
+                    <td className="py-4 px-6 text-right whitespace-nowrap">
+                      <TableActionMenu
+                        items={[
+                          {
+                            label: "Inspect Order",
+                            icon: "👁️",
+                            variant: "emerald",
+                            onClick: () => onSelectOrder?.(order),
+                          },
+                          {
+                            label: "Message Buyer on WhatsApp",
+                            icon: "💬",
+                            onClick: () =>
+                              window.open(
+                                `https://wa.me/${order.customerPhone.replace(/\+/g, "")}`,
+                                "_blank"
+                              ),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}

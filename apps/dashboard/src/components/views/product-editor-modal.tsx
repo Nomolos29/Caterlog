@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import type { ProductItem } from "@/lib/types";
 
 interface ProductVariant {
@@ -503,9 +504,11 @@ export function ProductEditorModal({
     onClose();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/50 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-3xl w-full my-8 p-6 sm:p-8 shadow-2xl border border-gray-100 space-y-6 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-6 bg-slate-900/25 backdrop-blur-md overflow-hidden animate-backdrop-fade">
+      <div className="bg-white rounded-none sm:rounded-[28px] max-w-3xl w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] p-4 sm:p-8 shadow-2xl border-0 sm:border border-gray-100 space-y-6 overflow-y-auto animate-popup-spring">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-gray-100 pb-4">
           <div>
@@ -1086,7 +1089,8 @@ export function ProductEditorModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

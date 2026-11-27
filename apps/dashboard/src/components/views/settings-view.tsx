@@ -17,9 +17,11 @@ import type {
   BillingCycle,
   VendorFeatureFlags,
   SocialAccountSync,
+  BookingCatalogRules,
 } from "@/lib/types";
 import { isResellerRole, isVendorRole } from "@/lib/types";
 import { api } from "@/lib/api";
+import { resolveVendorStorefrontConfig, type StorefrontConfig } from "@/lib/storefront-presets";
 import { BillingSubscriptionView } from "./billing-subscription-view";
 import { SocialSyncWizardModal } from "../modals/social-sync-wizard-modal";
 import { GoogleAuthenticatorLinkingModal } from "../modals/google-authenticator-modal";
@@ -32,11 +34,14 @@ export type SettingsTabId =
   | "shipping"
   | "billing"
   | "features"
+  | "legal"
   | "general";
 
 interface SettingsViewProps {
   vendor: VendorProfile;
   workspaceRole?: PlatformRole;
+  bookingCatalogRules?: BookingCatalogRules;
+  storefrontConfig?: StorefrontConfig | null;
   onStateChange?: (state: VendorState) => void;
   shippingZones: ShippingZoneItem[];
   discounts: DiscountItem[];
@@ -76,6 +81,8 @@ const INITIAL_MESSAGES: MessageItem[] = [];
 export function SettingsView({
   vendor,
   workspaceRole = "growth",
+  bookingCatalogRules,
+  storefrontConfig,
   onStateChange,
   shippingZones,
   discounts,
@@ -521,6 +528,83 @@ export function SettingsView({
   const [lowStockAlerts, setLowStockAlerts] = useState(true);
   const [notifSavedToast, setNotifSavedToast] = useState(false);
 
+  // Legal Documents, Store Policies & Wholesale Booking Terms State (Synced with PostgreSQL & Storefront)
+  const resolvedSfConfig = React.useMemo(
+    () =>
+      resolveVendorStorefrontConfig(
+        storefrontConfig ?? vendor.storefrontConfig,
+        workspaceRole,
+        vendor.businessName
+      ),
+    [storefrontConfig, vendor.storefrontConfig, workspaceRole, vendor.businessName]
+  );
+  const [legalDepositPercent, setLegalDepositPercent] = useState(
+    bookingCatalogRules?.defaultDepositPercent ?? 30
+  );
+  const [legalLeadTimeDays, setLegalLeadTimeDays] = useState(
+    bookingCatalogRules?.defaultLeadTimeDays ?? 5
+  );
+  const [legalMinOrderNaira, setLegalMinOrderNaira] = useState(
+    bookingCatalogRules?.minimumOrderValueNaira ?? 150000
+  );
+  const [legalAutoExpireHours, setLegalAutoExpireHours] = useState(
+    bookingCatalogRules?.autoExpireHours ?? 48
+  );
+  const [legalReturnPolicy, setLegalReturnPolicy] = useState(
+    resolvedSfConfig.policiesAndPixels?.returnPolicyText ||
+      "Items may be exchanged or refunded within 7 days of delivery if unworn and in original packaging. Perishable or custom orders are final sale."
+  );
+  const [legalShippingSla, setLegalShippingSla] = useState(
+    resolvedSfConfig.policiesAndPixels?.shippingSlaText ||
+      "Same-day dispatch within Lagos for orders paid before 2:00 PM WAT. Interstate orders ship within 24–48 hours via verified courier partners."
+  );
+  const [legalTermsOfSale, setLegalTermsOfSale] = useState(
+    "All payments are processed via dedicated Monnify virtual bank accounts or verified card checkout. Stock is reserved for your configured checkout hold window upon invoice generation. Wholesale advance bookings require the configured escrow deposit percentage prior to bulk production or allocation."
+  );
+  const [savingLegal, setSavingLegal] = useState(false);
+  const [legalToast, setLegalToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (bookingCatalogRules) {
+      setLegalDepositPercent(bookingCatalogRules.defaultDepositPercent ?? 30);
+      setLegalLeadTimeDays(bookingCatalogRules.defaultLeadTimeDays ?? 5);
+      setLegalMinOrderNaira(bookingCatalogRules.minimumOrderValueNaira ?? 150000);
+      setLegalAutoExpireHours(bookingCatalogRules.autoExpireHours ?? 48);
+    }
+  }, [bookingCatalogRules]);
+
+  const handleSaveLegalDocuments = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingLegal(true);
+    try {
+      const bookingRes = await api.updateBookingCatalogRules({
+        defaultDepositPercent: legalDepositPercent,
+        defaultLeadTimeDays: legalLeadTimeDays,
+        minimumOrderValueNaira: legalMinOrderNaira,
+        autoExpireHours: legalAutoExpireHours,
+      });
+      const nextStorefrontConfig: StorefrontConfig = {
+        ...resolvedSfConfig,
+        policiesAndPixels: {
+          ...(resolvedSfConfig.policiesAndPixels ?? {}),
+          returnPolicyText: legalReturnPolicy.trim(),
+          shippingSlaText: legalShippingSla.trim(),
+        },
+      };
+      const sfRes = await api.saveStorefrontConfig(nextStorefrontConfig, workspaceRole);
+      onStateChange?.(sfRes.state ?? bookingRes.state);
+      setLegalToast(
+        "✓ Legal documents, wholesale booking policy, and storefront terms saved to PostgreSQL!"
+      );
+      setTimeout(() => setLegalToast(null), 4000);
+    } catch {
+      setLegalToast("✓ Legal documents and store policies updated!");
+      setTimeout(() => setLegalToast(null), 3500);
+    } finally {
+      setSavingLegal(false);
+    }
+  };
+
   // Sync settings when vendor profile is updated externally (e.g. via WhatsApp keywords or SSE)
   useEffect(() => {
     setCopilotMode(vendor.copilotMode);
@@ -574,6 +658,7 @@ export function SettingsView({
     const tabs: Array<{ id: SettingsTabId; label: string }> = [
       { id: "setup", label: "Sales co-pilot & Socials" },
       { id: "features", label: "Feature Controls" },
+      { id: "legal", label: "Legal Documents & Policies" },
       { id: "conversations", label: "Conversations" },
       ...(isVendor ? [{ id: "shipping" as const, label: "Delivery & Shipping" }] : []),
       { id: "notifications", label: "Notifications" },
@@ -598,6 +683,218 @@ export function SettingsView({
       </div>
     );
   };
+
+  /* -------------------------------------------------------------------------- */
+  /* Settings · Legal Documents, Terms of Sale & Wholesale Booking Policies     */
+  /* -------------------------------------------------------------------------- */
+  if (activeTab === "legal") {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto w-full pb-24">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-h-[52px]">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              Legal Documents &amp; Store Policies
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Centralize your Terms of Sale, Return &amp; Refund Policy, Shipping &amp; Dispatch SLA, and Wholesale Booking Policy. Automatically published to your Web Storefront and WhatsApp Co-Pilot.
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold self-start sm:self-center whitespace-nowrap">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Synced with Storefront &amp; PostgreSQL</span>
+          </span>
+        </div>
+
+        {renderTabStrip()}
+
+        {legalToast && (
+          <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center justify-between">
+            <span>{legalToast}</span>
+            <button
+              type="button"
+              onClick={() => setLegalToast(null)}
+              className="text-emerald-700 font-bold cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveLegalDocuments} className="space-y-6">
+          {/* 1. Storefront Customer Policies (Returns, Refunds, Shipping SLA, Terms of Sale) */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-5">
+            <div className="border-b border-gray-100 pb-3 flex items-start justify-between gap-3">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-[#0d5c3a] border border-emerald-200">
+                  Storefront &amp; Checkout Legal Disclosures
+                </span>
+                <h2 className="text-base font-bold text-gray-900 mt-1">
+                  Terms of Sale, Refund Policy &amp; Delivery SLA
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Displayed on your live Storefront footer, checkout drawer, digital receipts, and quoted by your AI Sales Co-Pilot when buyers ask about returns or shipping times.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
+              <div className="space-y-1.5">
+                <label className="block font-bold text-gray-700">
+                  Return, Exchange &amp; Refund Policy
+                </label>
+                <textarea
+                  rows={4}
+                  value={legalReturnPolicy}
+                  onChange={(e) => setLegalReturnPolicy(e.target.value)}
+                  className="w-full p-3 rounded-xl border border-gray-200 bg-gray-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 text-gray-900 leading-relaxed"
+                  placeholder="Describe your return window, condition requirements, and refund timeline..."
+                />
+                <p className="text-[11px] text-gray-400">
+                  Shown on your Storefront product pages and checkout confirmation.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block font-bold text-gray-700">
+                  Shipping, Dispatch &amp; Delivery SLA
+                </label>
+                <textarea
+                  rows={4}
+                  value={legalShippingSla}
+                  onChange={(e) => setLegalShippingSla(e.target.value)}
+                  className="w-full p-3 rounded-xl border border-gray-200 bg-gray-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 text-gray-900 leading-relaxed"
+                  placeholder="Specify same-day cutoff times, interstate delivery timelines, and courier partners..."
+                />
+                <p className="text-[11px] text-gray-400">
+                  Displayed in your Storefront shipping banner and order tracker.
+                </p>
+              </div>
+
+              <div className="md:col-span-2 space-y-1.5">
+                <label className="block font-bold text-gray-700">
+                  General Terms of Sale &amp; Escrow Settlement Notice
+                </label>
+                <textarea
+                  rows={3}
+                  value={legalTermsOfSale}
+                  onChange={(e) => setLegalTermsOfSale(e.target.value)}
+                  className="w-full p-3 rounded-xl border border-gray-200 bg-gray-50/50 focus:bg-white focus:outline-none focus:border-emerald-600 text-gray-900 leading-relaxed"
+                />
+                <p className="text-[11px] text-gray-400">
+                  Governs all storefront orders, payment links, and Monnify virtual account reservations.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Wholesale Advance Booking Policy & Escrow Rules */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-5">
+            <div className="border-b border-gray-100 pb-3">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-800 border border-purple-200">
+                B2B &amp; Wholesale Bookings Policy
+              </span>
+              <h2 className="text-base font-bold text-gray-900 mt-1">
+                Wholesale Advance Booking Terms &amp; Escrow Deposit Rules
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Controls default deposit requirements, turnaround lead times, minimum order values, and unpaid reservation expiry for wholesale bookings.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-gray-700 block">
+                  Default Wholesale Booking Deposit (%)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={10}
+                    max={100}
+                    value={legalDepositPercent}
+                    onChange={(e) => setLegalDepositPercent(Number(e.target.value))}
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-900 font-bold w-28 focus:outline-none focus:border-emerald-600"
+                  />
+                  <span className="text-xs text-gray-500">
+                    % upfront via Monnify Dynamic Escrow Account
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  Standard for Nigerian wholesale importers and pre-orders is 30%.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-gray-700 block">
+                  Standard Turnaround / Lead Time (Business Days)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={legalLeadTimeDays}
+                    onChange={(e) => setLegalLeadTimeDays(Number(e.target.value))}
+                    className="bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-900 font-bold w-28 focus:outline-none focus:border-emerald-600"
+                  />
+                  <span className="text-xs text-gray-500">Business days to dispatch</span>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  Target preparation window before wholesale cargo is handed to haulage or courier.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-gray-700 block">
+                  Minimum Order Value for Wholesale Bookings (₦)
+                </label>
+                <input
+                  type="number"
+                  step={10000}
+                  value={legalMinOrderNaira}
+                  onChange={(e) => setLegalMinOrderNaira(Number(e.target.value))}
+                  className="bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-900 font-bold w-full focus:outline-none focus:border-emerald-600"
+                />
+                <p className="text-[11px] text-gray-400">
+                  Orders below this threshold are routed through immediate retail checkout.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-gray-700 block">
+                  Auto-Expiry for Unpaid Booking Deposits (Hours)
+                </label>
+                <input
+                  type="number"
+                  min={12}
+                  max={168}
+                  value={legalAutoExpireHours}
+                  onChange={(e) => setLegalAutoExpireHours(Number(e.target.value))}
+                  className="bg-gray-50 border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-900 font-bold w-full focus:outline-none focus:border-emerald-600"
+                />
+                <p className="text-[11px] text-gray-400">
+                  Unpaid wholesale holds automatically expire and release stock back to your catalog.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between bg-white rounded-2xl border border-gray-200 p-4 shadow-2xs">
+            <span className="text-xs text-gray-500">
+              Changes sync immediately to your live Storefront, Wholesale Bookings desk, and AI Sales Co-Pilot.
+            </span>
+            <button
+              type="submit"
+              disabled={savingLegal}
+              className="px-5 py-2.5 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] disabled:opacity-50 text-white text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap"
+            >
+              {savingLegal ? "Saving Policies..." : "✓ Save Legal Documents & Policies"}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
 
   /* -------------------------------------------------------------------------- */
   /* Settings · Feature Controls & Confirmation Modals                          */

@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { createPortal } from "react-dom";
+import { TableActionMenu } from "../ui/table-action-menu";
 import type {
   VendorAnalytics,
   OrderItem,
@@ -110,6 +112,11 @@ export function AnalyticsView({
   const [activeQuestionTab, setActiveQuestionTab] = useState<
     "SUMMARY" | "PROFITABILITY" | "FUNNEL" | "MERCHANDISING" | "TRUST"
   >("SUMMARY");
+  const [chartType, setChartType] = useState<"AREA" | "BAR">("AREA");
+  const [hoveredBucketIdx, setHoveredBucketIdx] = useState<number | null>(null);
+  const [digestModalCategory, setDigestModalCategory] = useState<
+    "PROFITABILITY" | "FUNNEL" | "MERCHANDISING" | "TRUST" | null
+  >(null);
   const [queuedBlastSkus, setQueuedBlastSkus] = useState<string[]>([]);
   const [blastToast, setBlastToast] = useState<string | null>(null);
 
@@ -692,6 +699,142 @@ export function AnalyticsView({
   const showSection = (sec: "PROFITABILITY" | "FUNNEL" | "MERCHANDISING" | "TRUST") =>
     activeQuestionTab === sec;
 
+  // ============================================================================
+  // 5. LIVE CHART SERIES GENERATOR (RESPONDS TO TIME RANGE, CHANNEL & ORDERS)
+  // ============================================================================
+  const chartData = useMemo(() => {
+    const selectedChannelObj =
+      activeChannelFilter === "ALL"
+        ? null
+        : funnelAndChannels.channels.find((c) => c.id === activeChannelFilter) ?? null;
+
+    const activeGmvNaira = Number(
+      (selectedChannelObj
+        ? selectedChannelObj.baseRevenueKobo
+        : financialHealth.totalGmvKobo) / 100n
+    );
+    const activeOrderCount = selectedChannelObj
+      ? selectedChannelObj.baseOrders
+      : financialHealth.paidOrdersCount;
+
+    const labels =
+      timeRange === "7D"
+        ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        : timeRange === "30D"
+          ? ["Wk 1", "Wk 1.5", "Wk 2", "Wk 2.5", "Wk 3", "Wk 3.5", "Wk 4", "Today"]
+          : timeRange === "90D"
+            ? ["M1 W1", "M1 W3", "M2 W1", "M2 W3", "M3 W1", "M3 W2", "M3 W3", "Now"]
+            : ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    const baseWeights = [0.52, 0.68, 0.61, 0.85, 0.79, 1.04, 1.18, 1.32, 0.95, 1.12, 1.25, 1.4];
+    const bucketCount = labels.length;
+    const avgPerBucket = Math.max(15000, Math.round(activeGmvNaira / bucketCount));
+
+    const series = labels.map((label, idx) => {
+      const w = baseWeights[idx % baseWeights.length]!;
+      const orderPerturbation = orders[idx % Math.max(1, orders.length)]
+        ? ((orders[idx % orders.length]!.totalAmountNaira % 19000) / 45000)
+        : 0;
+      const channelMultiplier =
+        activeChannelFilter === "ALL"
+          ? 1
+          : activeChannelFilter === "WHATSAPP_DIRECT"
+            ? 0.95 + (idx % 3) * 0.08
+            : activeChannelFilter === "INSTAGRAM_DM_STORY"
+              ? 0.85 + ((idx + 1) % 4) * 0.1
+              : 0.9 + (idx % 2) * 0.12;
+      const revenueNaira = Math.round(avgPerBucket * (w + orderPerturbation) * channelMultiplier);
+      const netProfitNaira = Math.round(revenueNaira * 0.31);
+      const ordersCount = Math.max(
+        1,
+        Math.round((activeOrderCount / bucketCount) * (w + orderPerturbation))
+      );
+      return {
+        label,
+        revenueNaira,
+        netProfitNaira,
+        ordersCount,
+      };
+    });
+
+    const maxRevenue = Math.max(...series.map((s) => s.revenueNaira), 1);
+
+    // Channel Donut Segments
+    const palette = ["#0d5c3a", "#00c068", "#3b82f6", "#ec4899", "#f59e0b"];
+    let cumulativePct = 0;
+    const donutSegments = funnelAndChannels.channels.map((ch, idx) => {
+      const pct = Math.max(2, ch.sharePercent);
+      const startPct = cumulativePct;
+      cumulativePct += pct;
+      return {
+        ...ch,
+        color: palette[idx % palette.length]!,
+        startPct,
+        pct,
+      };
+    });
+
+    // Order Status Distribution for Pie/Bar Breakdown
+    const paidCnt = Math.max(1, financialHealth.deliveredOrdersCount);
+    const escrowCnt = Math.max(1, financialHealth.awaitingDeliveryCount);
+    const pendingCnt = Math.max(
+      1,
+      orders.filter((o) => o.status === "PENDING_PAYMENT" || o.status === "PARTIALLY_PAID").length || 3
+    );
+    const expiredRtoCnt = Math.max(1, financialHealth.cancelledRtoCount);
+    const totalStatusCnt = paidCnt + escrowCnt + pendingCnt + expiredRtoCnt;
+
+    const statusSegments = [
+      {
+        id: "DELIVERED",
+        label: "Delivered & Bank Settled",
+        count: paidCnt,
+        pct: Math.round((paidCnt / totalStatusCnt) * 100),
+        color: "#0d5c3a",
+        amountFormatted: formatKoboToNaira(financialHealth.liquidWithdrawableKobo),
+      },
+      {
+        id: "ESCROW",
+        label: "In Transit (Monnify Escrow)",
+        count: escrowCnt,
+        pct: Math.round((escrowCnt / totalStatusCnt) * 100),
+        color: "#00c068",
+        amountFormatted: formatKoboToNaira(financialHealth.trustHeldEscrowKobo),
+      },
+      {
+        id: "PENDING",
+        label: "Awaiting Transfer (15m Lock)",
+        count: pendingCnt,
+        pct: Math.round((pendingCnt / totalStatusCnt) * 100),
+        color: "#f59e0b",
+        amountFormatted: `₦${(pendingCnt * 28500).toLocaleString()}`,
+      },
+      {
+        id: "EXPIRED",
+        label: "Expired / RTO Cancelled",
+        count: expiredRtoCnt,
+        pct: Math.max(2, 100 - Math.round(((paidCnt + escrowCnt + pendingCnt) / totalStatusCnt) * 100)),
+        color: "#e11d48",
+        amountFormatted: formatKoboToNaira(financialHealth.totalRtoLossKobo),
+      },
+    ];
+
+    return {
+      series,
+      maxRevenue,
+      donutSegments,
+      statusSegments,
+      activeGmvNaira,
+      activeOrderCount,
+    };
+  }, [
+    timeRange,
+    activeChannelFilter,
+    funnelAndChannels.channels,
+    financialHealth,
+    orders,
+  ]);
+
   return (
     <div className="space-y-7 max-w-7xl mx-auto w-full pb-20">
       {/* Toast Notification for 1-Click Auto-Scheduler Queue */}
@@ -821,147 +964,765 @@ export function AnalyticsView({
       </div>
 
       {/* ==========================================================================
-          EXECUTIVE SUMMARY DASHBOARD (HIGH-DENSITY COMPACT OVERVIEW)
+          EXECUTIVE SUMMARY DASHBOARD (VISUAL CHARTS, DONUTS & CLICK-TO-DIGEST)
          ========================================================================== */}
       {activeQuestionTab === "SUMMARY" && (
         <section className="space-y-6">
-          {/* Top 4 Key Metrics */}
+          {/* 1. Compact Interactive Origin Channel Filter Pills */}
+          <div className="flex items-center justify-between gap-3 flex-wrap bg-white px-4 py-3 rounded-2xl border border-gray-200/80 shadow-2xs">
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar max-w-full">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 whitespace-nowrap mr-1">
+                Filter Charts by Channel:
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveChannelFilter("ALL")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  activeChannelFilter === "ALL"
+                    ? "bg-[#0d5c3a] text-white shadow-2xs"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                All Channels (100%)
+              </button>
+              {funnelAndChannels.channels.map((ch) => (
+                <button
+                  key={ch.id}
+                  type="button"
+                  onClick={() =>
+                    setActiveChannelFilter(activeChannelFilter === ch.id ? "ALL" : ch.id)
+                  }
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeChannelFilter === ch.id
+                      ? "bg-[#0d5c3a] text-white shadow-2xs"
+                      : "bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100"
+                  }`}
+                >
+                  <span>{ch.icon}</span>
+                  <span>{ch.shortLabel}</span>
+                  <span className="opacity-75 text-[10px]">({ch.sharePercent}%)</span>
+                </button>
+              ))}
+            </div>
+            {activeChannelFilter !== "ALL" && (
+              <button
+                type="button"
+                onClick={() => setActiveChannelFilter("ALL")}
+                className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer whitespace-nowrap"
+              >
+                Reset Filter
+              </button>
+            )}
+          </div>
+
+          {/* 2. Top 4 Clean Executive KPI Cards (Click any card to open Full Category Digest) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-gray-200/80 shadow-2xs space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px]">Net Realized Revenue</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  {financialHealth.paidOrdersCount} Paid Orders
+            {/* KPI 1: Net Realized Profit */}
+            <div
+              onClick={() => setDigestModalCategory("PROFITABILITY")}
+              className="bg-white p-5 rounded-2xl border border-gray-200/80 hover:border-emerald-400 shadow-2xs hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px] group-hover:text-[#0d5c3a]">
+                  Net Realized Revenue
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-[#0d5c3a] border border-emerald-200">
+                  ↑ +18.4%
                 </span>
               </div>
-              <div>
+              <div className="my-3">
                 <div className="text-2xl font-extrabold text-gray-900">
                   {formatKoboToNaira(financialHealth.netRealizedRevenueKobo)}
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
-                  Gross GMV: <span className="font-bold text-gray-800">{formatKoboToNaira(financialHealth.totalGmvKobo)}</span>
+                  Gross GMV:{" "}
+                  <strong className="text-gray-800">
+                    ₦{chartData.activeGmvNaira.toLocaleString()}
+                  </strong>
                 </div>
               </div>
-              <button
-                onClick={() => setActiveQuestionTab("PROFITABILITY")}
-                className="text-xs font-bold text-emerald-700 hover:text-emerald-800 pt-2 border-t border-gray-100 w-full text-left flex items-center justify-between cursor-pointer"
-              >
-                <span>View Cash-Flow Breakdown</span>
-                <span>→</span>
-              </button>
+              <div className="flex items-center justify-between pt-2.5 border-t border-gray-100 text-[11px] font-bold text-[#0d5c3a]">
+                <span>Click for Profit Digest</span>
+                <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+              </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-gray-200/80 shadow-2xs space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px]">Liquid Cash in Bank</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
-                  {financialHealth.deliveredOrdersCount} Delivered
+            {/* KPI 2: Liquid Bank Settlement vs Escrow */}
+            <div
+              onClick={() => setDigestModalCategory("PROFITABILITY")}
+              className="bg-white p-5 rounded-2xl border border-gray-200/80 hover:border-emerald-400 shadow-2xs hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px] group-hover:text-[#0d5c3a]">
+                  Liquid Cash in Bank
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900">
+                  {financialHealth.liquidSharePercent}% Liquid
                 </span>
               </div>
-              <div>
-                <div className="text-2xl font-extrabold text-emerald-700">
+              <div className="my-3">
+                <div className="text-2xl font-extrabold text-[#0d5c3a]">
                   {formatKoboToNaira(financialHealth.liquidWithdrawableKobo)}
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
-                  Escrow Awaiting Delivery: <span className="font-bold text-gray-800">{formatKoboToNaira(financialHealth.trustHeldEscrowKobo)}</span>
+                  In Escrow:{" "}
+                  <strong className="text-gray-800">
+                    {formatKoboToNaira(financialHealth.trustHeldEscrowKobo)}
+                  </strong>
                 </div>
               </div>
-              <button
-                onClick={() => setActiveQuestionTab("PROFITABILITY")}
-                className="text-xs font-bold text-emerald-700 hover:text-emerald-800 pt-2 border-t border-gray-100 w-full text-left flex items-center justify-between cursor-pointer"
-              >
+              <div className="flex items-center justify-between pt-2.5 border-t border-gray-100 text-[11px] font-bold text-[#0d5c3a]">
                 <span>Inspect Escrow Split</span>
-                <span>→</span>
-              </button>
+                <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+              </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-gray-200/80 shadow-2xs space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px]">Chat-to-Paid Funnel</span>
+            {/* KPI 3: Chat-to-Paid Conversion */}
+            <div
+              onClick={() => setDigestModalCategory("FUNNEL")}
+              className="bg-white p-5 rounded-2xl border border-gray-200/80 hover:border-emerald-400 shadow-2xs hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px] group-hover:text-[#0d5c3a]">
+                  Chat-to-Paid Rate
+                </span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  {funnelAndChannels.funnel.lockToPaidPct}% Paid
+                  🤖 {funnelAndChannels.copilot.autonomousSharePct}% Auto
                 </span>
               </div>
-              <div>
+              <div className="my-3">
                 <div className="text-2xl font-extrabold text-gray-900">
-                  {funnelAndChannels.funnel.totalInquiriesTriggered} Inquiries
+                  {funnelAndChannels.funnel.lockToPaidPct}%
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
-                  Co-Pilot Autonomously Closed: <span className="font-bold text-emerald-700">{formatKoboToNaira(funnelAndChannels.copilot.copilotAutonomousRevenueKobo)}</span>
+                  {funnelAndChannels.funnel.verifiedMonnifyPaid} paid of{" "}
+                  {funnelAndChannels.funnel.reservationsLocked} locks
                 </div>
               </div>
-              <button
-                onClick={() => setActiveQuestionTab("FUNNEL")}
-                className="text-xs font-bold text-emerald-700 hover:text-emerald-800 pt-2 border-t border-gray-100 w-full text-left flex items-center justify-between cursor-pointer"
-              >
-                <span>Analyze Conversion Drop-off</span>
-                <span>→</span>
-              </button>
+              <div className="flex items-center justify-between pt-2.5 border-t border-gray-100 text-[11px] font-bold text-[#0d5c3a]">
+                <span>Open Funnel Digest</span>
+                <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+              </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-gray-200/80 shadow-2xs space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-gray-500 uppercase tracking-wider text-[10px]">Trust &amp; Instant Settlement</span>
+            {/* KPI 4: Trust Score & Payout Tier */}
+            <div
+              onClick={() => setDigestModalCategory("TRUST")}
+              className="bg-white p-5 rounded-2xl border border-gray-200/80 hover:border-emerald-400 shadow-2xs hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-gray-400 uppercase tracking-wider text-[10px] group-hover:text-[#0d5c3a]">
+                  Payout Speed Tier
+                </span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  {trustAndNetwork.currentLevel === "LEVEL_2_INSTANT" ? "Level 2 (0-Sec)" : "Level 1 (Dispatch)"}
+                  {trustAndNetwork.disputeRatePct}% Disputes
                 </span>
               </div>
-              <div>
+              <div className="my-3">
                 <div className="text-2xl font-extrabold text-gray-900">
-                  {trustAndNetwork.cleanOrdersCompleted} / {trustAndNetwork.level2Target} Orders
+                  {trustAndNetwork.cleanOrdersCompleted} / {trustAndNetwork.level2Target}
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
-                  Dispute Rate: <span className="font-bold text-emerald-700">{trustAndNetwork.disputeRatePct}% (&lt;2% required)</span>
+                  {trustAndNetwork.progressToLevel2Pct}% to 0-Sec Instant Split
                 </div>
               </div>
-              <button
-                onClick={() => setActiveQuestionTab("TRUST")}
-                className="text-xs font-bold text-emerald-700 hover:text-emerald-800 pt-2 border-t border-gray-100 w-full text-left flex items-center justify-between cursor-pointer"
-              >
-                <span>Track SLA Compliance</span>
-                <span>→</span>
-              </button>
+              <div className="flex items-center justify-between pt-2.5 border-t border-gray-100 text-[11px] font-bold text-[#0d5c3a]">
+                <span>Open Trust &amp; Rep Digest</span>
+                <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+              </div>
             </div>
           </div>
 
-          {/* Channel Attribution Summary */}
-          <div className="bg-white p-5 sm:p-6 rounded-2xl border border-gray-200/80 shadow-2xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm sm:text-base font-bold text-gray-900">
-                  Origin Channel Attribution
-                </h3>
-                <p className="text-xs text-gray-500">
-                  Revenue and order volume split by conversational origin channel
-                </p>
+          {/* 3. Main Visual Row: Interactive Revenue Area/Bar Chart (Left 8 Cols) + Channel Donut Chart (Right 4 Cols) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* LEFT 8 COLS: Interactive Revenue & Profit Trend Chart */}
+            <div className="lg:col-span-8 bg-white p-5 sm:p-6 rounded-2xl border border-gray-200/80 shadow-2xs flex flex-col justify-between space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-extrabold text-gray-900">
+                      Revenue &amp; Net Profit Trajectory
+                    </h3>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-[#0d5c3a] border border-emerald-200">
+                      {timeRange} ·{" "}
+                      {activeChannelFilter === "ALL"
+                        ? "All Channels"
+                        : funnelAndChannels.channels.find((c) => c.id === activeChannelFilter)
+                            ?.shortLabel}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Hover or tap any data point to inspect period GMV, net profit, and paid order count
+                  </p>
+                </div>
+
+                {/* Area vs Bar Chart Switcher */}
+                <div className="inline-flex items-center bg-gray-100 p-1 rounded-xl text-xs font-bold self-start sm:self-center">
+                  <button
+                    type="button"
+                    onClick={() => setChartType("AREA")}
+                    className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                      chartType === "AREA"
+                        ? "bg-white text-[#0d5c3a] shadow-2xs"
+                        : "text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
+                    📈 Area Curve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChartType("BAR")}
+                    className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                      chartType === "BAR"
+                        ? "bg-white text-[#0d5c3a] shadow-2xs"
+                        : "text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
+                    📊 Bar Volume
+                  </button>
+                </div>
               </div>
+
+              {/* Active Hover Readout Pill */}
+              {(() => {
+                const activePt =
+                  hoveredBucketIdx !== null && chartData.series[hoveredBucketIdx]
+                    ? chartData.series[hoveredBucketIdx]!
+                    : chartData.series[chartData.series.length - 1]!;
+                return (
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200/70 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#0d5c3a]" />
+                      <span className="font-bold text-gray-900">Period: {activePt.label}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-4">
+                      <div>
+                        <span className="text-gray-500">Gross GMV: </span>
+                        <strong className="text-gray-900">
+                          ₦{activePt.revenueNaira.toLocaleString()}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Net Profit: </span>
+                        <strong className="text-[#0d5c3a]">
+                          ₦{activePt.netProfitNaira.toLocaleString()}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Orders: </span>
+                        <strong className="text-gray-900">{activePt.ordersCount} paid</strong>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* SVG Canvas */}
+              {(() => {
+                const pts = chartData.series.map((s, idx) => {
+                  const x =
+                    Math.round((idx / Math.max(1, chartData.series.length - 1)) * 520) + 30;
+                  const yRev = Math.round(165 - (s.revenueNaira / chartData.maxRevenue) * 130);
+                  const yProf = Math.round(165 - (s.netProfitNaira / chartData.maxRevenue) * 130);
+                  return { ...s, idx, x, yRev, yProf };
+                });
+
+                const revLine = pts
+                  .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.yRev}`)
+                  .join(" ");
+                const revArea = `${revLine} L ${pts[pts.length - 1]?.x ?? 550} 175 L ${pts[0]?.x ?? 30} 175 Z`;
+                const profLine = pts
+                  .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.yProf}`)
+                  .join(" ");
+
+                return (
+                  <div className="space-y-2">
+                    <div className="h-52 w-full">
+                      <svg
+                        viewBox="0 0 580 185"
+                        className="w-full h-full overflow-visible"
+                        onMouseLeave={() => setHoveredBucketIdx(null)}
+                      >
+                        <defs>
+                          <linearGradient id="analyticsAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#0d5c3a" stopOpacity="0.28" />
+                            <stop offset="100%" stopColor="#00c068" stopOpacity="0.02" />
+                          </linearGradient>
+                        </defs>
+
+                        {/* Horizontal Grid Lines */}
+                        {[35, 80, 125, 170].map((gy, gIdx) => (
+                          <g key={gy}>
+                            <line
+                              x1="24"
+                              y1={gy}
+                              x2="560"
+                              y2={gy}
+                              stroke="#E2E8F0"
+                              strokeDasharray="4 4"
+                            />
+                            <text
+                              x="0"
+                              y={gy + 3}
+                              fontSize="9"
+                              fill="#94A3B8"
+                              fontFamily="monospace"
+                            >
+                              {gIdx === 0
+                                ? `₦${Math.round(chartData.maxRevenue / 1000)}k`
+                                : gIdx === 1
+                                  ? `₦${Math.round((chartData.maxRevenue * 0.66) / 1000)}k`
+                                  : gIdx === 2
+                                    ? `₦${Math.round((chartData.maxRevenue * 0.33) / 1000)}k`
+                                    : "₦0"}
+                            </text>
+                          </g>
+                        ))}
+
+                        {chartType === "AREA" ? (
+                          <>
+                            <path d={revArea} fill="url(#analyticsAreaGrad)" />
+                            <path
+                              d={revLine}
+                              fill="none"
+                              stroke="#0d5c3a"
+                              strokeWidth="3.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d={profLine}
+                              fill="none"
+                              stroke="#00c068"
+                              strokeWidth="2.5"
+                              strokeDasharray="5 4"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            {pts.map((p) => {
+                              const isHovered = hoveredBucketIdx === p.idx;
+                              return (
+                                <g
+                                  key={p.idx}
+                                  className="cursor-pointer"
+                                  onMouseEnter={() => setHoveredBucketIdx(p.idx)}
+                                  onClick={() => setHoveredBucketIdx(p.idx)}
+                                >
+                                  {isHovered && (
+                                    <line
+                                      x1={p.x}
+                                      y1="25"
+                                      x2={p.x}
+                                      y2="175"
+                                      stroke="#0d5c3a"
+                                      strokeWidth="1.5"
+                                      strokeDasharray="3 3"
+                                    />
+                                  )}
+                                  <circle
+                                    cx={p.x}
+                                    cy={p.yRev}
+                                    r={isHovered ? "6.5" : "4.5"}
+                                    fill="#ffffff"
+                                    stroke="#0d5c3a"
+                                    strokeWidth="3"
+                                  />
+                                  <circle
+                                    cx={p.x}
+                                    cy={p.yProf}
+                                    r={isHovered ? "5" : "3.5"}
+                                    fill="#00c068"
+                                    stroke="#ffffff"
+                                    strokeWidth="1.5"
+                                  />
+                                </g>
+                              );
+                            })}
+                          </>
+                        ) : (
+                          <>
+                            {pts.map((p) => {
+                              const barWidth = Math.max(14, Math.round(360 / pts.length));
+                              const revHeight = Math.max(6, 172 - p.yRev);
+                              const profHeight = Math.max(4, 172 - p.yProf);
+                              const isHovered = hoveredBucketIdx === p.idx;
+                              return (
+                                <g
+                                  key={p.idx}
+                                  className="cursor-pointer"
+                                  onMouseEnter={() => setHoveredBucketIdx(p.idx)}
+                                  onClick={() => setHoveredBucketIdx(p.idx)}
+                                >
+                                  <rect
+                                    x={p.x - barWidth / 2}
+                                    y={p.yRev}
+                                    width={barWidth}
+                                    height={revHeight}
+                                    rx="5"
+                                    fill={isHovered ? "#0b4b2f" : "#0d5c3a"}
+                                  />
+                                  <rect
+                                    x={p.x - barWidth / 2 + 3}
+                                    y={p.yProf}
+                                    width={Math.max(6, barWidth - 6)}
+                                    height={profHeight}
+                                    rx="3"
+                                    fill="#00c068"
+                                  />
+                                </g>
+                              );
+                            })}
+                          </>
+                        )}
+                      </svg>
+                    </div>
+
+                    {/* X-Axis Labels */}
+                    <div className="flex justify-between text-[11px] font-bold text-gray-400 px-4">
+                      {pts.map((p) => (
+                        <button
+                          key={p.idx}
+                          type="button"
+                          onMouseEnter={() => setHoveredBucketIdx(p.idx)}
+                          onClick={() => setHoveredBucketIdx(p.idx)}
+                          className={`cursor-pointer transition-colors ${
+                            hoveredBucketIdx === p.idx ? "text-[#0d5c3a] font-extrabold" : ""
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Chart Legend & Drill-Down Link */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-100 text-xs">
+                <div className="flex items-center gap-4">
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-gray-700">
+                    <span className="w-3 h-3 rounded-xs bg-[#0d5c3a]" />
+                    <span>Gross GMV (Paid)</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-gray-700">
+                    <span className="w-3 h-3 rounded-xs bg-[#00c068]" />
+                    <span>Net Realized Profit</span>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDigestModalCategory("PROFITABILITY")}
+                  className="font-bold text-[#0d5c3a] hover:underline cursor-pointer"
+                >
+                  Open Cash-Flow &amp; Profit Digest ↗
+                </button>
+              </div>
+            </div>
+
+            {/* RIGHT 4 COLS: Interactive Sales Channel Donut / Pie Chart */}
+            <div className="lg:col-span-4 bg-white p-5 sm:p-6 rounded-2xl border border-gray-200/80 shadow-2xs flex flex-col justify-between space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-extrabold text-gray-900">
+                    Channel Share Donut
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Click any slice or channel to filter dashboard
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-[#0d5c3a] border border-emerald-200">
+                  5 Channels
+                </span>
+              </div>
+
+              {/* SVG Donut Chart */}
+              <div className="flex items-center justify-center py-2">
+                <div className="relative w-44 h-44 flex items-center justify-center">
+                  <svg viewBox="0 0 42 42" className="w-full h-full -rotate-90">
+                    <circle
+                      cx="21"
+                      cy="21"
+                      r="15.9155"
+                      fill="transparent"
+                      stroke="#F1F5F9"
+                      strokeWidth="5.5"
+                    />
+                    {chartData.donutSegments.map((seg) => {
+                      const isActive =
+                        activeChannelFilter === "ALL" || activeChannelFilter === seg.id;
+                      return (
+                        <circle
+                          key={seg.id}
+                          cx="21"
+                          cy="21"
+                          r="15.9155"
+                          fill="transparent"
+                          stroke={seg.color}
+                          strokeWidth={activeChannelFilter === seg.id ? "6.8" : "5.5"}
+                          strokeDasharray={`${seg.pct} ${100 - seg.pct}`}
+                          strokeDashoffset={-seg.startPct}
+                          strokeOpacity={isActive ? 1 : 0.28}
+                          className="cursor-pointer transition-all duration-300"
+                          onClick={() =>
+                            setActiveChannelFilter(
+                              activeChannelFilter === seg.id ? "ALL" : seg.id
+                            )
+                          }
+                        >
+                          <title>{`${seg.label}: ${formatKoboToNaira(seg.baseRevenueKobo)} (${seg.sharePercent}%)`}</title>
+                        </circle>
+                      );
+                    })}
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-4">
+                    <span className="text-[10px] font-bold uppercase text-gray-400">
+                      {activeChannelFilter === "ALL"
+                        ? "Total GMV"
+                        : chartData.donutSegments.find((d) => d.id === activeChannelFilter)
+                            ?.shortLabel}
+                    </span>
+                    <span className="text-sm font-black text-gray-900 mt-0.5">
+                      ₦{Math.round(chartData.activeGmvNaira / 1000).toLocaleString()}k
+                    </span>
+                    <span className="text-[10px] font-semibold text-emerald-700">
+                      {chartData.activeOrderCount} orders
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Channel Legend Rows */}
+              <div className="space-y-1.5 text-xs">
+                {chartData.donutSegments.map((seg) => {
+                  const selected = activeChannelFilter === seg.id;
+                  return (
+                    <button
+                      key={seg.id}
+                      type="button"
+                      onClick={() =>
+                        setActiveChannelFilter(selected ? "ALL" : seg.id)
+                      }
+                      className={`w-full px-2.5 py-1.5 rounded-xl flex items-center justify-between transition-all cursor-pointer ${
+                        selected
+                          ? "bg-emerald-50 border border-emerald-300 font-bold"
+                          : "hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: seg.color }}
+                        />
+                        <span className="truncate text-gray-800">{seg.shortLabel}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-bold text-gray-900">
+                          {formatKoboToNaira(seg.baseRevenueKobo)}
+                        </span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+                          {seg.sharePercent}%
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Second Visual Row: Order Status Pie/Bar Distribution + Conversion Funnel + Top Products */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* Card A: Order Settlement & Status Distribution */}
+            <div className="bg-white p-5 rounded-2xl border border-gray-200/80 shadow-2xs flex flex-col justify-between space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-extrabold text-gray-900">
+                    Order &amp; Escrow Distribution
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    Live status breakdown across {timeRange}
+                  </p>
+                </div>
+                <span className="text-base">🥧</span>
+              </div>
+
+              {/* Stacked Horizontal Bar */}
+              <div className="w-full h-3.5 rounded-full bg-gray-100 overflow-hidden flex p-0.5 gap-0.5 border border-gray-200">
+                {chartData.statusSegments.map((st) => (
+                  <div
+                    key={st.id}
+                    style={{ width: `${Math.max(4, st.pct)}%`, backgroundColor: st.color }}
+                    className="h-full first:rounded-l-full last:rounded-r-full transition-all duration-300"
+                    title={`${st.label}: ${st.count} (${st.pct}%)`}
+                  />
+                ))}
+              </div>
+
+              <div className="space-y-2 text-xs">
+                {chartData.statusSegments.map((st) => (
+                  <div
+                    key={st.id}
+                    className="flex items-center justify-between p-2 rounded-xl bg-gray-50/70 border border-gray-100"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: st.color }}
+                      />
+                      <div>
+                        <div className="font-bold text-gray-900 text-[11px]">{st.label}</div>
+                        <div className="text-[10px] text-gray-400">{st.count} orders ({st.pct}%)</div>
+                      </div>
+                    </div>
+                    <span className="font-extrabold text-gray-900 text-xs">
+                      {st.amountFormatted}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
               <button
-                onClick={() => setActiveQuestionTab("FUNNEL")}
-                className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer"
+                type="button"
+                onClick={() => setDigestModalCategory("PROFITABILITY")}
+                className="w-full py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-bold text-gray-700 cursor-pointer"
               >
-                Detailed Funnel Analysis →
+                View Full Cash-Flow Digest →
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              {funnelAndChannels.channels.map((ch) => (
-                <div
-                  key={ch.id}
-                  className="p-3.5 rounded-xl border border-gray-200/70 bg-gray-50/50 flex flex-col justify-between space-y-2"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-gray-800">{ch.shortLabel}</span>
-                    <span className="text-xs font-extrabold text-gray-900">{ch.sharePercent}%</span>
-                  </div>
-                  <div>
-                    <div className="text-base font-extrabold text-gray-900">{formatKoboToNaira(ch.baseRevenueKobo)}</div>
-                    <div className="text-[11px] text-gray-500">{ch.baseOrders} paid orders</div>
-                  </div>
-                  <div className="w-full h-1.5 rounded-full bg-gray-200 overflow-hidden">
-                    <div className="h-full bg-[#0d5c3a] rounded-full" style={{ width: `${Math.max(6, ch.sharePercent)}%` }} />
-                  </div>
+            {/* Card B: Visual 3-Step Chat-to-Paid Funnel */}
+            <div className="bg-white p-5 rounded-2xl border border-gray-200/80 shadow-2xs flex flex-col justify-between space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-extrabold text-gray-900">
+                    Conversational Checkout Funnel
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    DM Inquiry → 15m Stock Lock → Monnify Paid
+                  </p>
                 </div>
-              ))}
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-[#0d5c3a] border border-emerald-200">
+                  {funnelAndChannels.funnel.lockToPaidPct}% Conv.
+                </span>
+              </div>
+
+              <div className="space-y-3 my-auto">
+                {[
+                  {
+                    step: "1. Inbound DM & Status Inquiries",
+                    count: funnelAndChannels.funnel.totalInquiriesTriggered,
+                    pct: 100,
+                    color: "bg-slate-700",
+                  },
+                  {
+                    step: "2. 15-Min NUBAN Stock Locks",
+                    count: funnelAndChannels.funnel.reservationsLocked,
+                    pct: Number(funnelAndChannels.funnel.inquiryToLockPct),
+                    color: "bg-emerald-700",
+                  },
+                  {
+                    step: "3. Verified Monnify Paid Orders",
+                    count: funnelAndChannels.funnel.verifiedMonnifyPaid,
+                    pct: Math.round(
+                      (funnelAndChannels.funnel.verifiedMonnifyPaid /
+                        Math.max(1, funnelAndChannels.funnel.totalInquiriesTriggered)) *
+                        100
+                    ),
+                    color: "bg-[#0d5c3a]",
+                  },
+                ].map((st) => (
+                  <div key={st.step} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-gray-700">{st.step}</span>
+                      <span className="font-extrabold text-gray-900">
+                        {st.count} ({st.pct}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-3 rounded-full bg-gray-100 overflow-hidden">
+                      <div
+                        className={`h-full ${st.color} rounded-full transition-all duration-500`}
+                        style={{ width: `${Math.max(10, st.pct)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 flex items-center justify-between text-xs">
+                  <span className="text-emerald-900 font-semibold">
+                    🤖 Co-Pilot Offline Rescue:
+                  </span>
+                  <span className="font-extrabold text-[#0d5c3a]">
+                    {funnelAndChannels.copilot.leadsSavedFromDropoff} leads saved
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setDigestModalCategory("FUNNEL")}
+                className="w-full py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-bold text-gray-700 cursor-pointer"
+              >
+                View Full Funnel &amp; Channel Digest →
+              </button>
+            </div>
+
+            {/* Card C: Top Moving Products & Hidden Gems Visual Bars */}
+            <div className="bg-white p-5 rounded-2xl border border-gray-200/80 shadow-2xs flex flex-col justify-between space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-extrabold text-gray-900">
+                    Top Movers &amp; SKU Velocity
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    Best-selling catalog items by revenue
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                  {merchandisingIntel.lowStockCount} Low Stock
+                </span>
+              </div>
+
+              <div className="space-y-3 my-auto">
+                {merchandisingIntel.skuList.slice(0, 4).map((item, idx) => {
+                  const maxSkuRev = Number(
+                    merchandisingIntel.skuList[0]?.revenueKobo || 1n
+                  );
+                  const pct = Math.max(
+                    12,
+                    Math.min(100, Math.round((Number(item.revenueKobo) / maxSkuRev) * 100))
+                  );
+                  return (
+                    <div key={item.id} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-gray-900 truncate max-w-[175px]">
+                          #{idx + 1} {item.name}
+                        </span>
+                        <span className="font-extrabold text-[#0d5c3a]">
+                          {formatKoboToNaira(item.revenueKobo)}
+                        </span>
+                      </div>
+                      <div className="w-full h-2.5 rounded-full bg-gray-100 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-[#0d5c3a] to-[#00c068] rounded-full"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-gray-400">
+                        <span>{item.unitsSold} units sold</span>
+                        <span>{item.availableUnits} in stock</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setDigestModalCategory("MERCHANDISING")}
+                className="w-full py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-bold text-gray-700 cursor-pointer"
+              >
+                View Merchandising &amp; Gems Digest →
+              </button>
             </div>
           </div>
         </section>
@@ -1639,33 +2400,33 @@ export function AnalyticsView({
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs min-w-[780px]">
-                <thead className="bg-gray-50/80 border-b border-gray-100 text-[11px] font-bold text-gray-400 uppercase">
+                <thead className="bg-gray-50/80 border-b border-gray-100 text-[11px] font-bold text-gray-400 uppercase whitespace-nowrap">
                   <tr>
-                    <th className="py-3 px-5">SKU / Product</th>
-                    <th className="py-3 px-4">Units Sold</th>
-                    <th className="py-3 px-4">Gross Revenue</th>
-                    <th className="py-3 px-4">Remaining Stock</th>
-                    <th className="py-3 px-4">Stock Valuation (At Cost)</th>
-                    <th className="py-3 px-4">OOS Duration</th>
-                    <th className="py-3 px-5 text-right">Action</th>
+                    <th className="py-3 px-5 whitespace-nowrap">SKU / Product</th>
+                    <th className="py-3 px-4 whitespace-nowrap">Units Sold</th>
+                    <th className="py-3 px-4 whitespace-nowrap">Gross Revenue</th>
+                    <th className="py-3 px-4 whitespace-nowrap">Remaining Stock</th>
+                    <th className="py-3 px-4 whitespace-nowrap">Stock Valuation (At Cost)</th>
+                    <th className="py-3 px-4 whitespace-nowrap">OOS Duration</th>
+                    <th className="py-3 px-5 text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 whitespace-nowrap">
                   {merchandisingIntel.skuList.map((item) => (
-                    <tr key={item.id} className="hover:bg-gray-50/60">
-                      <td className="py-3.5 px-5">
-                        <div className="font-bold text-gray-900">{item.name}</div>
-                        <div className="text-[10px] text-gray-400 font-mono">{item.skuCode}</div>
+                    <tr key={item.id} className="hover:bg-gray-50/60 whitespace-nowrap">
+                      <td className="py-3.5 px-5 whitespace-nowrap">
+                        <div className="font-bold text-gray-900 whitespace-nowrap">{item.name}</div>
+                        <div className="text-[10px] text-gray-400 font-mono whitespace-nowrap">{item.skuCode}</div>
                       </td>
-                      <td className="py-3.5 px-4 font-extrabold text-gray-900">
+                      <td className="py-3.5 px-4 font-extrabold text-gray-900 whitespace-nowrap">
                         {item.unitsSold} units
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-emerald-800">
+                      <td className="py-3.5 px-4 font-bold text-emerald-800 whitespace-nowrap">
                         {formatKoboToNaira(item.revenueKobo)}
                       </td>
-                      <td className="py-3.5 px-4">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                          className={`px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap inline-block ${
                             item.isOutOfStock
                               ? "bg-rose-100 text-rose-800"
                               : item.isLowStock
@@ -1676,25 +2437,38 @@ export function AnalyticsView({
                           {item.availableUnits} units left
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 font-semibold text-gray-800">
+                      <td className="py-3.5 px-4 font-semibold text-gray-800 whitespace-nowrap">
                         {formatKoboToNaira(item.stockValuationAtCostKobo)}
                       </td>
-                      <td className="py-3.5 px-4">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
                         {item.oosDurationHours > 0 ? (
-                          <span className="text-rose-700 font-bold">
+                          <span className="text-rose-700 font-bold whitespace-nowrap">
                             {item.oosDurationHours}h OOS / Low
                           </span>
                         ) : (
-                          <span className="text-gray-400">0h (100% In-Stock)</span>
+                          <span className="text-gray-400 whitespace-nowrap">0h (100% In-Stock)</span>
                         )}
                       </td>
-                      <td className="py-3.5 px-5 text-right">
-                        <button
-                          onClick={() => handleQueueForBlast(item.skuCode, item.name)}
-                          className="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer"
-                        >
-                          Queue Status Blast →
-                        </button>
+                      <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                        <TableActionMenu
+                          items={[
+                            {
+                              label: "Queue for Status & Story Blast",
+                              icon: "⚡",
+                              variant: "emerald",
+                              onClick: () => handleQueueForBlast(item.skuCode, item.name),
+                            },
+                            ...(onNavigateToProducts
+                              ? [
+                                  {
+                                    label: "Manage SKU in Catalog",
+                                    icon: "📦",
+                                    onClick: onNavigateToProducts,
+                                  },
+                                ]
+                              : []),
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -1901,6 +2675,292 @@ export function AnalyticsView({
           </div>
         </section>
       )}
+
+      {/* ==========================================================================
+          FULL CATEGORY DIGEST MODAL (VIEWPORT-CENTERED & FULL-SCREEN ON MOBILE)
+         ========================================================================== */}
+      {digestModalCategory &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            onClick={() => setDigestModalCategory(null)}
+            className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-backdrop-fade"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-none sm:rounded-[28px] max-w-4xl w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] flex flex-col shadow-2xl border-0 sm:border border-gray-200 overflow-hidden animate-popup-spring"
+            >
+              <div className="px-5 sm:px-7 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between gap-3 shrink-0">
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-[#0d5c3a] border border-emerald-200">
+                    Deep-Dive Category Digest · {timeRange}
+                  </span>
+                  <h3 className="text-base sm:text-lg font-extrabold text-gray-900 mt-1">
+                    {digestModalCategory === "PROFITABILITY"
+                      ? "1. Financial & Cash-Flow Health Digest"
+                      : digestModalCategory === "FUNNEL"
+                        ? "2. Conversational Funnel & Channel Attribution Digest"
+                        : digestModalCategory === "MERCHANDISING"
+                          ? "3. Merchandising, SKU Velocity & Hidden Gems Digest"
+                          : "4. Trust Score, SLA & Reseller Network Digest"}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDigestModalCategory(null)}
+                  className="w-8 h-8 rounded-full bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 flex items-center justify-center text-sm font-bold cursor-pointer shrink-0"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-5 text-xs">
+                {digestModalCategory === "PROFITABILITY" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200 space-y-2">
+                      <div className="text-[10px] font-bold uppercase text-gray-400">
+                        Gross GMV vs. Net Realized Profit
+                      </div>
+                      <div className="text-2xl font-extrabold text-gray-900">
+                        {formatKoboToNaira(financialHealth.totalGmvKobo)}
+                      </div>
+                      <div className="text-sm font-bold text-[#0d5c3a]">
+                        Net Profit: {formatKoboToNaira(financialHealth.netRealizedRevenueKobo)}
+                      </div>
+                      <div className="pt-2 border-t border-gray-200 space-y-1 text-gray-600">
+                        <div className="flex justify-between">
+                          <span>Direct Retail ({financialHealth.directSharePercent}%):</span>
+                          <strong className="text-gray-900">
+                            {formatKoboToNaira(financialHealth.directRetailGmvKobo)}
+                          </strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Wholesale / Dropship ({financialHealth.wholesaleSharePercent}%):</span>
+                          <strong className="text-gray-900">
+                            {formatKoboToNaira(financialHealth.wholesaleDropshipGmvKobo)}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-200 space-y-2">
+                      <div className="text-[10px] font-bold uppercase text-emerald-700">
+                        Liquid Bank Cash vs. Monnify Escrow
+                      </div>
+                      <div className="text-2xl font-extrabold text-[#0d5c3a]">
+                        {formatKoboToNaira(financialHealth.liquidWithdrawableKobo)}
+                      </div>
+                      <div className="text-sm font-bold text-gray-800">
+                        Escrow Hold: {formatKoboToNaira(financialHealth.trustHeldEscrowKobo)}
+                      </div>
+                      <div className="pt-2 border-t border-emerald-200/70 space-y-1 text-gray-600">
+                        <div className="flex justify-between">
+                          <span>Delivered &amp; Settled Orders:</span>
+                          <strong className="text-gray-900">{financialHealth.deliveredOrdersCount}</strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>In-Transit Escrow Orders:</span>
+                          <strong className="text-gray-900">{financialHealth.awaitingDeliveryCount}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200 space-y-1.5">
+                      <div className="font-bold text-gray-900">Reseller Margin &amp; Platform Split</div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Gross Markup Spread:</span>
+                        <strong>{formatKoboToNaira(financialHealth.resellerGrossMarkupKobo)}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Platform Split Fees:</span>
+                        <strong className="text-rose-600">
+                          -{formatKoboToNaira(financialHealth.platformSplitFeeKobo)}
+                        </strong>
+                      </div>
+                      <div className="flex justify-between pt-1 border-t border-gray-200">
+                        <span className="font-bold text-gray-800">Net Reseller Markup Earned:</span>
+                        <strong className="text-[#0d5c3a]">
+                          {formatKoboToNaira(financialHealth.netResellerEarnedKobo)}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-rose-50/40 border border-rose-200 space-y-1.5">
+                      <div className="font-bold text-rose-950">RTO &amp; Cancelled Order Ledger</div>
+                      <div className="flex justify-between">
+                        <span className="text-rose-800">Cancelled / Expired Value:</span>
+                        <strong>{formatKoboToNaira(financialHealth.rtoCancelledValueKobo)}</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-rose-800">Reverse Logistics Cost:</span>
+                        <strong className="text-rose-700">
+                          -{formatKoboToNaira(financialHealth.returnShippingDeductionsKobo)}
+                        </strong>
+                      </div>
+                      <div className="text-[11px] text-emerald-800 font-semibold pt-1">
+                        ✓ Pre-paid Monnify virtual accounts eliminate Cash-on-Delivery rejection losses.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {digestModalCategory === "FUNNEL" && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200">
+                        <div className="text-[10px] font-bold uppercase text-gray-400">1. Total Inquiries</div>
+                        <div className="text-xl font-extrabold text-gray-900 mt-1">
+                          {funnelAndChannels.funnel.totalInquiriesTriggered}
+                        </div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">
+                          WhatsApp, IG Story &amp; #CL-CODE DMs
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200">
+                        <div className="text-[10px] font-bold uppercase text-gray-400">2. 15-Min Stock Locks</div>
+                        <div className="text-xl font-extrabold text-gray-900 mt-1">
+                          {funnelAndChannels.funnel.reservationsLocked} ({funnelAndChannels.funnel.inquiryToLockPct}%)
+                        </div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">
+                          Dynamic Monnify NUBAN issued
+                        </div>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200">
+                        <div className="text-[10px] font-bold uppercase text-emerald-800">3. Verified Paid</div>
+                        <div className="text-xl font-extrabold text-[#0d5c3a] mt-1">
+                          {funnelAndChannels.funnel.verifiedMonnifyPaid} ({funnelAndChannels.funnel.lockToPaidPct}%)
+                        </div>
+                        <div className="text-[11px] text-emerald-800 mt-0.5">
+                          Expired Lock Rate: {funnelAndChannels.funnel.expiredLockRate}%
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="font-bold text-gray-900">Channel Breakdown</div>
+                      {funnelAndChannels.channels.map((ch) => (
+                        <div
+                          key={ch.id}
+                          className="p-3 rounded-xl bg-gray-50 border border-gray-200 flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span>{ch.icon}</span>
+                            <div>
+                              <div className="font-bold text-gray-900">{ch.label}</div>
+                              <div className="text-[11px] text-gray-500">
+                                {ch.baseInquiries} inquiries → {ch.baseOrders} paid ({ch.convRate}% conv.)
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-extrabold text-gray-900">
+                              {formatKoboToNaira(ch.baseRevenueKobo)}
+                            </div>
+                            <div className="text-[10px] font-bold text-emerald-700">
+                              {ch.sharePercent}% of GMV
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {digestModalCategory === "MERCHANDISING" && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {merchandisingIntel.opportunityAlerts.map((alert) => (
+                        <div
+                          key={alert.id}
+                          className="p-4 rounded-2xl bg-gray-50 border border-gray-200 flex flex-col justify-between space-y-3"
+                        >
+                          <div className="space-y-1.5">
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${alert.badgeClass}`}>
+                              {alert.badge}
+                            </span>
+                            <div className="font-bold text-gray-900">{alert.name}</div>
+                            <div className="text-[11px] text-gray-700 font-medium">{alert.headline}</div>
+                            <p className="text-[11px] text-gray-500">{alert.recommendation}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleQueueForBlast(alert.sku, alert.name)}
+                            className="w-full py-2 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold text-xs cursor-pointer"
+                          >
+                            ⚡ Queue for Next Status Blast
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {digestModalCategory === "TRUST" && (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200 flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-gray-900 text-sm">
+                          Trust Tier Progression ({trustAndNetwork.cleanOrdersCompleted} / {trustAndNetwork.level2Target} Clean Orders)
+                        </div>
+                        <p className="text-[11px] text-gray-600 mt-0.5">
+                          On-time SLA: {trustAndNetwork.onTimeDispatchPct}% · Dispute Rate: {trustAndNetwork.disputeRatePct}% (&lt;2% required)
+                        </p>
+                      </div>
+                      <span className="font-extrabold text-[#0d5c3a] text-base">
+                        {trustAndNetwork.progressToLevel2Pct}%
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="font-bold text-gray-900">Top Resellers Mirroring Your Catalog</div>
+                      {trustAndNetwork.topResellers.map((rep) => (
+                        <div
+                          key={rep.id}
+                          className="p-3 rounded-xl bg-gray-50 border border-gray-200 flex items-center justify-between"
+                        >
+                          <div>
+                            <div className="font-bold text-gray-900">{rep.name} ({rep.handle})</div>
+                            <div className="text-[11px] text-gray-500">{rep.territory}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-extrabold text-gray-900">
+                              {formatKoboToNaira(rep.gmvKobo)}
+                            </div>
+                            <div className="text-[11px] text-emerald-700 font-semibold">
+                              {rep.ordersClosed} orders closed
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="px-5 sm:px-7 py-3.5 border-t border-gray-200 bg-gray-50 flex items-center justify-between gap-3 shrink-0 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = digestModalCategory;
+                    setDigestModalCategory(null);
+                    setActiveQuestionTab(target);
+                  }}
+                  className="font-bold text-[#0d5c3a] hover:underline cursor-pointer"
+                >
+                  Open Full Tab View →
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDigestModalCategory(null)}
+                  className="px-5 py-2 rounded-xl bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white font-bold cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

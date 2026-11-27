@@ -582,16 +582,16 @@ export function SubscriptionsView({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full text-left text-xs border-collapse min-w-[780px]">
             <thead>
-              <tr className="border-b border-gray-200 text-center">
-                <th className="py-3 px-3 font-bold text-gray-900 text-left w-1/4">Feature</th>
-                <th className="py-3 px-2 font-bold text-blue-900 w-3/16">Reseller ($5)</th>
-                <th className="py-3 px-2 font-bold text-amber-900 w-3/16">Starter ($10)</th>
-                <th className="py-3 px-2 font-bold text-emerald-900 bg-emerald-50/50 rounded-t-lg w-3/16">
+              <tr className="border-b border-gray-200 text-center whitespace-nowrap">
+                <th className="py-3 px-4 font-bold text-gray-900 text-left whitespace-nowrap">Feature</th>
+                <th className="py-3 px-4 font-bold text-blue-900 whitespace-nowrap">Reseller ($5)</th>
+                <th className="py-3 px-4 font-bold text-amber-900 whitespace-nowrap">Starter ($10)</th>
+                <th className="py-3 px-4 font-bold text-emerald-900 bg-emerald-50/50 rounded-t-lg whitespace-nowrap">
                   Growth ($15)
                 </th>
-                <th className="py-3 px-2 font-bold text-indigo-900 w-3/16">Pro Concierge ($20)</th>
+                <th className="py-3 px-4 font-bold text-indigo-900 whitespace-nowrap">Pro Concierge ($20)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -600,22 +600,22 @@ export function SubscriptionsView({
                   <tr className="bg-gray-50/70">
                     <td
                       colSpan={5}
-                      className="py-2 px-3 font-bold text-[10px] uppercase tracking-wider text-gray-600"
+                      className="py-2 px-4 font-bold text-[10px] uppercase tracking-wider text-gray-600 whitespace-nowrap"
                     >
                       {section.category}
                     </td>
                   </tr>
                   {section.items.map((row, rIdx) => (
-                    <tr key={rIdx} className="hover:bg-gray-50/50 transition-colors text-center">
-                      <td className="py-2.5 px-3 text-left text-gray-700 font-medium text-[11px]">
+                    <tr key={rIdx} className="hover:bg-gray-50/50 transition-colors text-center whitespace-nowrap">
+                      <td className="py-3 px-4 text-left text-gray-700 font-semibold text-[11px] whitespace-nowrap">
                         {row.name}
                       </td>
-                      <td className="py-2.5 px-2 text-gray-600 text-[11px]">{row.reseller}</td>
-                      <td className="py-2.5 px-2 text-gray-800 text-[11px] font-medium">{row.starter}</td>
-                      <td className="py-2.5 px-2 font-semibold text-emerald-900 bg-emerald-50/30 text-[11px]">
+                      <td className="py-3 px-4 text-gray-600 text-[11px] whitespace-nowrap">{row.reseller}</td>
+                      <td className="py-3 px-4 text-gray-800 text-[11px] font-medium whitespace-nowrap">{row.starter}</td>
+                      <td className="py-3 px-4 font-semibold text-emerald-900 bg-emerald-50/30 text-[11px] whitespace-nowrap">
                         {row.growth}
                       </td>
-                      <td className="py-2.5 px-2 font-semibold text-indigo-900 text-[11px]">{row.pro}</td>
+                      <td className="py-3 px-4 font-semibold text-indigo-900 text-[11px] whitespace-nowrap">{row.pro}</td>
                     </tr>
                   ))}
                 </React.Fragment>
@@ -738,8 +738,8 @@ export function SubscriptionsView({
 
       {/* Upgrade Confirmation Modal */}
       {confirmModalPlan && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-md w-full p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/25 backdrop-blur-md overflow-hidden">
+          <div className="bg-white rounded-none sm:rounded-[28px] shadow-2xl border-0 sm:border border-gray-200 max-w-md w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-6 space-y-5 animate-popup-spring">
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <SparklesIcon className="w-5 h-5 text-indigo-600" />

@@ -15,6 +15,7 @@ import { isResellerRole, isVendorRole } from "@/lib/types";
 import { PlusIcon } from "../icons";
 import { ProductEditorModal, buildStructuredSku } from "./product-editor-modal";
 import { EmptyState } from "../ui/empty-state";
+import { TableActionMenu } from "../ui/table-action-menu";
 import { api, resolveImageUrl } from "@/lib/api";
 import { PromotionsStudioModal } from "../modals/promotions-studio-modal";
 import { SocialFlyerQrModal } from "../modals/social-flyer-qr-modal";
@@ -1007,18 +1008,18 @@ export function ProductsView({
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs min-w-[680px]">
-                  <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                <table className="w-full text-left text-xs min-w-[740px]">
+                  <thead className="bg-gray-50/70 border-b border-gray-100 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                     <tr>
-                      <th className="px-5 py-3">Listing</th>
-                      <th className="px-4 py-3">Source / Stock</th>
-                      <th className="px-4 py-3">Wholesale Cost</th>
-                      <th className="px-4 py-3">Your Price</th>
-                      <th className="px-4 py-3">Profit / Unit</th>
-                      <th className="px-5 py-3 text-right">Manage</th>
+                      <th className="px-5 py-3 whitespace-nowrap">Listing</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Source / Stock</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Wholesale Cost</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Your Price</th>
+                      <th className="px-4 py-3 whitespace-nowrap">Profit / Unit</th>
+                      <th className="px-5 py-3 text-right whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 text-gray-700">
+                  <tbody className="divide-y divide-gray-100 text-gray-700 whitespace-nowrap">
                     {filteredReselling.map((item) => {
                       const profit = item.sellingPrice - item.cost;
                       const marginPct =
@@ -1035,27 +1036,27 @@ export function ProductsView({
                       return (
                         <tr
                           key={item.id}
-                          className="hover:bg-gray-50 transition-colors"
+                          className="hover:bg-gray-50 transition-colors whitespace-nowrap"
                         >
-                          <td className="px-5 py-3.5">
-                            <div className="font-semibold text-gray-900">
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <div className="font-semibold text-gray-900 whitespace-nowrap">
                               {item.name}
                             </div>
-                            <div className="text-[11px] text-gray-400 font-mono">
+                            <div className="text-[11px] text-gray-400 font-mono whitespace-nowrap">
                               {item.catalogSku
                                 ? `${item.catalogSku} · Sup: ${item.sku}`
                                 : item.sku}
                             </div>
                           </td>
-                          <td className="px-4 py-3.5">
-                            <div className="text-gray-900 font-medium">
+                          <td className="px-4 py-3.5 whitespace-nowrap">
+                            <div className="text-gray-900 font-medium whitespace-nowrap">
                               {item.supplier}
                             </div>
-                            <div className="text-[10px] text-gray-500">
+                            <div className="text-[10px] text-gray-500 whitespace-nowrap">
                               🚚 {inheritedShipping}
                             </div>
                             <div
-                              className={`text-[11px] font-medium ${
+                              className={`text-[11px] font-medium whitespace-nowrap ${
                                 item.status === "Paused"
                                   ? "text-amber-700"
                                   : item.stock <= 5
@@ -1066,40 +1067,41 @@ export function ProductsView({
                               {item.stock} in stock · {item.status}
                             </div>
                           </td>
-                          <td className="px-4 py-3.5 font-medium">
+                          <td className="px-4 py-3.5 font-medium whitespace-nowrap">
                             ₦{item.cost.toLocaleString()}
                           </td>
-                          <td className="px-4 py-3.5 font-bold text-gray-900">
+                          <td className="px-4 py-3.5 font-bold text-gray-900 whitespace-nowrap">
                             ₦{item.sellingPrice.toLocaleString()}
                           </td>
-                          <td className="px-4 py-3.5">
+                          <td className="px-4 py-3.5 whitespace-nowrap">
                             <div
-                              className={`font-semibold ${profit > 0 ? "text-emerald-700" : "text-rose-600"}`}
+                              className={`font-semibold whitespace-nowrap ${profit > 0 ? "text-emerald-700" : "text-rose-600"}`}
                             >
                               ₦{profit.toLocaleString()}
                             </div>
-                            <div className="text-[11px] text-gray-400">
+                            <div className="text-[11px] text-gray-400 whitespace-nowrap">
                               {marginPct}% margin
                             </div>
                           </td>
-                          <td className="px-5 py-3.5 text-right space-x-2 whitespace-nowrap">
-                            <button
-                              onClick={() => {
-                                setEditingResellItem(item);
-                                setEditingResellPrice(
-                                  String(item.sellingPrice),
-                                );
-                              }}
-                              className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg cursor-pointer"
-                            >
-                              Edit price
-                            </button>
-                            <button
-                              onClick={() => handleToggleListingPause(item.sku)}
-                              className="px-3 py-1.5 border border-gray-200 hover:bg-gray-50 text-gray-700 text-xs font-medium rounded-lg cursor-pointer"
-                            >
-                              {item.status === "Paused" ? "Resume" : "Pause"}
-                            </button>
+                          <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                            <TableActionMenu
+                              items={[
+                                {
+                                  label: "Edit Retail Price",
+                                  icon: "✏️",
+                                  variant: "emerald",
+                                  onClick: () => {
+                                    setEditingResellItem(item);
+                                    setEditingResellPrice(String(item.sellingPrice));
+                                  },
+                                },
+                                {
+                                  label: item.status === "Paused" ? "Resume Listing" : "Pause Listing",
+                                  icon: item.status === "Paused" ? "▶️" : "⏸️",
+                                  onClick: () => handleToggleListingPause(item.sku),
+                                },
+                              ]}
+                            />
                           </td>
                         </tr>
                       );
@@ -1502,18 +1504,19 @@ export function ProductsView({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs min-w-[700px]">
+            <table className="w-full text-left text-xs min-w-[740px]">
               <thead>
-                <tr className="bg-gray-50/80 text-gray-500 font-semibold border-b border-gray-100">
-                  <th className="py-3 px-5">Product &amp; SKU</th>
-                  <th className="py-3 px-4">Category</th>
-                  <th className="py-3 px-4">Retail Price</th>
-                  <th className="py-3 px-4">Wholesale MOQ</th>
-                  <th className="py-3 px-4">Escrow Deposit</th>
-                  <th className="py-3 px-5 text-right">Status &amp; Edit</th>
+                <tr className="bg-gray-50/80 text-gray-500 font-semibold border-b border-gray-100 whitespace-nowrap">
+                  <th className="py-3 px-5 whitespace-nowrap">Product &amp; SKU</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Category</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Retail Price</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Wholesale MOQ</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Escrow Deposit</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Bookability</th>
+                  <th className="py-3 px-5 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 whitespace-nowrap">
                 {products.map((p) => {
                   const override = bookableProductOverrides[p.skuCode];
                   const explicitBookable = p.customFields?.isBookable === "true";
@@ -1522,45 +1525,53 @@ export function ProductsView({
                   const dep = override?.depositPercent || (p.customFields?.bookingDepositPercent ? Number(p.customFields.bookingDepositPercent) : 30);
 
                   return (
-                    <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="py-3.5 px-5">
-                        <div className="font-bold text-gray-900">{p.name}</div>
-                        <div className="text-[10px] text-gray-400 font-mono">{p.skuCode}</div>
+                    <tr key={p.id} className="hover:bg-gray-50/50 transition-colors whitespace-nowrap">
+                      <td className="py-3.5 px-5 whitespace-nowrap">
+                        <div className="font-bold text-gray-900 whitespace-nowrap">{p.name}</div>
+                        <div className="text-[10px] text-gray-400 font-mono whitespace-nowrap">{p.skuCode}</div>
                       </td>
-                      <td className="py-3.5 px-4 font-semibold text-gray-600">
+                      <td className="py-3.5 px-4 font-semibold text-gray-600 whitespace-nowrap">
                         {p.category || "General"}
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-gray-900">
+                      <td className="py-3.5 px-4 font-bold text-gray-900 whitespace-nowrap">
                         ₦{p.basePriceNaira.toLocaleString()}
                       </td>
-                      <td className="py-3.5 px-4 font-semibold text-gray-800">
+                      <td className="py-3.5 px-4 font-semibold text-gray-800 whitespace-nowrap">
                         {moq} units min.
                       </td>
-                      <td className="py-3.5 px-4 font-semibold text-emerald-800">
+                      <td className="py-3.5 px-4 font-semibold text-emerald-800 whitespace-nowrap">
                         {dep}% deposit
                       </td>
-                      <td className="py-3.5 px-5 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => toggleProductBookable(p.skuCode)}
-                            className={`px-3 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                              isBookable
-                                ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                : "bg-gray-100 text-gray-600 border border-gray-300 hover:bg-gray-200"
-                            }`}
-                          >
-                            {isBookable ? "✓ Bookable" : "Not Bookable"}
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingProduct(p);
-                              setEditorModalOpen(true);
-                            }}
-                            className="px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 text-xs font-semibold cursor-pointer"
-                          >
-                            Edit
-                          </button>
-                        </div>
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap inline-block ${
+                            isBookable
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                              : "bg-gray-100 text-gray-600 border border-gray-300"
+                          }`}
+                        >
+                          {isBookable ? "✓ Bookable" : "Not Bookable"}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-5 text-right whitespace-nowrap">
+                        <TableActionMenu
+                          items={[
+                            {
+                              label: isBookable ? "Disable Wholesale Booking" : "Enable Wholesale Booking",
+                              icon: isBookable ? "🚫" : "✅",
+                              variant: "emerald",
+                              onClick: () => toggleProductBookable(p.skuCode),
+                            },
+                            {
+                              label: "Edit SKU & MOQ Rules",
+                              icon: "✏️",
+                              onClick: () => {
+                                setEditingProduct(p);
+                                setEditorModalOpen(true);
+                              },
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   );

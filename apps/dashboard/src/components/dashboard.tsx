@@ -884,7 +884,9 @@ export function Dashboard() {
       case "settings":
         return settingsTab === "shipping"
           ? "Settings / Delivery & Shipping"
-          : "Settings / Sales co-pilot / Setup";
+          : settingsTab === "legal"
+            ? "Settings / Legal Documents & Policies"
+            : "Settings / Sales co-pilot / Setup";
       case "payment-links":
         return "Payment Links";
       case "subscriptions":
@@ -905,7 +907,7 @@ export function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] flex text-gray-900 font-sans antialiased">
+    <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-[#F9FAFB] flex text-gray-900 font-sans antialiased">
       {/* Sidebar Navigation (Desktop Persistent + Mobile Sliding Drawer) */}
       <Sidebar
         currentView={currentView}
@@ -933,7 +935,7 @@ export function Dashboard() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 max-w-full overflow-x-hidden">
         {/* Top Header */}
         <TopNav
           vendor={state.vendor}
@@ -1035,7 +1037,7 @@ export function Dashboard() {
         )}
 
         {/* View Surface */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+        <main className="flex-1 p-3 sm:p-6 lg:p-8 overflow-y-auto overflow-x-hidden min-w-0">
           {error && (
             <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex justify-between items-center animate-popup-spring">
               <span>{error}</span>
@@ -1152,6 +1154,10 @@ export function Dashboard() {
               onStateChange={setState}
               onNavigateToProducts={() => setCurrentView("products")}
               onNavigateToPayments={() => setCurrentView("payments")}
+              onNavigateToLegalSettings={() => {
+                setSettingsTab("legal");
+                setCurrentView("settings");
+              }}
               onOpenTour={() => handleOpenTour("bookings")}
             />
           )}
@@ -1338,6 +1344,8 @@ export function Dashboard() {
               initialTab={settingsTab}
               vendor={state.vendor}
               workspaceRole={activeWorkspace}
+              bookingCatalogRules={state.bookingCatalogRules}
+              storefrontConfig={state.storefrontConfig ?? state.vendor.storefrontConfig}
               onStateChange={setState}
               shippingZones={state.shippingZones}
               discounts={state.discounts}

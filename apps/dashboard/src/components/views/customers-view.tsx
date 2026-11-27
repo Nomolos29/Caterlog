@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import type { CustomerRecordItem, DiscountItem, OrderItem, VendorState } from "@/lib/types";
 import { EmptyState } from "../ui/empty-state";
+import { TableActionMenu } from "../ui/table-action-menu";
 
 interface CustomerProfile {
   id: string;
@@ -438,18 +439,18 @@ export function CustomersView({
           {/* Customers Table */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm min-w-[700px]">
-                <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+              <table className="w-full text-left text-sm min-w-[740px]">
+                <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100 whitespace-nowrap">
                   <tr>
-                    <th className="py-3 px-6">Customer</th>
-                    <th className="py-3 px-6">Contact / Location</th>
-                    <th className="py-3 px-6">Orders</th>
-                    <th className="py-3 px-6">Lifetime Value</th>
-                    <th className="py-3 px-6">Segment</th>
-                    <th className="py-3 px-6 text-right">Actions</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Customer</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Contact / Location</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Orders</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Lifetime Value</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Segment</th>
+                    <th className="py-3 px-6 text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 whitespace-nowrap">
                   {filteredCustomers.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-12 text-center text-gray-400 text-sm">
@@ -458,38 +459,42 @@ export function CustomersView({
                     </tr>
                   ) : (
                     filteredCustomers.map((c) => (
-                      <tr key={c.id} className="hover:bg-gray-50/60 transition-colors">
-                        <td className="py-4 px-6">
-                          <div className="flex items-center gap-3">
+                      <tr
+                        key={c.id}
+                        onClick={() => setSelectedCustomerPhone(c.key)}
+                        className="hover:bg-gray-50/60 transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        <td className="py-4 px-6 whitespace-nowrap">
+                          <div className="flex items-center gap-3 whitespace-nowrap">
                             <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
                               {c.name.charAt(0)}
                             </div>
-                            <div>
-                              <div className="font-semibold text-gray-900 text-xs flex items-center gap-1.5">
-                                <span>{c.name}</span>
+                            <div className="whitespace-nowrap">
+                              <div className="font-semibold text-gray-900 text-xs flex items-center gap-1.5 whitespace-nowrap">
+                                <span className="whitespace-nowrap">{c.name}</span>
                                 {c.hasWebsiteOrders && (
-                                  <span className="px-1.5 py-0.2 rounded-xs bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-bold uppercase">
+                                  <span className="px-1.5 py-0.2 rounded-xs bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-bold uppercase whitespace-nowrap">
                                     Website
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-gray-400">{c.email}</div>
+                              <div className="text-[11px] text-gray-400 whitespace-nowrap">{c.email}</div>
                             </div>
                           </div>
                         </td>
-                        <td className="py-4 px-6 text-xs text-gray-600">
-                          <div className="font-mono text-gray-700">{c.phone}</div>
-                          <div className="text-[11px] text-gray-400">{c.location}</div>
+                        <td className="py-4 px-6 text-xs text-gray-600 whitespace-nowrap">
+                          <div className="font-mono text-gray-700 whitespace-nowrap">{c.phone}</div>
+                          <div className="text-[11px] text-gray-400 whitespace-nowrap">{c.location}</div>
                         </td>
-                        <td className="py-4 px-6 font-semibold text-gray-900 text-xs">
+                        <td className="py-4 px-6 font-semibold text-gray-900 text-xs whitespace-nowrap">
                           {c.orderCount} {c.orderCount === 1 ? "order" : "orders"}
                         </td>
-                        <td className="py-4 px-6 font-bold text-gray-900 text-xs">
+                        <td className="py-4 px-6 font-bold text-gray-900 text-xs whitespace-nowrap">
                           {c.totalSpentFormatted}
                         </td>
-                        <td className="py-4 px-6">
+                        <td className="py-4 px-6 whitespace-nowrap">
                           <span
-                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap inline-block ${
                               c.tag === "VIP"
                                 ? "bg-purple-50 text-purple-700 border border-purple-200"
                                 : c.tag === "Repeat"
@@ -500,24 +505,35 @@ export function CustomersView({
                             {c.tag}
                           </span>
                         </td>
-                        <td className="py-4 px-6 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <a
-                              href={`https://wa.me/${c.phone.replace(/\+/g, "")}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors flex items-center gap-1"
-                              title="Chat on WhatsApp"
-                            >
-                              <span>WA</span>
-                            </a>
-                            <button
-                              onClick={() => setSelectedCustomerPhone(c.key)}
-                              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
-                            >
-                              Profile
-                            </button>
-                          </div>
+                        <td className="py-4 px-6 text-right whitespace-nowrap">
+                          <TableActionMenu
+                            items={[
+                              {
+                                label: "Open Customer Profile",
+                                icon: "👤",
+                                variant: "emerald",
+                                onClick: () => setSelectedCustomerPhone(c.key),
+                              },
+                              {
+                                label: "Chat on WhatsApp",
+                                icon: "💬",
+                                onClick: () =>
+                                  window.open(
+                                    `https://wa.me/${c.phone.replace(/\+/g, "")}`,
+                                    "_blank"
+                                  ),
+                              },
+                              ...(onNavigateToPaymentLinks
+                                ? [
+                                    {
+                                      label: "Create Payment Link",
+                                      icon: "💳",
+                                      onClick: () => onNavigateToPaymentLinks(c.name),
+                                    },
+                                  ]
+                                : []),
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))
@@ -531,8 +547,8 @@ export function CustomersView({
 
       {/* Customer Profile Modal (Matching Customer Profile & History.png) */}
       {selectedCustomer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-100 p-6 sm:p-8 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/25 backdrop-blur-md overflow-hidden">
+          <div className="bg-white rounded-none sm:rounded-[28px] max-w-2xl w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto shadow-2xl border-0 sm:border border-gray-100 p-5 sm:p-8 animate-popup-spring">
             {/* Modal Header */}
             <div className="flex items-start justify-between border-b border-gray-100 pb-5">
               <div className="flex items-center gap-4">
@@ -768,13 +784,13 @@ export function CustomersView({
       {/* Standalone Popup 1: Add Customer to CRM */}
       {showAddCustomerModal && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 animate-backdrop-fade"
+          className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-backdrop-fade"
           onClick={() => setShowAddCustomerModal(false)}
         >
           <form
             onSubmit={handleCreateCustomerSubmit}
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-[28px] max-w-lg w-full p-6 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border border-slate-200/80 space-y-5 text-xs animate-popup-spring"
+            className="bg-white rounded-none sm:rounded-[28px] max-w-lg w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] p-5 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border-0 sm:border border-slate-200/80 space-y-5 text-xs overflow-y-auto animate-popup-spring"
           >
             <div className="flex items-start justify-between border-b border-gray-100 pb-4">
               <div>
@@ -889,12 +905,12 @@ export function CustomersView({
       {/* Standalone Popup 2: Customer Segment Broadcast & Abandoned Order Recovery */}
       {showBroadcastModal && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-md flex items-center justify-center p-4 animate-backdrop-fade"
+          className="fixed inset-0 z-50 bg-slate-900/25 backdrop-blur-md flex items-center justify-center p-0 sm:p-4 overflow-hidden animate-backdrop-fade"
           onClick={() => setShowBroadcastModal(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-[28px] max-w-xl w-full p-6 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border border-slate-200/80 space-y-5 text-xs animate-popup-spring"
+            className="bg-white rounded-none sm:rounded-[28px] max-w-xl w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] p-5 sm:p-8 shadow-[0_28px_80px_-12px_rgba(15,23,42,0.18)] border-0 sm:border border-slate-200/80 space-y-5 text-xs overflow-y-auto animate-popup-spring"
           >
             {broadcastReceipt ? (
               <div className="text-center space-y-4 py-2">

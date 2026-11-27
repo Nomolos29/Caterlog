@@ -63,6 +63,7 @@ export function StorefrontView({
   );
   const [viewport, setViewport] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [mobileStudioPane, setMobileStudioPane] = useState<"editor" | "preview">("preview");
   const [previewFullWebsiteAsStarter, setPreviewFullWebsiteAsStarter] = useState(false);
 
   const [syncState, setSyncState] = useState<"synced" | "syncing" | "saved">("synced");
@@ -190,6 +191,7 @@ export function StorefrontView({
     setStudioTab("sections");
     setActiveSection(secId);
     if (inspectorCollapsed) setInspectorCollapsed(false);
+    setMobileStudioPane("editor");
   };
 
   const starterPresets = STOREFRONT_PRESETS.filter(
@@ -321,125 +323,163 @@ export function StorefrontView({
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full max-w-full overflow-x-hidden">
       {/* 1. STUDIO TOP COMMAND BAR */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-3.5 sm:px-5 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setInspectorCollapsed((prev: boolean) => !prev)}
-            className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50 cursor-pointer"
-            title="Toggle Left Inspector"
-          >
-            {inspectorCollapsed ? "▸ Show Studio Panel" : "◂ Full Canvas"}
-          </button>
+      <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:px-5 flex flex-col gap-3 shadow-2xs">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setInspectorCollapsed((prev: boolean) => !prev)}
+              className="hidden lg:inline-flex px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50 cursor-pointer shrink-0"
+              title="Toggle Left Inspector"
+            >
+              {inspectorCollapsed ? "▸ Show Studio Panel" : "◂ Full Canvas"}
+            </button>
 
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm sm:text-base font-extrabold text-gray-900">
-                Website & Storefront Studio
-              </h1>
-              <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  syncState === "syncing"
-                    ? "bg-amber-50 text-amber-700"
-                    : "bg-emerald-50 text-emerald-700"
-                }`}
-              >
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-sm sm:text-base font-extrabold text-gray-900 truncate">
+                  Website & Storefront Studio
+                </h1>
                 <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    syncState === "syncing" ? "bg-amber-500 animate-ping" : "bg-emerald-500"
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                    syncState === "syncing"
+                      ? "bg-amber-50 text-amber-700"
+                      : "bg-emerald-50 text-emerald-700"
                   }`}
-                />
-                {syncState === "syncing" ? "Syncing Live..." : "Realtime Sync Active"}
-              </span>
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      syncState === "syncing" ? "bg-amber-500 animate-ping" : "bg-emerald-500"
+                    }`}
+                  />
+                  {syncState === "syncing" ? "Syncing..." : "Live Sync"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Actions: Device Viewport + Copy Link + Open Standalone Storefront App */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="hidden sm:inline-flex items-center bg-gray-100 p-1 rounded-xl text-xs font-semibold">
+              {(
+                [
+                  { id: "desktop", icon: "💻", label: "Desktop" },
+                  { id: "tablet", icon: "📟", label: "Tablet" },
+                  { id: "mobile", icon: "📱", label: "Mobile" },
+                ] as const
+              ).map((vp) => (
+                <button
+                  key={vp.id}
+                  type="button"
+                  onClick={() => setViewport(vp.id)}
+                  className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 ${
+                    viewport === vp.id
+                      ? "bg-white text-gray-900 shadow-2xs font-bold"
+                      : "text-gray-600 opacity-75 hover:opacity-100"
+                  }`}
+                  title={`${vp.label} view`}
+                >
+                  <span>{vp.icon}</span>
+                  <span className="hidden md:inline text-[11px]">{vp.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-1 sm:flex-initial justify-end">
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer whitespace-nowrap"
+              >
+                {copiedUrl ? "✓ Copied" : "🔗 Copy Link"}
+              </button>
+
+              <a
+                href={standaloneStorefrontUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-[#0d5c3a] hover:bg-emerald-100 text-xs font-bold transition-colors whitespace-nowrap"
+              >
+                ↗ Live Store
+              </a>
+
+              <button
+                type="button"
+                onClick={handleManualPublish}
+                className="px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-bold bg-[#0d5c3a] hover:bg-[#0b4b2f] text-white shadow-xs cursor-pointer whitespace-nowrap"
+              >
+                Publish
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Center Page Preview Switcher */}
-        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl overflow-x-auto">
-          {(effectivePreviewConfig.mode === "FULL_WEBSITE"
-            ? ([
-                { id: "home", label: "Home" },
-                { id: "shop", label: "Shop" },
-                { id: "collections", label: "Lookbook" },
-                { id: "about", label: "Story" },
-                { id: "checkout", label: "Checkout" },
-                { id: "track", label: "Tracker" },
-              ] as const)
-            : ([
-                { id: "shop", label: "Catalog" },
-                { id: "checkout", label: "Checkout" },
-                { id: "track", label: "Tracker" },
-              ] as const)
-          ).map((pg) => (
+        {/* Bottom row of Command Bar: Page Switcher + Mobile Mode Toggle */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-gray-100">
+          {/* Mobile Editor vs Live Preview Toggle */}
+          <div className="grid grid-cols-2 lg:hidden bg-emerald-950/5 p-1 rounded-xl border border-emerald-900/10">
             <button
-              key={pg.id}
               type="button"
-              onClick={() => setActivePreviewPage(pg.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activePreviewPage === pg.id
-                  ? "bg-white text-gray-900 shadow-2xs"
-                  : "text-gray-600 hover:text-gray-900"
+              onClick={() => setMobileStudioPane("editor")}
+              className={`py-2 px-3 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                mobileStudioPane === "editor"
+                  ? "bg-[#0d5c3a] text-white shadow-xs"
+                  : "text-gray-700 hover:text-gray-900"
               }`}
             >
-              {pg.label}
+              <span>🎨</span>
+              <span>Customize Studio</span>
             </button>
-          ))}
-        </div>
+            <button
+              type="button"
+              onClick={() => setMobileStudioPane("preview")}
+              className={`py-2 px-3 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                mobileStudioPane === "preview"
+                  ? "bg-[#0d5c3a] text-white shadow-xs"
+                  : "text-gray-700 hover:text-gray-900"
+              }`}
+            >
+              <span>👁️</span>
+              <span>Live Store Preview</span>
+            </button>
+          </div>
 
-        {/* Right Actions: Device Viewport + Copy Link + Open Standalone Storefront App */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center bg-gray-100 p-1 rounded-xl text-xs font-semibold">
-            {(
-              [
-                { id: "desktop", icon: "💻", label: "Desktop" },
-                { id: "tablet", icon: "📟", label: "Tablet" },
-                { id: "mobile", icon: "📱", label: "Mobile" },
-              ] as const
-            ).map((vp) => (
+          {/* Center Page Preview Switcher */}
+          <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl overflow-x-auto no-scrollbar max-w-full">
+            {(effectivePreviewConfig.mode === "FULL_WEBSITE"
+              ? ([
+                  { id: "home", label: "Home" },
+                  { id: "shop", label: "Shop" },
+                  { id: "collections", label: "Lookbook" },
+                  { id: "about", label: "Story" },
+                  { id: "checkout", label: "Checkout" },
+                  { id: "track", label: "Tracker" },
+                ] as const)
+              : ([
+                  { id: "shop", label: "Catalog" },
+                  { id: "checkout", label: "Checkout" },
+                  { id: "track", label: "Tracker" },
+                ] as const)
+            ).map((pg) => (
               <button
-                key={vp.id}
+                key={pg.id}
                 type="button"
-                onClick={() => setViewport(vp.id)}
-                className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 ${
-                  viewport === vp.id
-                    ? "bg-white text-gray-900 shadow-2xs font-bold"
-                    : "text-gray-600 opacity-75 hover:opacity-100"
+                onClick={() => {
+                  setActivePreviewPage(pg.id);
+                  setMobileStudioPane("preview");
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                  activePreviewPage === pg.id
+                    ? "bg-white text-gray-900 shadow-2xs"
+                    : "text-gray-600 hover:text-gray-900"
                 }`}
-                title={`${vp.label} view`}
               >
-                <span>{vp.icon}</span>
-                <span className="hidden md:inline text-[11px]">{vp.label}</span>
+                {pg.label}
               </button>
             ))}
           </div>
-
-          <button
-            type="button"
-            onClick={handleCopyLink}
-            className="px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
-          >
-            {copiedUrl ? "✓ Copied" : "🔗 Copy URL"}
-          </button>
-
-          <a
-            href={standaloneStorefrontUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-bold transition-colors"
-          >
-            ↗ Open Storefront (:3001)
-          </a>
-
-          <button
-            type="button"
-            onClick={handleManualPublish}
-            className="px-4 py-2 rounded-xl text-xs font-bold bg-gray-900 hover:bg-black text-white shadow-xs cursor-pointer"
-          >
-            Publish
-          </button>
         </div>
       </div>
 
@@ -486,10 +526,14 @@ export function StorefrontView({
       )}
 
       {/* 2. STUDIO WORKSPACE: Left Visual Inspector + Right Interactive Canvas */}
-      <div className="flex flex-col lg:flex-row gap-4 items-start">
+      <div className="flex flex-col lg:flex-row gap-4 items-start w-full min-w-0">
         {/* LEFT VISUAL INSPECTOR */}
         {!inspectorCollapsed && (
-          <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs">
+          <div
+            className={`w-full lg:w-[320px] xl:w-[340px] shrink-0 bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs ${
+              mobileStudioPane === "preview" ? "hidden lg:block" : "block"
+            }`}
+          >
             {/* 4 Clean Studio Tabs */}
             <div className="grid grid-cols-4 border-b border-gray-200 bg-gray-50/80 text-[11px] font-extrabold">
               {(
@@ -504,9 +548,9 @@ export function StorefrontView({
                   key={t.id}
                   type="button"
                   onClick={() => setStudioTab(t.id)}
-                  className={`py-3.5 text-center border-b-2 transition-all cursor-pointer ${
+                  className={`py-3 text-center border-b-2 transition-all cursor-pointer whitespace-nowrap px-1 ${
                     studioTab === t.id
-                      ? "bg-white text-indigo-600 border-indigo-600"
+                      ? "bg-white text-[#0d5c3a] border-[#0d5c3a]"
                       : "text-gray-500 border-transparent hover:text-gray-800"
                   }`}
                 >
@@ -515,7 +559,7 @@ export function StorefrontView({
               ))}
             </div>
 
-            <div className="p-4 max-h-[820px] overflow-y-auto space-y-3">
+            <div className="p-3.5 sm:p-4 max-h-[75dvh] lg:max-h-[820px] overflow-y-auto space-y-3">
               {/* =============================================================
                   TAB 1: VISUAL PAGE SECTIONS & INLINE EDITOR
                  ============================================================= */}
@@ -1853,7 +1897,11 @@ export function StorefrontView({
         )}
 
         {/* RIGHT INTERACTIVE LIVE PREVIEW CANVAS */}
-        <div className="w-full flex-1 min-w-0 flex flex-col items-center">
+        <div
+          className={`w-full flex-1 min-w-0 flex flex-col items-center ${
+            mobileStudioPane === "editor" ? "hidden lg:flex" : "flex"
+          }`}
+        >
           <div
             className={`w-full transition-all duration-300 bg-white border border-gray-300 rounded-2xl shadow-xl overflow-hidden ${
               viewport === "mobile"
@@ -1864,19 +1912,26 @@ export function StorefrontView({
             }`}
           >
             {/* Browser Bar */}
-            <div className="bg-gray-100 border-b border-gray-200 px-3.5 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
+            <div className="bg-gray-100 border-b border-gray-200 px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2">
+              <div className="hidden sm:flex items-center gap-1.5 shrink-0">
                 <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
               </div>
 
-              <div className="flex-1 min-w-[140px] max-w-md mx-auto px-3 py-1 rounded-lg bg-white border border-gray-200 text-[11px] font-mono text-gray-600 truncate text-center">
+              <div className="flex-1 min-w-0 max-w-md mx-auto px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-[11px] font-mono text-gray-600 truncate text-center">
                 {standaloneStorefrontUrl}
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-xs bg-indigo-100 text-indigo-800">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setMobileStudioPane("editor")}
+                  className="lg:hidden text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg bg-[#0d5c3a] text-white cursor-pointer whitespace-nowrap"
+                >
+                  ✎ Edit Section
+                </button>
+                <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-xs bg-emerald-100 text-emerald-900">
                   {viewport === "mobile"
                     ? "Mobile · 390px"
                     : viewport === "tablet"
@@ -1886,14 +1941,14 @@ export function StorefrontView({
                 <button
                   type="button"
                   onClick={() => setInspectorCollapsed((prev: boolean) => !prev)}
-                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-xs border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer"
+                  className="hidden lg:inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-xs border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer"
                 >
                   {inspectorCollapsed ? "Show Panel" : "Expand"}
                 </button>
               </div>
             </div>
 
-            <div className="max-h-[820px] overflow-y-auto">
+            <div className="max-h-[78dvh] lg:max-h-[820px] overflow-y-auto overflow-x-hidden">
               <StorefrontRenderer
                 vendor={{
                   id: state.vendor.id,

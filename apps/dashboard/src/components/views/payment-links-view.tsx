@@ -8,6 +8,7 @@ import type {
   VendorState,
 } from "@/lib/types";
 import { ManualOrderCreatorModal } from "../modals/manual-order-creator-modal";
+import { TableActionMenu } from "../ui/table-action-menu";
 
 interface PaymentLinksViewProps {
   products: ProductItem[];
@@ -357,47 +358,60 @@ export function PaymentLinksView({
             </span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[650px]">
-              <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+            <table className="w-full text-left text-sm min-w-[700px]">
+              <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100 whitespace-nowrap">
                 <tr>
-                  <th className="py-3 px-6">Slug</th>
-                  <th className="py-3 px-6">Customer / Product</th>
-                  <th className="py-3 px-6">Amount</th>
-                  <th className="py-3 px-6">Checkout URL</th>
-                  <th className="py-3 px-6 text-right">Actions</th>
+                  <th className="py-3 px-6 whitespace-nowrap">Slug</th>
+                  <th className="py-3 px-6 whitespace-nowrap">Customer / Product</th>
+                  <th className="py-3 px-6 whitespace-nowrap">Amount</th>
+                  <th className="py-3 px-6 whitespace-nowrap">Checkout URL</th>
+                  <th className="py-3 px-6 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 whitespace-nowrap">
                 {paymentLinks.map((pl) => (
-                  <tr key={pl.id} className="hover:bg-gray-50/60 transition-colors">
-                    <td className="py-3.5 px-6 font-mono text-xs font-bold text-emerald-800">{pl.slug}</td>
-                    <td className="py-3.5 px-6 text-xs text-gray-700">
-                      <div className="font-semibold text-gray-900">{pl.customerName || "Any Shopper"}</div>
-                      <div className="text-[11px] text-gray-400">{pl.productSku || pl.description || "Custom Link"}</div>
+                  <tr key={pl.id} className="hover:bg-gray-50/60 transition-colors whitespace-nowrap">
+                    <td className="py-3.5 px-6 font-mono text-xs font-bold text-emerald-800 whitespace-nowrap">{pl.slug}</td>
+                    <td className="py-3.5 px-6 text-xs text-gray-700 whitespace-nowrap">
+                      <div className="font-semibold text-gray-900 whitespace-nowrap">{pl.customerName || "Any Shopper"}</div>
+                      <div className="text-[11px] text-gray-400 whitespace-nowrap">{pl.productSku || pl.description || "Custom Link"}</div>
                     </td>
-                    <td className="py-3.5 px-6 font-bold text-gray-900 text-xs">
+                    <td className="py-3.5 px-6 font-bold text-gray-900 text-xs whitespace-nowrap">
                       {pl.amountFormatted || `₦${(pl.amountNaira ?? 0).toLocaleString()}`}
                     </td>
-                    <td className="py-3.5 px-6 font-mono text-xs text-gray-500 truncate max-w-[220px]">
+                    <td className="py-3.5 px-6 font-mono text-xs text-gray-500 whitespace-nowrap">
                       {pl.checkoutUrl}
                     </td>
-                    <td className="py-3.5 px-6 text-right space-x-2">
-                      <button
-                        type="button"
-                        onClick={() => navigator.clipboard.writeText(pl.checkoutUrl)}
-                        className="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer"
-                      >
-                        Copy
-                      </button>
-                      {onDeletePaymentLink && (
-                        <button
-                          type="button"
-                          onClick={() => void onDeletePaymentLink(pl.slug)}
-                          className="text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
-                        >
-                          Remove
-                        </button>
-                      )}
+                    <td className="py-3.5 px-6 text-right whitespace-nowrap">
+                      <TableActionMenu
+                        items={[
+                          {
+                            label: "Copy Checkout Link",
+                            icon: "🔗",
+                            variant: "emerald",
+                            onClick: () => void navigator.clipboard.writeText(pl.checkoutUrl),
+                          },
+                          {
+                            label: "Share via WhatsApp",
+                            icon: "💬",
+                            onClick: () =>
+                              window.open(
+                                `https://wa.me/?text=${encodeURIComponent(`Pay securely here: ${pl.checkoutUrl}`)}`,
+                                "_blank"
+                              ),
+                          },
+                          ...(onDeletePaymentLink
+                            ? [
+                                {
+                                  label: "Remove Payment Link",
+                                  icon: "🗑️",
+                                  variant: "danger" as const,
+                                  onClick: () => void onDeletePaymentLink(pl.slug),
+                                },
+                              ]
+                            : []),
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -413,34 +427,34 @@ export function PaymentLinksView({
           <h2 className="text-base font-bold text-gray-900">Recent Payment Invoices</h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm min-w-[650px]">
-            <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+          <table className="w-full text-left text-sm min-w-[680px]">
+            <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100 whitespace-nowrap">
               <tr>
-                <th className="py-3 px-6">Customer</th>
-                <th className="py-3 px-6">Reference</th>
-                <th className="py-3 px-6">Amount</th>
-                <th className="py-3 px-6">Status</th>
-                <th className="py-3 px-6">10-Digit NUBAN</th>
+                <th className="py-3 px-6 whitespace-nowrap">Customer</th>
+                <th className="py-3 px-6 whitespace-nowrap">Reference</th>
+                <th className="py-3 px-6 whitespace-nowrap">Amount</th>
+                <th className="py-3 px-6 whitespace-nowrap">Status</th>
+                <th className="py-3 px-6 whitespace-nowrap">10-Digit NUBAN</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-gray-100 whitespace-nowrap">
               {orders.slice(0, 5).map((ord) => (
-                <tr key={ord.id} className="hover:bg-gray-50/60 transition-colors">
-                  <td className="py-3.5 px-6 font-semibold text-gray-900 text-xs">{ord.customerName}</td>
-                  <td className="py-3.5 px-6 font-mono text-xs text-gray-500">{ord.shortCode}</td>
-                  <td className="py-3.5 px-6 font-bold text-gray-900 text-xs">{ord.totalAmountFormatted}</td>
-                  <td className="py-3.5 px-6">
+                <tr key={ord.id} className="hover:bg-gray-50/60 transition-colors whitespace-nowrap">
+                  <td className="py-3.5 px-6 font-semibold text-gray-900 text-xs whitespace-nowrap">{ord.customerName}</td>
+                  <td className="py-3.5 px-6 font-mono text-xs text-gray-500 whitespace-nowrap">{ord.shortCode}</td>
+                  <td className="py-3.5 px-6 font-bold text-gray-900 text-xs whitespace-nowrap">{ord.totalAmountFormatted}</td>
+                  <td className="py-3.5 px-6 whitespace-nowrap">
                     <span
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap inline-block ${
                         ord.status === "PAID"
                           ? "bg-emerald-50 text-emerald-700"
                           : "bg-amber-50 text-amber-700"
                       }`}
                     >
-                      {ord.status}
+                      {ord.status.replace(/_/g, " ")}
                     </span>
                   </td>
-                  <td className="py-3.5 px-6 font-mono text-xs text-emerald-700 font-bold">
+                  <td className="py-3.5 px-6 font-mono text-xs text-emerald-700 font-bold whitespace-nowrap">
                     {ord.accountNumber}
                   </td>
                 </tr>

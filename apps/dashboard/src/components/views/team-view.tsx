@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import type { TeamMemberItem, CommerceEventItem, PlatformRole } from "@/lib/types";
 import { api } from "@/lib/api";
 import { FilterIcon, ExportIcon, PlusIcon } from "../icons";
+import { TableActionMenu } from "../ui/table-action-menu";
 
 export type StaffRole =
   | "Owner"
@@ -523,62 +524,62 @@ export function TeamView({
           {/* Members Table */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-2xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm min-w-[700px]">
-                <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100">
+              <table className="w-full text-left text-sm min-w-[740px]">
+                <thead className="bg-gray-50/60 text-[11px] uppercase font-bold text-gray-400 border-b border-gray-100 whitespace-nowrap">
                   <tr>
-                    <th className="py-3 px-6">Member</th>
-                    <th className="py-3 px-6">Role</th>
-                    <th className="py-3 px-6">Assigned Permissions</th>
-                    <th className="py-3 px-6">Status</th>
-                    <th className="py-3 px-6 text-right">Actions</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Member</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Role</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Assigned Permissions</th>
+                    <th className="py-3 px-6 whitespace-nowrap">Status</th>
+                    <th className="py-3 px-6 text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 whitespace-nowrap">
                   {members.map((m) => (
-                    <tr key={m.id} className="hover:bg-gray-50/60 transition-colors">
-                      <td className="py-4 px-6">
-                        <div className="flex items-center gap-3">
+                    <tr key={m.id} className="hover:bg-gray-50/60 transition-colors whitespace-nowrap">
+                      <td className="py-4 px-6 whitespace-nowrap">
+                        <div className="flex items-center gap-3 whitespace-nowrap">
                           <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-800 font-bold text-xs flex items-center justify-center shrink-0">
                             {m.name.charAt(0)}
                           </div>
-                          <div>
-                            <div className="font-semibold text-gray-900 text-xs">{m.name}</div>
-                            <div className="text-[11px] text-gray-400">{m.email}</div>
+                          <div className="whitespace-nowrap">
+                            <div className="font-semibold text-gray-900 text-xs whitespace-nowrap">{m.name}</div>
+                            <div className="text-[11px] text-gray-400 whitespace-nowrap">{m.email}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="py-4 px-6">
-                        <span className="text-xs font-semibold text-gray-800 bg-gray-100 px-2.5 py-1 rounded-lg">
+                      <td className="py-4 px-6 whitespace-nowrap">
+                        <span className="text-xs font-semibold text-gray-800 bg-gray-100 px-2.5 py-1 rounded-lg whitespace-nowrap inline-block">
                           {m.role}
                         </span>
                       </td>
-                      <td className="py-4 px-6 text-xs text-gray-600">
-                        <div className="flex flex-wrap gap-1 max-w-xs">
+                      <td className="py-4 px-6 text-xs text-gray-600 whitespace-nowrap">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
                           {m.permissions.canManageOrders && (
-                            <span className="text-[10px] bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-md">
+                            <span className="text-[10px] bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-md whitespace-nowrap">
                               Orders
                             </span>
                           )}
                           {m.permissions.canManageInventory && (
-                            <span className="text-[10px] bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-md">
+                            <span className="text-[10px] bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-md whitespace-nowrap">
                               Stock
                             </span>
                           )}
                           {m.permissions.canViewPayouts && (
-                            <span className="text-[10px] bg-purple-50 text-purple-700 font-semibold px-2 py-0.5 rounded-md">
+                            <span className="text-[10px] bg-purple-50 text-purple-700 font-semibold px-2 py-0.5 rounded-md whitespace-nowrap">
                               Payouts
                             </span>
                           )}
                           {m.permissions.canOverrideCopilot && (
-                            <span className="text-[10px] bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-md">
+                            <span className="text-[10px] bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-md whitespace-nowrap">
                               Co-Pilot
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className="py-4 px-6">
+                      <td className="py-4 px-6 whitespace-nowrap">
                         <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap inline-block ${
                             m.status === "Active"
                               ? "bg-emerald-100 text-emerald-800"
                               : m.status === "Suspended"
@@ -589,31 +590,41 @@ export function TeamView({
                           {m.status}
                         </span>
                       </td>
-                      <td className="py-4 px-6 text-right">
-                        <div className="inline-flex items-center gap-2">
-                          <button
-                            onClick={() => void handleSwitchStaffSession(m)}
-                            disabled={m.status === "Suspended"}
-                            className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer active:scale-95 ${
-                              activeStaffEmail.toLowerCase() === m.email.toLowerCase()
-                                ? "bg-emerald-700 border-emerald-700 text-white"
-                                : "border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
-                            }`}
-                            title={`Authenticate sub-account session as ${m.name} (${m.role})`}
-                          >
-                            {activeStaffEmail.toLowerCase() === m.email.toLowerCase()
-                              ? `Active (${m.role})`
-                              : "Sign In As"}
-                          </button>
-                          {m.role !== "Owner" && (
-                            <button
-                              onClick={() => setEditMember(m)}
-                              className="text-xs font-semibold px-3 py-1 rounded-lg border border-gray-300 hover:border-gray-500 hover:bg-gray-100 text-gray-700 hover:text-gray-900 transition-all cursor-pointer active:scale-95"
-                            >
-                              Edit
-                            </button>
-                          )}
-                        </div>
+                      <td className="py-4 px-6 text-right whitespace-nowrap">
+                        <TableActionMenu
+                          items={[
+                            {
+                              label:
+                                activeStaffEmail.toLowerCase() === m.email.toLowerCase()
+                                  ? `Active Session (${m.role})`
+                                  : `Sign In As ${m.name}`,
+                              icon: "🔑",
+                              variant: "emerald",
+                              disabled: m.status === "Suspended",
+                              onClick: () => void handleSwitchStaffSession(m),
+                            },
+                            ...(m.role !== "Owner"
+                              ? [
+                                  {
+                                    label: "Edit Permissions & Role",
+                                    icon: "✏️",
+                                    onClick: () => setEditMember(m),
+                                  },
+                                  {
+                                    label: "Remove Staff Member",
+                                    icon: "🗑️",
+                                    variant: "danger" as const,
+                                    onClick: () => {
+                                      if (onDeleteTeamMember) {
+                                        void onDeleteTeamMember(m.email);
+                                      }
+                                      setMembers((prev) => prev.filter((item) => item.id !== m.id));
+                                    },
+                                  },
+                                ]
+                              : []),
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -744,8 +755,8 @@ export function TeamView({
 
       {/* Invite Member Modal */}
       {inviteModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-gray-100 space-y-5 animate-in fade-in duration-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/25 backdrop-blur-md overflow-hidden">
+          <div className="bg-white rounded-none sm:rounded-[28px] max-w-md w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-6 sm:p-8 shadow-2xl border-0 sm:border border-gray-100 space-y-5 animate-popup-spring">
             <div className="flex items-center justify-between border-b border-gray-100 pb-4">
               <div>
                 <h3 className="text-base font-bold text-gray-900">Invite Team Member</h3>
@@ -875,8 +886,8 @@ export function TeamView({
 
       {/* Edit Member Modal */}
       {editMember && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4 animate-in fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/25 backdrop-blur-md overflow-hidden">
+          <div className="bg-white rounded-none sm:rounded-[28px] max-w-md w-full h-[100dvh] sm:h-auto sm:max-h-[90dvh] overflow-y-auto p-6 shadow-2xl border-0 sm:border border-gray-100 space-y-4 animate-popup-spring">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-gray-900 text-sm">Edit {editMember.name}</h3>
               <button onClick={() => setEditMember(null)} className="text-gray-400 hover:text-gray-600 p-1 cursor-pointer">
