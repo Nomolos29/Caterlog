@@ -1,3 +1,4 @@
+/// <reference path="./externals.d.ts" />
 import dns from "node:dns";
 import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
